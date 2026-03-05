@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>네이버 검색광고 통합 관리자</title>
+  <style>
+    body { font-family: 'Malgun Gothic', sans-serif; padding: 20px; background-color: #f4f7f6; display: flex; gap: 20px; }
+    .panel { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); flex: 1; height: 85vh; overflow-y: auto; }
+    input[type="text"], input[type="password"], input[type="number"] { width: 100%; padding: 8px; margin-bottom: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+    .btn { padding: 10px 14px; border: none; border-radius: 6px; cursor: pointer; font-weight: 700; }
+    .btn-save { background: #2b88ff; color: #fff; width: 100%; margin-bottom: 10px;}
+    .btn-sub { background: #111; color: #fff; }
+    .list-item { padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between; gap: 10px; transition: background 0.2s;}
+    .list-item:hover { background-color: #f2f7ff; }
+    .list-item.active { background: #eaf2ff; }
+    .badge { font-size: 12px; padding: 3px 8px; border-radius: 10px; font-weight: 800; }
+    .badge.on { background: #d1fae5; color: #065f46; }
+    .badge.off { background: #fee2e2; color: #991b1b; }
+    .small { font-size: 12px; color: #666; line-height: 1.4; }
+    .schedule-box { padding: 12px; background: #f6f8ff; border: 1px solid #e5e7ff; border-radius: 8px; margin: 12px 0; }
+    .schedule-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-top: 10px; }
+    .day { display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #ddd; border-radius: 8px; padding: 10px 0; cursor: pointer; user-select: none; }
+    .day.active { border-color: #2b88ff; background: #eaf2ff; font-weight: 900; }
+    .row { display: flex; gap: 10px; }
+    .row > div { flex: 1; }
+    pre { white-space: pre-wrap; word-break: break-word; background: #0b1020; color: #d7e2ff; padding: 12px; border-radius: 10px; font-size: 12px; }
+    .chk-container { display: flex; align-items: center; gap: 10px; width: 100%; cursor: pointer; }
+    .chk-container input { width: 18px; height: 18px; cursor: pointer; }
+    .clickable-text { flex: 1; cursor: pointer; padding: 5px; }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <h3>1. 계정/인증</h3>
+    <hr>
+
+    <label>Open API Key</label>
+    <input id="api_key" type="text" placeholder="API Key">
+    <label>Open Secret Key</label>
+    <input id="secret_key" type="password" placeholder="Secret Key">
+
+    <label><input id="save_keys_chk" type="checkbox" style="width:auto;"> API Key/Secret 저장</label>
+
+    <hr>
+    <h4>업체 선택</h4>
+    <div id="account_list">
+      {% for acc in accounts %}
+        <div class="list-item clickable-text" onclick="loadCampaigns('{{ acc.customer_id }}', this)">
+          <div>
+            <div style="font-weight: 900;">{{ acc.account_name }}</div>
+            <div class="small">customer_id: {{ acc.customer_id }}</div>
+          </div>
+          <span class="badge on">선택</span>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>2. 캠페인 일괄 설정</h3>
+    <div id="campaign_list" class="small">업체를 먼저 선택해주세요.</div>
+    
+    <div id="campaign_budget_editor" style="display:none; margin-top: 20px; border-top: 2px solid #ddd; padding-top: 20px;">
+      <h4 style="color:#2b88ff; margin-top:0;">체크된 캠페인 [하루 예산] 일괄 변경</h4>
+      <div class="schedule-box">
+        <div class="small">- 0 입력 시 '제한없음'으로 설정됩니다.</div>
+        <div style="margin-top: 10px;">
+          하루 예산 (원): <input type="number" id="campaign_budget_val" value="0" step="10">
+        </div>
+      </div>
+      <button class="btn btn-save" onclick="saveBudgetBulk('campaign')">선택된 캠페인 하루 예산 저장</button>
+      <div id="campaign_log"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>3. 광고그룹 일괄 설정</h3>
+    <div id="adgroup_list" class="small">캠페인 이름을 클릭하면 광고그룹이 표시됩니다.</div>
+
+    <div id="schedule_editor" style="display:none; margin-top: 20px; border-top: 2px solid #ddd; padding-top: 20px;">
+      
+      <h4 style="color:#2b88ff; margin-top:0;">체크된 광고그룹 [하루 예산] 일괄 변경</h4>
+      <div class="schedule-box">
+        <div class="small">- 0 입력 시 '제한없음'으로 설정됩니다.</div>
+        <div style="margin-top: 10px;">
+          하루 예산 (원): <input type="number" id="adgroup_budget_val" value="0" step="10">
+        </div>
+      </div>
+      <button class="btn btn-save" onclick="saveBudgetBulk('adgroup')" style="background-color: #f59e0b;">선택된 그룹 하루 예산 저장</button>
+
+      <h4 style="color:#2b88ff; margin-top:20px;">체크된 광고그룹 [요일/시간/가중치] 일괄 변경</h4>
+      <div class="schedule-box">
+        <div class="row" style="margin-top: 10px;">
+          <div><div class="small">시작(시)</div><select id="start_time" style="width:100%; padding:8px;"></select></div>
+          <div><div class="small">종료(시)</div><select id="end_time" style="width:100%; padding:8px;"></select></div>
+          <div><div class="small">가중치(%)</div><input id="bid_weight" type="number" min="0" max="500" value="100"></div>
+        </div>
+        <div style="margin-top:10px;">
+          <div class="small">요일 선택 (선택된 요일/시간만 ON)</div>
+          <div class="schedule-grid" id="days_grid"></div>
+        </div>
+      </div>
+      <button class="btn btn-save" onclick="saveScheduleBulk()">선택된 그룹 요일/시간/가중치 저장</button>
+      
+      <div style="margin-top:12px;">
+        <button class="btn btn-sub" onclick="loadSchedule()">첫 번째 체크된 그룹 스케줄 조회</button>
+      </div>
+      <div id="log" style="margin-top:12px;"></div>
+    </div>
+  </div>
+
+<script>
+  let currentCustomerId = null;
+  let currentCampaignId = null;
+
+  const DAYS = [
+    {n:1, label:"월"}, {n:2, label:"화"}, {n:3, label:"수"}, {n:4, label:"목"},
+    {n:5, label:"금"}, {n:6, label:"토"}, {n:7, label:"일"},
+  ];
+  const selectedDays = new Set([1,2,3,4,5]); 
+
+  window.onload = function() {
+    if(localStorage.getItem('naver_api_key')) {
+      document.getElementById('api_key').value = localStorage.getItem('naver_api_key');
+      document.getElementById('secret_key').value = localStorage.getItem('naver_secret_key');
+      document.getElementById('save_keys_chk').checked = true;
+    }
+
+    const startSelect = document.getElementById('start_time');
+    const endSelect = document.getElementById('end_time');
+    for(let i=0; i<=23; i++) {
+      startSelect.innerHTML += `<option value="${i}">${String(i).padStart(2,'0')}:00</option>`;
+    }
+    for(let i=1; i<=24; i++) {
+      const display = i === 24 ? "24:00" : `${String(i).padStart(2,'0')}:00`;
+      const selected = (i === 24) ? "selected" : "";
+      endSelect.innerHTML += `<option value="${i}" ${selected}>${display}</option>`;
+    }
+
+    const grid = document.getElementById('days_grid');
+    DAYS.forEach(d => {
+      const el = document.createElement('div');
+      el.className = 'day' + (selectedDays.has(d.n) ? ' active' : '');
+      el.textContent = d.label;
+      el.onclick = () => {
+        if(selectedDays.has(d.n)) selectedDays.delete(d.n);
+        else selectedDays.add(d.n);
+        el.classList.toggle('active');
+      };
+      grid.appendChild(el);
+    });
+  };
+
+  function getOpenAuth() {
+    const auth = {
+      api_key: document.getElementById('api_key').value.trim(),
+      secret_key: document.getElementById('secret_key').value.trim(),
+    };
+    if(document.getElementById('save_keys_chk').checked) {
+      localStorage.setItem('naver_api_key', auth.api_key);
+      localStorage.setItem('naver_secret_key', auth.secret_key);
+    } else {
+      localStorage.removeItem('naver_api_key');
+      localStorage.removeItem('naver_secret_key');
+    }
+    return auth;
+  }
+
+  function mustOpenAuth() {
+    const a = getOpenAuth();
+    if(!a.api_key || !a.secret_key) {
+      alert("Open API Key/Secret을 입력해주세요.");
+      return null;
+    }
+    return a;
+  }
+
+  function logMsg(elementId, obj) {
+    document.getElementById(elementId).innerHTML = `<pre>${typeof obj === "string" ? obj : JSON.stringify(obj, null, 2)}</pre>`;
+  }
+
+  function toggleAll(checkbox, className) {
+    const isChecked = checkbox.checked;
+    document.querySelectorAll('.' + className).forEach(chk => chk.checked = isChecked);
+  }
+
+  function loadCampaigns(customerId, element) {
+    const auth = mustOpenAuth();
+    if(!auth) return;
+
+    currentCustomerId = customerId;
+    document.querySelectorAll('#account_list .list-item').forEach(el => el.classList.remove('active'));
+    element.classList.add('active');
+
+    document.getElementById('campaign_list').innerHTML = "로딩 중...";
+    document.getElementById('adgroup_list').innerHTML = "캠페인 이름을 클릭하면 광고그룹이 표시됩니다.";
+    document.getElementById('schedule_editor').style.display = "none";
+    document.getElementById('campaign_budget_editor').style.display = "none";
+    document.getElementById('campaign_log').innerHTML = "";
+
+    fetch('/get_campaigns', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({...auth, customer_id: currentCustomerId})
+    }).then(r => r.json()).then(data => {
+      if(data.error) { document.getElementById('campaign_list').innerHTML = data.details || data.error; return; }
+      
+      let html = `<div style="margin-bottom: 12px; padding: 10px; background: #eaf2ff; border-radius: 6px;">
+                    <label class="chk-container">
+                      <input type="checkbox" onchange="toggleAll(this, 'campaign-chk')"> 
+                      <strong style="color: #2b88ff;">캠페인 전체 선택 / 해제</strong>
+                    </label>
+                  </div>`;
+      data.forEach(c => {
+        html += `<div class="list-item">
+                   <input type="checkbox" class="campaign-chk" value="${c.nccCampaignId}" style="width: 18px; height: 18px; cursor: pointer;">
+                   <div class="clickable-text" onclick="loadAdgroups('${c.nccCampaignId}', '${c.name}', this.parentElement)">
+                     <div style="font-weight:900; color: #111;">${c.name}</div>
+                     <div class="small">${c.nccCampaignId}</div>
+                   </div>
+                 </div>`;
+      });
+      document.getElementById('campaign_list').innerHTML = html;
+      document.getElementById('campaign_budget_editor').style.display = "block";
+    });
+  }
+
+  function loadAdgroups(campaignId, campaignName, element) {
+    const auth = mustOpenAuth();
+    if(!auth) return;
+
+    currentCampaignId = campaignId;
+    document.querySelectorAll('#campaign_list .list-item').forEach(el => el.classList.remove('active'));
+    element.classList.add('active');
+
+    document.getElementById('adgroup_list').innerHTML = "로딩 중...";
+    document.getElementById('log').innerHTML = "";
+
+    fetch('/get_adgroups', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({...auth, customer_id: currentCustomerId, campaign_id: currentCampaignId})
+    }).then(r => r.json()).then(data => {
+      if(data.error) { document.getElementById('adgroup_list').innerHTML = data.details || data.error; return; }
+      
+      let html = `<div style="margin-bottom: 12px; padding: 10px; background: #eaf2ff; border-radius: 6px;">
+                    <label class="chk-container">
+                      <input type="checkbox" onchange="toggleAll(this, 'adgroup-chk')"> 
+                      <strong style="color: #2b88ff;">광고그룹 전체 선택 / 해제</strong>
+                    </label>
+                  </div>`;
+      
+      data.forEach(g => {
+        html += `<div class="list-item">
+                   <label class="chk-container">
+                     <input type="checkbox" class="adgroup-chk" value="${g.nccAdgroupId}">
+                     <div>
+                       <div style="font-weight:900; color: #111;">${g.name}</div>
+                       <div class="small">${g.nccAdgroupId}</div>
+                     </div>
+                   </label>
+                 </div>`;
+      });
+      
+      document.getElementById('adgroup_list').innerHTML = html;
+      document.getElementById('schedule_editor').style.display = "block";
+    });
+  }
+
+  function saveBudgetBulk(entityType) {
+    const auth = mustOpenAuth();
+    if(!auth) return;
+    
+    const selector = entityType === 'campaign' ? '.campaign-chk:checked' : '.adgroup-chk:checked';
+    const checkedBoxes = document.querySelectorAll(selector);
+    const entityIds = Array.from(checkedBoxes).map(cb => cb.value);
+
+    if(entityIds.length === 0) { 
+        alert(`예산을 변경할 ${entityType === 'campaign' ? '캠페인' : '광고그룹'}을 하나 이상 체크해주세요.`); 
+        return; 
+    }
+
+    const inputId = entityType === 'campaign' ? 'campaign_budget_val' : 'adgroup_budget_val';
+    const budget = parseInt(document.getElementById(inputId).value, 10);
+    const typeName = entityType === 'campaign' ? '캠페인' : '광고그룹';
+
+    if(!confirm(`총 ${entityIds.length}개의 ${typeName} 하루 예산을 [${budget === 0 ? '제한없음' : budget.toLocaleString()+'원'}]으로 변경하시겠습니까?`)) return;
+
+    const payload = {
+      ...auth,
+      customer_id: currentCustomerId,
+      entity_type: entityType,
+      entity_ids: entityIds,
+      budget: budget
+    };
+
+    const logId = entityType === 'campaign' ? 'campaign_log' : 'log';
+    document.getElementById(logId).innerHTML = "<pre>일괄 예산 변경 진행 중... 잠시만 기다려주세요.</pre>";
+
+    fetch('/update_budget', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    }).then(r => r.json().then(j => ({ok:r.ok, json:j}))).then(({ok, json}) => {
+      if(!ok || json.error) { logMsg(logId, json); alert(json.error || "일괄 예산 처리 실패"); return; }
+      logMsg(logId, json);
+      alert(json.message);
+    });
+  }
+
+  function saveScheduleBulk() {
+    const auth = mustOpenAuth();
+    if(!auth) return;
+    
+    const checkedBoxes = document.querySelectorAll('.adgroup-chk:checked');
+    const adgroupIds = Array.from(checkedBoxes).map(cb => cb.value);
+
+    if(adgroupIds.length === 0) { 
+        alert("적용할 광고그룹을 하나 이상 체크해주세요."); 
+        return; 
+    }
+
+    if(!confirm(`총 ${adgroupIds.length}개의 광고그룹 스케줄을 일괄 변경하시겠습니까?`)) return;
+
+    const payload = {
+      ...auth,
+      customer_id: currentCustomerId,
+      adgroup_ids: adgroupIds,
+      start: parseInt(document.getElementById('start_time').value, 10),
+      end: parseInt(document.getElementById('end_time').value, 10),
+      bidWeight: parseInt(document.getElementById('bid_weight').value, 10),
+      days: Array.from(selectedDays.values()).sort((a,b)=>a-b)
+    };
+
+    document.getElementById('log').innerHTML = "<pre>일괄 업데이트 진행 중... 잠시만 기다려주세요.</pre>";
+
+    fetch('/update_schedule', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    }).then(r => r.json().then(j => ({ok:r.ok, json:j}))).then(({ok, json}) => {
+      if(!ok || json.error) { logMsg('log', json); alert(json.error || "일괄 처리 실패"); return; }
+      logMsg('log', json);
+      alert(json.message);
+    });
+  }
+
+  function loadSchedule() {
+    const auth = mustOpenAuth();
+    if(!auth) return;
+    
+    const checkedBoxes = document.querySelectorAll('.adgroup-chk:checked');
+    if(checkedBoxes.length === 0) { alert("확인할 광고그룹을 하나 체크해주세요."); return; }
+
+    const firstId = checkedBoxes[0].value;
+
+    fetch('/get_schedule', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({...auth, customer_id: currentCustomerId, adgroup_id: firstId})
+    }).then(r => r.json().then(j => ({ok:r.ok, json:j}))).then(({ok, json}) => {
+      logMsg('log', json);
+      if(!ok || json.error) alert(json.error || "조회 실패");
+    });
+  }
+</script>
+</body>
+</html>
