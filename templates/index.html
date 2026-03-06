@@ -2,170 +2,175 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>네이버 검색광고 마스터 툴 (통합관리)</title>
+  <title>네이버 검색광고 마스터 툴 (대량관리)</title>
   <style>
-    /* 전체 기본 설정 */
-    body { font-family: 'Pretendard', 'Malgun Gothic', sans-serif; padding: 0; margin: 0; background-color: #f3f4f6; color: #1f2937; display: flex; flex-direction: column; height: 100vh; }
+    /* ✅ 초깔끔 미니멀 스타일 정의 (Toss/Notion 스타일) */
     
-    /* 상단 헤더 */
-    .header { background-color: #1e3a8a; color: white; padding: 15px 30px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
-    .header h1 { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: 1px; }
-    .header p { margin: 5px 0 0 0; font-size: 13px; color: #93c5fd; }
+    :root {
+      --bg-main: #f4f4f5; 
+      --bg-panel: #ffffff; 
+      --border-color: #e4e4e7; 
+      --text-main: #18181b; 
+      --text-sub: #71717a; 
+      --point-color: #3b82f6; 
+      --point-hover: #2563eb;
+      --bg-active: #eff6ff; 
+      --danger: #ef4444; 
+    }
 
-    /* 메인 레이아웃 (3단 패널) */
-    .container { display: flex; gap: 20px; padding: 20px; flex: 1; overflow: hidden; box-sizing: border-box; }
-    .panel { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border: 1px solid #e5e7eb; display: flex; flex-direction: column; overflow-y: auto; }
+    body { font-family: 'Pretendard', -apple-system, sans-serif; padding: 0; margin: 0; background-color: var(--bg-main); color: var(--text-main); display: flex; flex-direction: column; height: 100vh; font-size: 14px; }
     
-    /* 각 패널 너비 비율 */
-    .panel-1 { flex: 0.8; }
-    .panel-2 { flex: 1.2; }
-    .panel-3 { flex: 1.5; background-color: #fffbeb; border: 2px solid #fde68a; } /* 하이라이트 패널 */
+    /* 헤더 */
+    .header { background-color: var(--bg-panel); padding: 15px 25px; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; }
+    .header-titles h1 { margin: 0; font-size: 18px; font-weight: 700; }
+    .header-titles p { margin: 3px 0 0 0; font-size: 12px; color: var(--text-sub); }
 
-    /* 제목 및 설명 */
-    h3 { margin-top: 0; color: #111827; font-size: 16px; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; }
-    .panel-3 h3 { color: #d97706; border-bottom-color: #fde68a; }
-    .help-text { font-size: 11px; color: #6b7280; margin-top: 4px; line-height: 1.5; word-break: keep-all; }
-    .badge { background: #fee2e2; color: #b91c1c; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; vertical-align: middle; margin-left: 5px; }
-
-    /* 입력 폼 및 버튼 */
-    input[type="text"], input[type="password"], input[type="number"], select { width: 100%; padding: 10px; margin-bottom: 5px; box-sizing: border-box; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; outline: none; transition: border 0.2s; }
-    input:focus, select:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+    /* 메인 레이아웃 */
+    .container { display: flex; gap: 15px; padding: 15px; flex: 1; overflow: hidden; box-sizing: border-box; }
+    .panel { background: var(--bg-panel); padding: 20px; border-radius: 12px; border: 1px solid var(--border-color); display: flex; flex-direction: column; overflow-y: auto; box-sizing: border-box;}
     
-    .btn { padding: 10px 14px; border: none; border-radius: 6px; cursor: pointer; font-weight: 700; font-size: 13px; transition: all 0.2s; text-align: center; display: inline-block; width: 100%; box-sizing: border-box; }
-    .btn-save { background: #3b82f6; color: #fff; margin-top: 5px; }
-    .btn-save:hover { background: #2563eb; }
-    .btn-copy { background: #8b5cf6; color: #fff; margin-top: 10px; box-shadow: 0 4px 6px rgba(139, 92, 246, 0.2); }
-    .btn-copy:hover { background: #7c3aed; transform: translateY(-1px); }
-    .btn-refresh { background: #f3f4f6; color: #4b5563; border: 1px solid #d1d5db; padding: 6px 10px; width: auto; font-size: 12px; }
-    .btn-refresh:hover { background: #e5e7eb; }
+    /* 패널 비율 */
+    .panel-1 { flex: 0.8; min-width: 250px; }
+    .panel-2 { flex: 1.2; min-width: 350px; }
+    .panel-3 { flex: 1.5; min-width: 400px; } 
 
-    /* 리스트 디자인 (계정, 캠페인, 그룹) */
-    .list-wrapper { flex: 1; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 6px; background: #f9fafb; padding: 5px; margin-bottom: 10px; }
-    .list-item { padding: 10px; margin-bottom: 5px; border-radius: 6px; background: white; border: 1px solid #e5e7eb; display: flex; align-items: center; justify-content: space-between; gap: 10px; transition: all 0.2s; cursor: pointer; }
-    .list-item:hover { border-color: #93c5fd; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-    .list-item.active { background: #eff6ff; border-color: #3b82f6; border-left: 4px solid #3b82f6; }
-    .clickable-text { flex: 1; display: flex; flex-direction: column; justify-content: center; }
-    .item-title { font-weight: 700; color: #1f2937; font-size: 13px; margin-bottom: 3px; }
-    .item-id { font-size: 11px; color: #9ca3af; }
+    /* 제목 및 도움말 */
+    h3 { margin-top: 0; color: var(--text-main); font-size: 15px; font-weight: 700; padding-bottom: 12px; margin-bottom: 15px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; }
+    .help-text { font-size: 12px; color: var(--text-sub); margin-top: 3px; line-height: 1.5; word-break: keep-all; }
+    .badge { background: #fee2e2; color: #b91c1c; padding: 2px 5px; border-radius: 4px; font-size: 10px; font-weight: bold; margin-left: 5px; }
 
-    /* 체크박스 및 레이블 */
-    .chk-container { display: flex; align-items: center; gap: 8px; cursor: pointer; margin: 0; padding: 0; }
-    .chk-container input { width: 16px; height: 16px; cursor: pointer; accent-color: #3b82f6; }
-    .select-all-box { margin-bottom: 10px; padding: 10px; background: #e0e7ff; border-radius: 6px; border: 1px solid #bfdbfe; font-size: 13px; font-weight: bold; color: #1e40af; }
+    /* 입력 폼 */
+    input[type="text"], input[type="password"], input[type="number"], select { width: 100%; padding: 10px; margin-bottom: 5px; box-sizing: border-box; border: 1px solid var(--border-color); border-radius: 8px; font-size: 13px; outline: none; transition: border-color 0.2s; background-color: #fafafa; }
+    input:focus, select:focus { border-color: var(--point-color); background-color: #fff; }
+    
+    /* 버튼 스타일 */
+    .btn { padding: 10px 14px; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 13px; transition: all 0.2s; text-align: center; display: inline-block; width: 100%; box-sizing: border-box; }
+    .btn-point { background: var(--point-color); color: #fff; margin-top: 5px; }
+    .btn-point:hover { background: var(--point-hover); }
+    .btn-sub { background: white; color: var(--text-main); border: 1px solid var(--border-color); padding: 6px 10px; width: auto; font-size: 12px; }
+    .btn-sub:hover { background: #f4f4f5; border-color: #d4d4d8; }
+    
+    /* 🔥 리스트 디자인 (정렬 버그 완벽 수정) */
+    .list-wrapper { flex: 1; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; background: #fafafa; padding: 5px; margin-bottom: 10px; min-height: 150px;}
+    
+    /* justify-content를 flex-start로 변경하여 왼쪽으로 딱 붙게 수정했습니다. */
+    .list-item { padding: 12px; margin-bottom: 5px; border-radius: 8px; background: white; border: 1px solid transparent; display: flex; align-items: center; justify-content: flex-start; gap: 12px; transition: all 0.2s; cursor: pointer; text-align: left; }
+    .list-item:hover { background-color: #f8fafc; border-color: #e2e8f0; }
+    .list-item.active { border-color: var(--point-color); background-color: var(--bg-active); box-shadow: 0 2px 4px rgba(59, 130, 246, 0.05); }
+    
+    /* flex:1 을 주어 텍스트 칸이 남은 공간을 차지하게 만들어 오른쪽 별(☆)을 자연스레 우측으로 밀어냅니다. */
+    .clickable-text { flex: 1; display: flex; flex-direction: column; justify-content: center; overflow: hidden; }
+    .item-title { font-weight: 600; color: var(--text-main); font-size: 13px; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .item-id { font-size: 11px; color: var(--text-sub); }
+
+    /* 체크박스 커스텀 */
+    .chk-container { display: flex; align-items: center; justify-content: center; cursor: pointer; margin: 0; padding: 0; }
+    .chk-container input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: var(--point-color); margin: 0; }
 
     /* 기능별 묶음 박스 (Section) */
-    .feature-box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 15px; margin-top: 15px; }
-    .feature-box h4 { margin: 0 0 10px 0; font-size: 14px; display: flex; align-items: center; gap: 5px; }
-    .feature-box.copy-box { background: #f5f3ff; border-color: #ddd6fe; }
-    .feature-box.copy-box h4 { color: #6d28d9; }
-    .feature-box.edit-box { background: #eff6ff; border-color: #bfdbfe; }
-    .feature-box.edit-box h4 { color: #1e40af; }
+    .feature-box { border: 1px solid var(--border-color); border-radius: 10px; padding: 18px; margin-top: 15px; background: #fff; }
+    .feature-box h4 { margin: 0 0 12px 0; font-size: 14px; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 5px; }
+    
+    /* 구분선 */
+    .divider { border: 0; border-top: 1px solid var(--border-color); margin: 18px 0; }
 
-    /* 스케줄 그리드 */
-    .schedule-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; margin-top: 8px; }
-    .day { background: white; border: 1px solid #d1d5db; border-radius: 4px; padding: 8px 0; text-align: center; cursor: pointer; font-size: 12px; font-weight: 600; color: #6b7280; user-select: none; transition: 0.2s; }
-    .day:hover { background: #f3f4f6; }
-    .day.active { border-color: #10b981; background: #d1fae5; color: #065f46; }
-    .row { display: flex; gap: 10px; margin-top: 8px; }
+    /* 스케줄 그리드 미니멀 */
+    .schedule-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: 8px; }
+    .day { background: white; border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 0; text-align: center; cursor: pointer; font-size: 12px; font-weight: 500; color: var(--text-sub); user-select: none; transition: 0.2s; }
+    .day:hover { background: #f4f4f5; }
+    .day.active { border-color: var(--point-color); background: var(--bg-active); color: var(--point-color); font-weight: 600; }
+    .row { display: flex; gap: 8px; margin-top: 8px; }
     .row > div { flex: 1; }
 
-    /* 기타 UI 요소 */
-    .pin-btn { font-size: 16px; cursor: pointer; color: #d1d5db; user-select: none; transition: 0.2s; padding: 5px; border-radius: 50%; }
-    .pin-btn:hover { background: #f3f4f6; }
+    /* 별 핀 버튼 */
+    .pin-btn { font-size: 16px; cursor: pointer; color: #d4d4d8; user-select: none; transition: 0.2s; padding: 4px; display: flex; align-items: center; }
+    .pin-btn:hover { transform: scale(1.1); }
     .pin-btn.pinned { color: #f59e0b; }
-    #log, #campaign_log, #copy_log { margin-top: 10px; font-size: 11px; color: #4b5563; background: #f3f4f6; padding: 10px; border-radius: 6px; white-space: pre-wrap; max-height: 100px; overflow-y: auto; display: none; }
+    
+    /* 로그 영역 */
+    #log, #campaign_log, #copy_log { margin-top: 10px; font-size: 11px; color: var(--text-sub); background: #fafafa; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); white-space: pre-wrap; max-height: 120px; overflow-y: auto; display: none; }
     #log:not(:empty), #campaign_log:not(:empty), #copy_log:not(:empty) { display: block; }
+
+    /* 전체 선택 박스 */
+    .select-all-box { margin-bottom: 8px; padding: 10px 12px; background: #f8fafc; border-radius: 8px; border: 1px solid var(--border-color); font-size: 13px; color: var(--text-main); font-weight: 600; display: flex; gap: 12px; align-items: center;}
+
   </style>
 </head>
 <body>
 
   <div class="header">
-    <h1>🚀 네이버 검색광고 마스터 툴</h1>
-    <p>파워링크 & 쇼핑검색 대량 복사 및 일괄 관리 솔루션</p>
+    <div class="header-titles">
+      <h1>네이버 검색광고 마스터 툴</h1>
+      <p>대량 복사 및 일괄 관리 솔루션 (Minimal Edition)</p>
+    </div>
   </div>
 
   <div class="container">
     <div class="panel panel-1">
-      <h3>
-        <span>🔑 1. 계정 및 인증</span>
-      </h3>
+      <h3><span>🔑 1. 인증 및 계정</span></h3>
       <div>
-        <label style="font-size:12px; font-weight:bold; color:#4b5563;">API Key</label>
-        <input id="api_key" type="text" placeholder="네이버 검색광고 API Key 입력">
-        
-        <label style="font-size:12px; font-weight:bold; color:#4b5563; margin-top:5px; display:block;">Secret Key</label>
+        <input id="api_key" type="text" placeholder="API Key 입력">
         <input id="secret_key" type="password" placeholder="Secret Key 입력">
         
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 5px; margin-bottom: 15px;">
-          <label class="chk-container" style="font-size:12px;"><input id="save_keys_chk" type="checkbox"> 내 PC에 키 자동 저장</label>
+        <div style="margin: 5px 0 15px 0;">
+          <label style="font-size:12px; color: var(--text-sub); display:flex; align-items:center; gap:5px; cursor:pointer;">
+            <input type="checkbox" id="save_keys_chk" style="margin:0;"> 이 PC에 키 저장
+          </label>
         </div>
       </div>
-      <hr style="border:0; border-top:1px solid #e5e7eb; margin: 0 0 15px 0;">
       
-      <div style="font-size:13px; font-weight:bold; margin-bottom: 8px;">🏢 광고주(업체) 목록</div>
-      <div class="help-text" style="margin-bottom: 10px;">별(☆)을 클릭하여 자주 쓰는 업체를 상단에 고정하세요.</div>
+      <div style="font-size:13px; font-weight:700; margin-bottom: 5px; color: var(--text-sub);">광고주 목록</div>
       <div id="account_list" class="list-wrapper">
         </div>
     </div>
 
     <div class="panel panel-2">
       <h3>
-        <span>📁 2. 캠페인 관리</span>
-        <button class="btn btn-refresh" onclick="refreshCampaigns()">🔄 새로고침</button>
+        <span>📁 2. 캠페인 선택/변경</span>
+        <button class="btn btn-sub" onclick="refreshCampaigns()">🔄 새로고침</button>
       </h3>
-      <div class="help-text" style="margin-bottom: 10px; color:#3b82f6;">👇 원본을 추출할 캠페인 이름을 클릭하면 우측 3번 패널에 하위 그룹이 뜹니다.</div>
+      <div class="help-text" style="margin-bottom: 10px;">👇 이름을 클릭하면 우측에 하위 그룹이 나타납니다.</div>
       
       <div id="campaign_list" class="list-wrapper">
-        <div style="padding:15px; text-align:center; color:#9ca3af; font-size:12px;">👈 좌측에서 업체를 먼저 선택해주세요.</div>
+        <div style="padding:20px; text-align:center; color: var(--text-sub); font-size:12px;">좌측에서 업체를 선택해주세요.</div>
       </div>
       
-      <div id="campaign_editor_area" style="display:none; padding-top: 10px;">
-        
-        <div class="feature-box copy-box">
-          <h4>📑 체크된 캠페인 껍데기 복사</h4>
-          <div class="help-text">캠페인의 설정(예산 등)만 새로 복사합니다. 하위 그룹은 복사되지 않습니다.</div>
-          <div style="margin-top: 10px;">
-            <label style="font-size:12px; font-weight:bold;">새 캠페인 이름 꼬리표</label>
-            <input type="text" id="camp_suffix" value="_복사본">
-          </div>
-          <button class="btn btn-copy" onclick="copySelectedCampaigns()">선택된 캠페인 복사 실행</button>
+      <div id="campaign_editor_area" style="display:none; padding-top: 5px;">
+        <div class="feature-box">
+          <h4>📑 체크된 캠페인 [껍데기] 복사</h4>
+          <input type="text" id="camp_suffix" value="_복사본" placeholder="새 이름 뒤에 붙을 문구">
+          <button class="btn btn-point" style="background:#8b5cf6;" onclick="copySelectedCampaigns()">캠페인 복사 실행</button>
         </div>
 
-        <div class="feature-box edit-box">
-          <h4>✏️ 체크된 캠페인 일괄 설정 변경</h4>
+        <div class="feature-box">
+          <h4>✏️ 체크된 캠페인 일괄 변경</h4>
           
-          <div style="margin-top:10px;">
-            <label style="font-size:12px; font-weight:bold;">1. 캠페인 [하루 예산] 일괄 변경</label>
-            <div style="display:flex; gap:5px; align-items:center; margin-top:3px;">
-              <input type="number" id="campaign_budget_val" value="0" step="10"> 원
-            </div>
-            <div class="help-text">* 0원 입력 시 '제한 없음'으로 설정됩니다.</div>
-            <button class="btn btn-save" onclick="saveBudgetBulk('campaign')">예산 일괄 저장</button>
+          <div style="display:flex; gap:5px; align-items:center;">
+            <input type="number" id="campaign_budget_val" value="0" step="10" placeholder="하루 예산"> 원
+            <button class="btn btn-sub" style="width:auto; margin:0;" onclick="saveBudgetBulk('campaign')">예산 저장</button>
           </div>
+          <div class="help-text">* 0원은 '제한 없음'</div>
 
-          <hr style="border:0; border-top:1px dashed #bfdbfe; margin: 15px 0;">
+          <hr class="divider">
 
-          <div>
-            <label style="font-size:12px; font-weight:bold;">2. 하위 전체 [키워드 입찰가] 일괄 변경 <span class="badge">강력</span></label>
-            <div style="display:flex; gap:5px; align-items:center; margin-top:3px;">
-              <input type="number" id="camp_keyword_bid_val" value="70" step="10"> 원
-            </div>
-            <div class="help-text" style="color:#b91c1c;">* 0원 입력 시 '그룹 기본 입찰가 사용'으로 모두 전환됩니다. (최소 70원)</div>
-            <button class="btn btn-save" style="background:#f59e0b;" onclick="saveKeywordBidsBulk('campaign')">키워드 입찰가 일괄 저장</button>
+          <label class="item-title">하위 전체 [키워드 입찰가] 변경 <span class="badge">강력</span></label>
+          <div style="display:flex; gap:5px; align-items:center; margin-top:3px;">
+            <input type="number" id="camp_keyword_bid_val" value="70" step="10"> 원
+            <button class="btn btn-sub" style="width:auto; margin:0; color:#b91c1c;" onclick="saveKeywordBidsBulk('campaign')">입찰가 변경</button>
           </div>
+          <div class="help-text" style="color:var(--danger);">* 0원 입력 시 '그룹 기본가 사용'으로 전환</div>
 
-          <hr style="border:0; border-top:1px dashed #bfdbfe; margin: 15px 0;">
+          <hr class="divider">
 
-          <div>
-            <label style="font-size:12px; font-weight:bold;">3. 하위 전체 [그룹 요일/시간] 일괄 변경</label>
-            <div class="row">
-              <div><div class="help-text">시작(시)</div><select id="camp_start_time"></select></div>
-              <div><div class="help-text">종료(시)</div><select id="camp_end_time"></select></div>
-              <div><div class="help-text">가중치(%)</div><input id="camp_bid_weight" type="number" min="0" max="500" value="100"></div>
-            </div>
-            <div class="schedule-grid" id="camp_days_grid"></div>
-            <button class="btn btn-save" style="background:#10b981; margin-top:10px;" onclick="saveScheduleCampaignBulk()">스케줄 일괄 저장</button>
+          <label class="item-title">하위 전체 [그룹 요일/시간] 변경</label>
+          <div class="row">
+            <div><select id="camp_start_time"></select></div>
+            <div><select id="camp_end_time"></select></div>
+            <div><input id="camp_bid_weight" type="number" min="0" max="500" value="100" placeholder="가중치%"></div>
           </div>
+          <div class="schedule-grid" id="camp_days_grid"></div>
+          <button class="btn btn-point" style="background:#10b981; margin-top:8px;" onclick="saveScheduleCampaignBulk()">스케줄 저장</button>
+          
           <div id="campaign_log"></div>
         </div>
       </div>
@@ -173,70 +178,56 @@
 
     <div class="panel panel-3">
       <h3>
-        <span>✨ 3. 광고그룹 및 하위 데이터 관리</span>
-        <button class="btn btn-refresh" onclick="refreshAdgroups()">🔄 새로고침</button>
+        <span>🌟 3. 광고그룹 대량 복사/관리</span>
+        <button class="btn btn-sub" onclick="refreshAdgroups()">🔄 새로고침</button>
       </h3>
-      <div class="help-text" style="margin-bottom: 10px;">체크박스로 복사 또는 변경할 광고그룹을 선택하세요.</div>
       
       <div id="adgroup_list" class="list-wrapper" style="max-height: 250px;">
-        <div style="padding:15px; text-align:center; color:#9ca3af; font-size:12px;">👈 중앙 패널에서 캠페인을 클릭해주세요.</div>
+        <div style="padding:20px; text-align:center; color: var(--text-sub); font-size:12px;">중앙 패널에서 캠페인을 클릭해주세요.</div>
       </div>
       
-      <div id="adgroup_copy_area" class="feature-box copy-box" style="display:none; border: 2px solid #c4b5fd;">
-        <h4 style="font-size: 15px;">🚀 체크된 광고그룹 타겟 캠페인으로 '통째로' 복사</h4>
-        <div class="help-text" style="color:#b91c1c; font-weight:bold; margin-bottom: 10px;">
-          주의: 쇼핑검색 광고그룹은 반드시 '쇼핑검색용 타겟 캠페인'을 선택하셔야 에러가 나지 않습니다! (소재, 확장소재, 제외키워드까지 100% 복사됩니다)
+      <div id="adgroup_copy_area" class="feature-box" style="display:none; border-color: #8b5cf6;">
+        <h4 style="color:#6d28d9; font-size:15px;">🚀 체크된 그룹 다른 캠페인으로 '통째로' 복사</h4>
+        <div class="help-text" style="color:var(--danger); font-weight:600; margin-bottom: 10px;">
+          쇼핑검색 그룹은 반드시 쇼핑검색 캠페인으로만 복사하세요!
         </div>
         
-        <label style="font-size:12px; font-weight:bold; margin-top:5px; display:block;">1. 도착할 타겟 캠페인 선택 (필수)</label>
         <select id="target_campaign_select"></select>
-        
-        <label style="font-size:12px; font-weight:bold; margin-top:10px; display:block;">2. 적용할 비즈채널/웹사이트 (필수)</label>
         <select id="target_biz_channel_select"></select>
-        <div class="help-text">* 브랜드/쇼핑검색 복사 시 '원본 채널 유지'를 권장합니다.</div>
-        
-        <label style="font-size:12px; font-weight:bold; margin-top:10px; display:block;">3. 복사본 이름 꼬리표 (식별용)</label>
+        <div class="help-text">* 쇼핑/브랜드 복사는 '원본 채널 유지' 권장</div>
         <input type="text" id="adg_suffix" value="_복사본">
         
-        <button class="btn btn-copy" id="btn_exec_copy" style="font-size: 14px; padding: 12px; margin-top: 15px;" onclick="execAdgroupsCopyToTarget()">🌟 선택된 광고그룹 완벽 복사 실행</button>
+        <button class="btn btn-point" id="btn_exec_copy" style="background:#8b5cf6; font-size: 14px; padding: 12px; margin-top: 10px;" onclick="execAdgroupsCopyToTarget()">선택 그룹 통째로 복사 실행</button>
         <div id="copy_log"></div>
       </div>
 
-      <div id="schedule_editor" class="feature-box edit-box" style="display:none;">
-        <h4>✏️ 체크된 광고그룹 일괄 설정 변경</h4>
+      <div id="schedule_editor" class="feature-box" style="display:none;">
+        <h4>✏️ 체크된 광고그룹 일괄 변경</h4>
         
-        <div style="margin-top:10px;">
-          <label style="font-size:12px; font-weight:bold;">1. 광고그룹 [하루 예산] 일괄 변경</label>
-          <div style="display:flex; gap:5px; align-items:center; margin-top:3px;">
-            <input type="number" id="adgroup_budget_val" value="0" step="10"> 원
-          </div>
-          <div class="help-text">* 0원 입력 시 '제한 없음'으로 설정됩니다.</div>
-          <button class="btn btn-save" onclick="saveBudgetBulk('adgroup')">예산 일괄 저장</button>
+        <div style="display:flex; gap:5px; align-items:center;">
+          <input type="number" id="adgroup_budget_val" value="0" step="10"> 원
+          <button class="btn btn-sub" style="width:auto; margin:0;" onclick="saveBudgetBulk('adgroup')">예산 저장</button>
         </div>
 
-        <hr style="border:0; border-top:1px dashed #bfdbfe; margin: 15px 0;">
+        <hr class="divider">
 
-        <div>
-          <label style="font-size:12px; font-weight:bold;">2. 하위 전체 [키워드 입찰가] 일괄 변경 <span class="badge">강력</span></label>
-          <div style="display:flex; gap:5px; align-items:center; margin-top:3px;">
-            <input type="number" id="adg_keyword_bid_val" value="70" step="10"> 원
-          </div>
-          <div class="help-text" style="color:#b91c1c;">* 0원 입력 시 '그룹 기본 입찰가 사용'으로 모두 전환됩니다. (최소 70원)</div>
-          <button class="btn btn-save" style="background:#f59e0b;" onclick="saveKeywordBidsBulk('adgroup')">키워드 입찰가 일괄 저장</button>
+        <label class="item-title">하위 [키워드 입찰가] 변경 <span class="badge">강력</span></label>
+        <div style="display:flex; gap:5px; align-items:center; margin-top:3px;">
+          <input type="number" id="adg_keyword_bid_val" value="70" step="10"> 원
+          <button class="btn btn-sub" style="width:auto; margin:0; color:#b91c1c;" onclick="saveKeywordBidsBulk('adgroup')">입찰가 변경</button>
         </div>
 
-        <hr style="border:0; border-top:1px dashed #bfdbfe; margin: 15px 0;">
+        <hr class="divider">
 
-        <div>
-          <label style="font-size:12px; font-weight:bold;">3. 광고그룹 [요일/시간/가중치] 일괄 변경</label>
-          <div class="row">
-            <div><div class="help-text">시작(시)</div><select id="start_time"></select></div>
-            <div><div class="help-text">종료(시)</div><select id="end_time"></select></div>
-            <div><div class="help-text">가중치(%)</div><input id="bid_weight" type="number" min="0" max="500" value="100"></div>
-          </div>
-          <div class="schedule-grid" id="days_grid"></div>
-          <button class="btn btn-save" style="background:#10b981; margin-top:10px;" onclick="saveScheduleBulk()">스케줄 일괄 저장</button>
+        <label class="item-title">광고그룹 [요일/시간] 변경</label>
+        <div class="row">
+          <div><select id="start_time"></select></div>
+          <div><select id="end_time"></select></div>
+          <div><input id="bid_weight" type="number" min="0" max="500" value="100"></div>
         </div>
+        <div class="schedule-grid" id="days_grid"></div>
+        <button class="btn btn-point" style="background:#10b981; margin-top:8px;" onclick="saveScheduleBulk()">스케줄 저장</button>
+        
         <div id="log"></div>
       </div>
     </div>
@@ -271,7 +262,6 @@
       el2.onclick = () => { campSelectedDays.has(d.n) ? campSelectedDays.delete(d.n) : campSelectedDays.add(d.n); el2.classList.toggle('active'); };
       gridCamp.appendChild(el2);
     });
-
     renderAccounts();
   };
 
@@ -280,7 +270,7 @@
     if(document.getElementById('save_keys_chk').checked) { localStorage.setItem('naver_api_key', auth.api_key); localStorage.setItem('naver_secret_key', auth.secret_key); } 
     return auth;
   }
-  function mustOpenAuth() { const a = getOpenAuth(); if(!a.api_key || !a.secret_key) { alert("API Key와 Secret Key를 좌측 상단에 입력해주세요."); return null; } return a; }
+  function mustOpenAuth() { const a = getOpenAuth(); if(!a.api_key || !a.secret_key) { alert("상단에 API Key와 Secret Key를 입력해주세요."); return null; } return a; }
   function toggleAll(checkbox, className) { document.querySelectorAll('.' + className).forEach(chk => chk.checked = checkbox.checked); }
 
   function renderAccounts() {
@@ -291,13 +281,13 @@
           if (aPin !== bPin) return bPin - aPin; 
           return a.account_name.localeCompare(b.account_name);
       });
-      
       let html = '';
       accountsData.forEach(acc => {
           let isPinned = pinned.includes(acc.customer_id);
-          let star = isPinned ? `<span class="pin-btn pinned" title="상단 고정 해제" onclick="togglePin(event, '${acc.customer_id}')">⭐</span>` : `<span class="pin-btn" title="자주 쓰는 업체 상단 고정" onclick="togglePin(event, '${acc.customer_id}')">☆</span>`;
+          let star = isPinned ? `<span class="pin-btn pinned" title="고정 해제" onclick="togglePin(event, '${acc.customer_id}')">⭐</span>` : `<span class="pin-btn" title="상단 고정" onclick="togglePin(event, '${acc.customer_id}')">☆</span>`;
           let activeClass = (acc.customer_id === currentCustomerId) ? 'active' : '';
           
+          /* 계정 리스트 렌더링 수정: 텍스트 박스가 유연하게 뻗어서 별을 우측으로 밀어냄 */
           html += `<div class="list-item ${activeClass}" id="acc_${acc.customer_id}" onclick="loadCampaigns('${acc.customer_id}')">
             <div class="clickable-text">
               <div class="item-title">${acc.account_name}</div>
@@ -318,8 +308,8 @@
       renderAccounts();
   }
 
-  function refreshCampaigns() { if(!currentCustomerId) return alert("선택된 업체가 없습니다."); loadCampaigns(currentCustomerId); }
-  function refreshAdgroups() { if(!currentCampaignId) return alert("선택된 캠페인이 없습니다."); loadAdgroups(currentCampaignId); }
+  function refreshCampaigns() { if(!currentCustomerId) return alert("업체가 선택되지 않았습니다."); loadCampaigns(currentCustomerId); }
+  function refreshAdgroups() { if(!currentCampaignId) return alert("캠페인이 선택되지 않았습니다."); loadAdgroups(currentCampaignId); }
 
   function loadCampaigns(customerId) {
     const auth = mustOpenAuth(); if(!auth) return;
@@ -327,26 +317,29 @@
     document.querySelectorAll('#account_list .list-item').forEach(el => el.classList.remove('active')); 
     const activeAcc = document.getElementById(`acc_${customerId}`);
     if(activeAcc) activeAcc.classList.add('active');
-
-    document.getElementById('campaign_list').innerHTML = "<div style='padding:15px; text-align:center;'>⏳ 네이버에서 데이터를 불러오는 중입니다...</div>";
-
+    document.getElementById('campaign_list').innerHTML = "<div style='padding:20px; text-align:center;'>⏳ 로딩 중...</div>";
+    
     fetch('/get_campaigns', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({...auth, customer_id: currentCustomerId}) })
     .then(r => r.json()).then(data => {
-      if(data.error) { document.getElementById('campaign_list').innerHTML = `<div style="color:red; padding:10px;">에러: ${data.error}</div>`; return; }
+      if(data.error) { document.getElementById('campaign_list').innerHTML = `<div style="color:red; padding:10px; font-size:12px;">에러: ${data.error}</div>`; return; }
       
-      let campSelectHtml = '<option value="">(필수) 복사해 넣을 도착 캠페인을 선택하세요</option>';
+      let campSelectHtml = '<option value="">(필수) 도착 캠페인 선택</option>';
       data.forEach(c => { campSelectHtml += `<option value="${c.nccCampaignId}">[${c.campaignTp}] ${c.name}</option>`; });
       document.getElementById('target_campaign_select').innerHTML = campSelectHtml;
-      
       populateBizChannels('target_biz_channel_select');
-
+      
       let html = `<div class="select-all-box">
-                    <label class="chk-container"><input type="checkbox" onchange="toggleAll(this, 'campaign-chk')"> <span>모든 캠페인 전체 선택</span></label>
+                    <label style="display:flex; gap:8px; cursor:pointer; width:100%;">
+                      <input type="checkbox" onchange="toggleAll(this, 'campaign-chk')"> <span>전체 선택</span>
+                    </label>
                   </div>`;
       data.forEach(c => {
         let actClass = (c.nccCampaignId === currentCampaignId) ? 'active' : '';
+        /* 🔥 캠페인 리스트 정렬 렌더링 수정: 좌측 정렬 딱 맞게 */
         html += `<div class="list-item ${actClass}" id="camp_${c.nccCampaignId}">
-                   <label class="chk-container" onclick="event.stopPropagation()"><input type="checkbox" class="campaign-chk" value="${c.nccCampaignId}"></label>
+                   <label class="chk-container" onclick="event.stopPropagation()">
+                     <input type="checkbox" class="campaign-chk" value="${c.nccCampaignId}">
+                   </label>
                    <div class="clickable-text" onclick="loadAdgroups('${c.nccCampaignId}')">
                      <div class="item-title">${c.name}</div>
                      <div class="item-id">${c.campaignTp} | ${c.nccCampaignId}</div>
@@ -364,24 +357,27 @@
     document.querySelectorAll('#campaign_list .list-item').forEach(el => el.classList.remove('active')); 
     const actCamp = document.getElementById(`camp_${campaignId}`);
     if(actCamp) actCamp.classList.add('active');
-
-    document.getElementById('adgroup_list').innerHTML = "<div style='padding:15px; text-align:center;'>⏳ 네이버에서 데이터를 불러오는 중입니다...</div>";
-
+    document.getElementById('adgroup_list').innerHTML = "<div style='padding:20px; text-align:center;'>⏳ 로딩 중...</div>";
+    
     fetch('/get_adgroups', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...auth, customer_id: currentCustomerId, campaign_id: currentCampaignId}) })
     .then(r => r.json()).then(data => {
-      if(data.error) { document.getElementById('adgroup_list').innerHTML = `<div style="color:red; padding:10px;">에러: ${data.error}</div>`; return; }
+      if(data.error) { document.getElementById('adgroup_list').innerHTML = `<div style="color:red; padding:10px; font-size:12px;">에러: ${data.error}</div>`; return; }
+      
       let html = `<div class="select-all-box">
-                    <label class="chk-container"><input type="checkbox" onchange="toggleAll(this, 'adgroup-chk')"> <span>모든 광고그룹 전체 선택</span></label>
+                    <label style="display:flex; gap:8px; cursor:pointer; width:100%;">
+                      <input type="checkbox" onchange="toggleAll(this, 'adgroup-chk')"> <span>전체 선택</span>
+                    </label>
                   </div>`;
       data.forEach(g => {
+        /* 🔥 광고그룹 텍스트 클릭 시 체크박스가 연동되도록 클릭 이벤트 스마트 처리 */
         html += `<div class="list-item">
-                   <label class="chk-container" style="width:100%;">
+                   <label class="chk-container" onclick="event.stopPropagation()">
                      <input type="checkbox" class="adgroup-chk" value="${g.nccAdgroupId}">
-                     <div class="clickable-text">
-                       <div class="item-title">${g.name}</div>
-                       <div class="item-id">ID: ${g.nccAdgroupId}</div>
-                     </div>
                    </label>
+                   <div class="clickable-text" onclick="let cb = this.previousElementSibling.querySelector('input'); cb.checked = !cb.checked;">
+                     <div class="item-title">${g.name}</div>
+                     <div class="item-id">ID: ${g.nccAdgroupId}</div>
+                   </div>
                  </div>`;
       });
       document.getElementById('adgroup_list').innerHTML = html; 
@@ -395,14 +391,14 @@
     fetch('/get_biz_channels', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({...auth, customer_id: currentCustomerId}) })
     .then(r => r.json()).then(data => {
         if(data.error) return; 
-        let html = '<option value="">(필수) 연결할 비즈채널(웹사이트)을 선택하세요</option>';
+        let html = '<option value="">(필수) 연결할 비즈채널 선택</option>';
         data.forEach(b => {
             let cleanDomain = b.name.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
             let displayLabel = (b.channelTp === 'SITE') ? cleanDomain : `${cleanDomain} (${b.channelTp || ''})`;
             let cid = b.bizChannelId || b.nccChannelId || b.channelId; 
             html += `<option value="${cid}">${displayLabel}</option>`;
         });
-        html += `<option value="keep">✨ [권장] 원본 채널 유지 (쇼핑검색/브랜드검색 등 특수광고는 필수)</option>`;
+        html += `<option value="keep">✨ 원본 채널 유지 (쇼핑/브랜드는 필수)</option>`;
         document.getElementById(selectElementId).innerHTML = html;
     });
   }
@@ -410,54 +406,42 @@
   function copySelectedCampaigns() {
     const auth = mustOpenAuth(); if(!auth) return;
     const campIds = Array.from(document.querySelectorAll('.campaign-chk:checked')).map(cb => cb.value);
-    if(campIds.length === 0) { alert("복사할 캠페인을 체크해주세요."); return; }
+    if(campIds.length === 0) return alert("캠페인을 선택해주세요.");
     const suffix = document.getElementById('camp_suffix').value;
-    
-    if(!confirm(`체크된 ${campIds.length}개 캠페인을 복사하시겠습니까?\n(하위 그룹은 제외하고 캠페인 설정만 복사됩니다)`)) return;
-
-    document.getElementById('campaign_log').innerText = "⏳ 캠페인 복사 진행 중...";
-    fetch('/copy_campaigns', { 
-        method: 'POST', headers: {'Content-Type': 'application/json'}, 
-        body: JSON.stringify({...auth, customer_id: currentCustomerId, source_ids: campIds, suffix: suffix}) 
-    })
+    if(!confirm(`체크된 ${campIds.length}개 캠페인을 복사하시겠습니까?\n(설정만 복사되며 하위 그룹은 제외됩니다)`)) return;
+    document.getElementById('campaign_log').innerText = "⏳ 복사 진행 중...";
+    fetch('/copy_campaigns', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({...auth, customer_id: currentCustomerId, source_ids: campIds, suffix: suffix}) })
     .then(r => r.json()).then(data => {
         document.getElementById('campaign_log').innerText = data.message || data.error;
-        alert("캠페인 복사가 완료되었습니다. 목록을 새로고침합니다.");
-        refreshCampaigns();
+        alert("작업 완료. 목록을 새로고침합니다."); refreshCampaigns();
     });
   }
 
   function execAdgroupsCopyToTarget() {
     const auth = mustOpenAuth(); if(!auth) return;
     const adgroupIds = Array.from(document.querySelectorAll('.adgroup-chk:checked')).map(cb => cb.value);
-    if(adgroupIds.length === 0) { alert("복사할 원본 그룹을 체크해주세요."); return; }
+    if(adgroupIds.length === 0) return alert("복사할 원본 그룹을 선택해주세요.");
     const targetCampId = document.getElementById('target_campaign_select').value;
-    if(!targetCampId) { alert("도착할 타겟 캠페인을 드롭다운에서 선택해주세요."); return; }
+    if(!targetCampId) return alert("도착할 타겟 캠페인을 선택해주세요.");
     const bizId = document.getElementById('target_biz_channel_select').value;
-    if(!bizId) { alert("비즈채널을 드롭다운에서 선택해주세요."); return; }
+    if(!bizId) return alert("비즈채널을 선택해주세요.");
     const suffix = document.getElementById('adg_suffix').value;
-
-    if(!confirm(`정말 체크된 ${adgroupIds.length}개 그룹을 복사하시겠습니까?\n키워드, 소재, 확장소재, 제외키워드까지 모두 안전하게 복사됩니다.`)) return;
-
+    if(!confirm(`정말 체크된 ${adgroupIds.length}개 그룹을 통째로 복사하시겠습니까?\n(키워드, 소재, 제외키워드 등 포함)`)) return;
     const btn = document.getElementById('btn_exec_copy');
-    btn.innerText = "⏳ 복사 중입니다... (창을 닫지 마세요)"; btn.disabled = true;
+    btn.innerText = "⏳ 복사 중... (닫지 마세요)"; btn.disabled = true;
     document.getElementById('copy_log').innerText = "";
-
-    fetch('/copy_adgroups_to_target', { 
-        method: 'POST', headers: {'Content-Type': 'application/json'}, 
-        body: JSON.stringify({...auth, customer_id: currentCustomerId, source_ids: adgroupIds, target_campaign_id: targetCampId, suffix: suffix, biz_channel_id: bizId}) 
-    })
+    fetch('/copy_adgroups_to_target', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({...auth, customer_id: currentCustomerId, source_ids: adgroupIds, target_campaign_id: targetCampId, suffix: suffix, biz_channel_id: bizId}) })
     .then(r => r.json()).then(data => {
-        btn.innerText = "🌟 선택된 광고그룹 완벽 복사 실행"; btn.disabled = false;
+        btn.innerText = "선택 그룹 통째로 복사 실행"; btn.disabled = false;
         document.getElementById('copy_log').innerText = data.message || data.error;
-        if(data.ok) alert("광고그룹 복사 작업이 성공적으로 완료되었습니다!");
+        if(data.ok) alert("복사 작업이 완료되었습니다.");
     });
   }
 
   function saveBudgetBulk(entityType) {
     const auth = mustOpenAuth(); if(!auth) return;
     const entityIds = Array.from(document.querySelectorAll(entityType === 'campaign' ? '.campaign-chk:checked' : '.adgroup-chk:checked')).map(cb => cb.value);
-    if(entityIds.length === 0) { alert(`예산을 변경할 항목을 체크해주세요.`); return; }
+    if(entityIds.length === 0) return alert(`대상을 체크해주세요.`);
     const budget = parseInt(document.getElementById(entityType === 'campaign' ? 'campaign_budget_val' : 'adgroup_budget_val').value, 10);
     const logId = entityType === 'campaign' ? 'campaign_log' : 'log'; 
     document.getElementById(logId).innerText = "⏳ 진행 중...";
@@ -468,31 +452,24 @@
   function saveKeywordBidsBulk(entityType) {
     const auth = mustOpenAuth(); if(!auth) return;
     const entityIds = Array.from(document.querySelectorAll(entityType === 'campaign' ? '.campaign-chk:checked' : '.adgroup-chk:checked')).map(cb => cb.value);
-    if(entityIds.length === 0) { alert(`입찰가를 변경할 항목을 체크해주세요.`); return; }
-    
+    if(entityIds.length === 0) return alert(`대상을 체크해주세요.`);
     const bidAmt = parseInt(document.getElementById(entityType === 'campaign' ? 'camp_keyword_bid_val' : 'adg_keyword_bid_val').value, 10);
-    if(bidAmt > 0 && bidAmt < 70) { alert("입찰가는 최소 70원 이상이어야 합니다. (그룹 기본가 사용을 원하시면 0원을 입력하세요)"); return; }
-    
-    let confirmMsg = bidAmt === 0 ? "'그룹 기본 입찰가'를 사용하도록" : `${bidAmt.toLocaleString()}원으로`;
-    if(!confirm(`선택하신 항목 안에 있는 [모든 하위 키워드]의 입찰가를\n${confirmMsg} 일괄 변경하시겠습니까?`)) return;
-
+    if(bidAmt > 0 && bidAmt < 70) return alert("최소 70원 이상 입력해주세요.");
+    let confirmMsg = bidAmt === 0 ? "'그룹 기본 입찰가' 사용으로" : `${bidAmt.toLocaleString()}원으로`;
+    if(!confirm(`선택한 항목 내 [모든 키워드] 입찰가를\n${confirmMsg} 일괄 변경하시겠습니까?`)) return;
     const logId = entityType === 'campaign' ? 'campaign_log' : 'log'; 
-    document.getElementById(logId).innerText = "⏳ 키워드 수에 따라 수십 초가 소요될 수 있습니다. 진행 중입니다...";
-    
-    fetch('/update_keyword_bids', { 
-        method:'POST', headers:{'Content-Type':'application/json'}, 
-        body: JSON.stringify({...auth, customer_id: currentCustomerId, entity_type: entityType, entity_ids: entityIds, bid_amt: bidAmt}) 
-    })
+    document.getElementById(logId).innerText = "⏳ 키워드 수가 많으면 수십 초가 소요될 수 있습니다...";
+    fetch('/update_keyword_bids', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...auth, customer_id: currentCustomerId, entity_type: entityType, entity_ids: entityIds, bid_amt: bidAmt}) })
     .then(r => r.json()).then(data => { 
         document.getElementById(logId).innerText = data.message || data.error; 
-        if(data.ok) alert("키워드 입찰가 일괄 변경이 완료되었습니다!");
+        if(data.ok) alert("키워드 입찰가 변경이 완료되었습니다.");
     });
   }
 
   function saveScheduleBulk() {
     const auth = mustOpenAuth(); if(!auth) return;
     const adgroupIds = Array.from(document.querySelectorAll('.adgroup-chk:checked')).map(cb => cb.value);
-    if(adgroupIds.length === 0) { alert("항목을 체크해주세요."); return; }
+    if(adgroupIds.length === 0) return alert("대상을 체크해주세요.");
     document.getElementById('log').innerText = "⏳ 진행 중...";
     fetch('/update_schedule', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...auth, customer_id: currentCustomerId, adgroup_ids: adgroupIds, start: parseInt(document.getElementById('start_time').value, 10), end: parseInt(document.getElementById('end_time').value, 10), bidWeight: parseInt(document.getElementById('bid_weight').value, 10), days: Array.from(selectedDays.values()).sort((a,b)=>a-b)}) })
     .then(r => r.json()).then(data => { document.getElementById('log').innerText = data.message || data.error; });
@@ -501,7 +478,7 @@
   function saveScheduleCampaignBulk() {
     const auth = mustOpenAuth(); if(!auth) return;
     const campaignIds = Array.from(document.querySelectorAll('.campaign-chk:checked')).map(cb => cb.value);
-    if(campaignIds.length === 0) { alert("항목을 체크해주세요."); return; }
+    if(campaignIds.length === 0) return alert("대상을 체크해주세요.");
     document.getElementById('campaign_log').innerText = "⏳ 진행 중...";
     fetch('/update_schedule_campaign_bulk', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...auth, customer_id: currentCustomerId, campaign_ids: campaignIds, start: parseInt(document.getElementById('camp_start_time').value, 10), end: parseInt(document.getElementById('camp_end_time').value, 10), bidWeight: parseInt(document.getElementById('camp_bid_weight').value, 10), days: Array.from(campSelectedDays.values()).sort((a,b)=>a-b)}) })
     .then(r => r.json()).then(data => { document.getElementById('campaign_log').innerText = data.message || data.error; });
