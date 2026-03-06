@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 app.py (Open API 전용 통합 버전)
-- 키워드 입찰가 일괄 변경(68개 실패 현상) 완벽 해결
-- 기존 키워드 객체를 통째로 가져와(Deep Copy) 입찰가만 수정 후 전송하도록 규격 준수
-- 입찰가 변경 전용 에러 투시경 추가
+- 스케줄 일괄 변경 로직 업데이트: 단일 범위(start~end)에서 -> 다중 선택(hours list) 방식으로 변경
 """
 
 from flask import Flask, render_template, request, jsonify
@@ -146,12 +144,16 @@ def update_budget():
         else: results["fail"] += 1
     return jsonify({"ok": True, "message": f"총 {len(entity_ids)}개 예산 업데이트 성공: {results['success']}개 / 실패: {results['fail']}개"})
 
+# 🔥 신규: 다중 시간 선택(hours list) 스케줄 처리
 @app.route("/update_schedule", methods=["POST"])
 def update_schedule():
     d = request.json or {}
     api_key, secret_key, cid, adgroup_ids = d.get("api_key"), d.get("secret_key"), d.get("customer_id"), d.get("adgroup_ids", [])
-    start, end, days, bid_weight = int(d.get("start",0)), int(d.get("end",24)), d.get("days",[]), int(d.get("bidWeight",100))
-    codes = [f"SD{DAY_NUM_TO_CODE[int(d_num)]}{h:02d}{(h+1):02d}" for d_num in days for h in range(start, end)]
+    days, hours, bid_weight = d.get("days",[]), d.get("hours",[]), int(d.get("bidWeight",100))
+    
+    # 전달받은 시간대(hours) 리스트를 기반으로 코드 생성
+    codes = [f"SD{DAY_NUM_TO_CODE[int(d_num)]}{int(h):02d}{(int(h)+1):02d}" for d_num in days for h in hours]
+    
     results = {"success": 0, "fail": 0}
     for owner_id in adgroup_ids:
         uri = f"/ncc/criterion/{owner_id.strip()}/SD"
@@ -167,13 +169,15 @@ def update_schedule():
 def update_schedule_campaign_bulk():
     d = request.json or {}
     api_key, secret_key, cid, campaign_ids = d.get("api_key"), d.get("secret_key"), d.get("customer_id"), d.get("campaign_ids", [])
-    start, end, days, bid_weight = int(d.get("start",0)), int(d.get("end",24)), d.get("days",[]), int(d.get("bidWeight",100))
+    days, hours, bid_weight = d.get("days",[]), d.get("hours",[]), int(d.get("bidWeight",100))
+    
     adgroup_ids = []
     for camp_id in campaign_ids:
         r_adgs = _do_req("GET", api_key, secret_key, cid, "/ncc/adgroups", params={"nccCampaignId": camp_id})
         if r_adgs.status_code == 200: adgroup_ids.extend([adg.get("nccAdgroupId") for adg in r_adgs.json()])
     
-    codes = [f"SD{DAY_NUM_TO_CODE[int(d_num)]}{h:02d}{(h+1):02d}" for d_num in days for h in range(start, end)]
+    codes = [f"SD{DAY_NUM_TO_CODE[int(d_num)]}{int(h):02d}{(int(h)+1):02d}" for d_num in days for h in hours]
+    
     results = {"success": 0, "fail": 0}
     for owner_id in adgroup_ids:
         uri = f"/ncc/criterion/{owner_id}/SD"
@@ -185,7 +189,6 @@ def update_schedule_campaign_bulk():
         results["success"] += 1
     return jsonify({"ok": True, "message": f"하위 광고그룹 총 {len(adgroup_ids)}개 스케줄 일괄 변경 완료!\n(성공: {results['success']} / 실패: {results['fail']})"})
 
-# 🔥 완벽 해결본: 키워드 입찰가 일괄 변경 (Deep Copy & Error X-Ray 적용)
 @app.route("/update_keyword_bids", methods=["POST"])
 def update_keyword_bids():
     d = request.json or {}
@@ -218,39 +221,28 @@ def update_keyword_bids():
 
             update_payload = []
             for kw in kws:
-                # 🚨 핵심: 원본 키워드 데이터를 100% 통째로 복사해서 빈칸 없이 전송!
                 item = copy.deepcopy(kw)
                 item["useGroupBidAmt"] = use_group_bid
                 item["bidAmt"] = target_bid
-                
-                # 시스템에서 읽기 전용으로 주는 찌꺼기 값만 조심스럽게 버림
                 for k in ['regTm', 'editTm', 'status', 'statusReason', 'inspectStatus', 'delFlag', 'managedKeyword', 'referenceKey']: 
                     item.pop(k, None)
-                    
                 update_payload.append(item)
 
-            # 100개 단위로 묶어서 전송
             for i in range(0, len(update_payload), 100):
                 batch = update_payload[i:i+100]
                 r_put = _do_req("PUT", api_key, secret_key, cid, "/ncc/keywords", params={"fields": "bidAmt,useGroupBidAmt"}, json_body=batch)
-                
                 if r_put.status_code in [200, 201]:
                     success_cnt += len(batch)
                 else:
-                    # 묶음 전송 실패 시, 낱개로 안전하게 하나씩 다시 시도 + 에러 투시경 캡처!
                     for item in batch:
                         r_single = _do_req("PUT", api_key, secret_key, cid, f"/ncc/keywords/{item['nccKeywordId']}", params={"fields": "bidAmt,useGroupBidAmt"}, json_body=item)
-                        if r_single.status_code in [200, 201]: 
-                            success_cnt += 1
+                        if r_single.status_code in [200, 201]: success_cnt += 1
                         else: 
                             fail_cnt += 1
-                            if len(err_details) < 5:  # 에러 로그는 최대 5개까지만 수집
-                                err_details.append(f"[{item.get('keyword', '알수없음')}] 실패: {r_single.text}")
+                            if len(err_details) < 5: err_details.append(f"[{item.get('keyword', '알수없음')}] 실패: {r_single.text}")
 
     msg = f"키워드 입찰가 변경 완료!\n(성공: {success_cnt}개, 실패: {fail_cnt}개)"
-    if err_details:
-        msg += "\n\n[상세 에러 내역]\n" + "\n".join(err_details)
-        
+    if err_details: msg += "\n\n[상세 에러 내역]\n" + "\n".join(err_details)
     return jsonify({"ok": True, "message": msg})
 
 def _extract_adgroup(src, target_camp_id, cid, biz_channel_id):
@@ -272,7 +264,7 @@ def _extract_adgroup(src, target_camp_id, cid, biz_channel_id):
 def _copy_adgroup_children(api_key, secret_key, cid, old_adg_id, new_adg_id, biz_channel_id):
     errors = []
     
-    # 1. 키워드 복사
+    # 1. 키워드
     r_kw = _do_req("GET", api_key, secret_key, cid, "/ncc/keywords", params={"nccAdgroupId": old_adg_id})
     if r_kw.status_code == 200:
         new_kws = []
@@ -290,7 +282,7 @@ def _copy_adgroup_children(api_key, secret_key, cid, old_adg_id, new_adg_id, biz
                         r_single = _do_req("POST", api_key, secret_key, cid, "/ncc/keywords", params={"nccAdgroupId": new_adg_id}, json_body=item)
                         if r_single.status_code not in [200, 201]: errors.append(f"키워드 에러: {r_single.text}")
 
-    # 2. 소재 복사 
+    # 2. 소재 
     r_ad = _do_req("GET", api_key, secret_key, cid, "/ncc/ads", params={"nccAdgroupId": old_adg_id})
     if r_ad.status_code == 200:
         ads = r_ad.json()
@@ -326,7 +318,7 @@ def _copy_adgroup_children(api_key, secret_key, cid, old_adg_id, new_adg_id, biz
                 err_msg = f.result()
                 if err_msg: errors.append(err_msg)
 
-    # 3. 확장소재 복사
+    # 3. 확장소재 
     r_ext = _do_req("GET", api_key, secret_key, cid, "/ncc/ad-extensions", params={"ownerId": old_adg_id})
     if r_ext.status_code == 200:
         for ext in r_ext.json():
@@ -340,7 +332,7 @@ def _copy_adgroup_children(api_key, secret_key, cid, old_adg_id, new_adg_id, biz
             if res.status_code not in [200, 201] and "4003" not in res.text:
                 errors.append(f"확장소재 에러: {res.text}")
 
-    # 4. 제외검색어 복사 
+    # 4. 제외검색어 
     rk_list = []
     r_rk = _do_req("GET", api_key, secret_key, cid, f"/ncc/adgroups/{old_adg_id}/restricted-keywords")
     if r_rk.status_code == 200 and r_rk.json():
