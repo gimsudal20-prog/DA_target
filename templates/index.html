@@ -47,27 +47,33 @@
     .btn { padding: 10px 14px; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 13px; transition: all 0.2s; text-align: center; display: inline-block; width: 100%; box-sizing: border-box; }
     .btn-point { background: var(--point-color); color: #fff; margin-top: 5px; }
     .btn-point:hover { background: var(--point-hover); }
-    .btn-sub { background: white; color: var(--text-main); border: 1px solid var(--border-color); padding: 6px 10px; width: auto; font-size: 12px; }
+    .btn-sub { background: white; color: var(--text-main); border: 1px solid var(--border-color); padding: 8px 12px; width: auto; font-size: 12px; }
     .btn-sub:hover { background: #f4f4f5; border-color: #d4d4d8; }
     
-    /* 🔥 리스트 디자인 (정렬 버그 완벽 수정) */
+    /* 🔥 입력창 + 버튼 그룹 가로 정렬 (버튼 눌림 방지 완벽 적용) */
+    .input-group { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+    .input-group .input-wrapper { display: flex; flex: 1; align-items: center; gap: 6px; }
+    .input-group input { margin: 0; width: 100%; }
+    .input-group span { white-space: nowrap; color: var(--text-sub); font-size: 13px; }
+    .input-group button { margin: 0; flex-shrink: 0; white-space: nowrap; } /* 텍스트 줄바꿈 방지 및 버튼 찌그러짐 방지 */
+
+    /* 🔥 리스트 디자인 (텍스트 우측 쏠림 버그 완벽 수정) */
     .list-wrapper { flex: 1; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; background: #fafafa; padding: 5px; margin-bottom: 10px; min-height: 150px;}
-    
-    /* justify-content를 flex-start로 변경하여 왼쪽으로 딱 붙게 수정했습니다. */
     .list-item { padding: 12px; margin-bottom: 5px; border-radius: 8px; background: white; border: 1px solid transparent; display: flex; align-items: center; justify-content: flex-start; gap: 12px; transition: all 0.2s; cursor: pointer; text-align: left; }
     .list-item:hover { background-color: #f8fafc; border-color: #e2e8f0; }
     .list-item.active { border-color: var(--point-color); background-color: var(--bg-active); box-shadow: 0 2px 4px rgba(59, 130, 246, 0.05); }
     
-    /* flex:1 을 주어 텍스트 칸이 남은 공간을 차지하게 만들어 오른쪽 별(☆)을 자연스레 우측으로 밀어냅니다. */
-    .clickable-text { flex: 1; display: flex; flex-direction: column; justify-content: center; overflow: hidden; }
-    .item-title { font-weight: 600; color: var(--text-main); font-size: 13px; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .item-id { font-size: 11px; color: var(--text-sub); }
+    /* 텍스트 컨테이너 강제 좌측 정렬 */
+    .clickable-text { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; overflow: hidden; text-align: left; }
+    .item-title { font-weight: 600; color: var(--text-main); font-size: 13px; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; width: 100%; }
+    .item-id { font-size: 11px; color: var(--text-sub); text-align: left; width: 100%; }
 
     /* 체크박스 커스텀 */
     .chk-container { display: flex; align-items: center; justify-content: center; cursor: pointer; margin: 0; padding: 0; }
     .chk-container input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: var(--point-color); margin: 0; }
+    .select-all-box { margin-bottom: 8px; padding: 10px 12px; background: #f8fafc; border-radius: 8px; border: 1px solid var(--border-color); font-size: 13px; color: var(--text-main); font-weight: 600; display: flex; gap: 12px; align-items: center; justify-content: flex-start; }
 
-    /* 기능별 묶음 박스 (Section) */
+    /* 기능별 묶음 박스 */
     .feature-box { border: 1px solid var(--border-color); border-radius: 10px; padding: 18px; margin-top: 15px; background: #fff; }
     .feature-box h4 { margin: 0 0 12px 0; font-size: 14px; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 5px; }
     
@@ -90,9 +96,6 @@
     /* 로그 영역 */
     #log, #campaign_log, #copy_log { margin-top: 10px; font-size: 11px; color: var(--text-sub); background: #fafafa; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); white-space: pre-wrap; max-height: 120px; overflow-y: auto; display: none; }
     #log:not(:empty), #campaign_log:not(:empty), #copy_log:not(:empty) { display: block; }
-
-    /* 전체 선택 박스 */
-    .select-all-box { margin-bottom: 8px; padding: 10px 12px; background: #f8fafc; border-radius: 8px; border: 1px solid var(--border-color); font-size: 13px; color: var(--text-main); font-weight: 600; display: flex; gap: 12px; align-items: center;}
 
   </style>
 </head>
@@ -145,18 +148,25 @@
         <div class="feature-box">
           <h4>✏️ 체크된 캠페인 일괄 변경</h4>
           
-          <div style="display:flex; gap:5px; align-items:center;">
-            <input type="number" id="campaign_budget_val" value="0" step="10" placeholder="하루 예산"> 원
-            <button class="btn btn-sub" style="width:auto; margin:0;" onclick="saveBudgetBulk('campaign')">예산 저장</button>
+          <label class="item-title">캠페인 [하루 예산] 변경</label>
+          <div class="input-group">
+            <div class="input-wrapper">
+              <input type="number" id="campaign_budget_val" value="0" step="10" placeholder="하루 예산">
+              <span>원</span>
+            </div>
+            <button class="btn btn-sub" onclick="saveBudgetBulk('campaign')">예산 저장</button>
           </div>
           <div class="help-text">* 0원은 '제한 없음'</div>
 
           <hr class="divider">
 
           <label class="item-title">하위 전체 [키워드 입찰가] 변경 <span class="badge">강력</span></label>
-          <div style="display:flex; gap:5px; align-items:center; margin-top:3px;">
-            <input type="number" id="camp_keyword_bid_val" value="70" step="10"> 원
-            <button class="btn btn-sub" style="width:auto; margin:0; color:#b91c1c;" onclick="saveKeywordBidsBulk('campaign')">입찰가 변경</button>
+          <div class="input-group">
+            <div class="input-wrapper">
+              <input type="number" id="camp_keyword_bid_val" value="70" step="10">
+              <span>원</span>
+            </div>
+            <button class="btn btn-sub" style="color:var(--danger); border-color:#fca5a5;" onclick="saveKeywordBidsBulk('campaign')">입찰가 변경</button>
           </div>
           <div class="help-text" style="color:var(--danger);">* 0원 입력 시 '그룹 기본가 사용'으로 전환</div>
 
@@ -169,7 +179,7 @@
             <div><input id="camp_bid_weight" type="number" min="0" max="500" value="100" placeholder="가중치%"></div>
           </div>
           <div class="schedule-grid" id="camp_days_grid"></div>
-          <button class="btn btn-point" style="background:#10b981; margin-top:8px;" onclick="saveScheduleCampaignBulk()">스케줄 저장</button>
+          <button class="btn btn-point" style="background:#10b981; margin-top:12px;" onclick="saveScheduleCampaignBulk()">스케줄 저장</button>
           
           <div id="campaign_log"></div>
         </div>
@@ -204,17 +214,25 @@
       <div id="schedule_editor" class="feature-box" style="display:none;">
         <h4>✏️ 체크된 광고그룹 일괄 변경</h4>
         
-        <div style="display:flex; gap:5px; align-items:center;">
-          <input type="number" id="adgroup_budget_val" value="0" step="10"> 원
-          <button class="btn btn-sub" style="width:auto; margin:0;" onclick="saveBudgetBulk('adgroup')">예산 저장</button>
+        <label class="item-title">광고그룹 [하루 예산] 변경</label>
+        <div class="input-group">
+          <div class="input-wrapper">
+            <input type="number" id="adgroup_budget_val" value="0" step="10">
+            <span>원</span>
+          </div>
+          <button class="btn btn-sub" onclick="saveBudgetBulk('adgroup')">예산 저장</button>
         </div>
+        <div class="help-text">* 0원은 '제한 없음'</div>
 
         <hr class="divider">
 
         <label class="item-title">하위 [키워드 입찰가] 변경 <span class="badge">강력</span></label>
-        <div style="display:flex; gap:5px; align-items:center; margin-top:3px;">
-          <input type="number" id="adg_keyword_bid_val" value="70" step="10"> 원
-          <button class="btn btn-sub" style="width:auto; margin:0; color:#b91c1c;" onclick="saveKeywordBidsBulk('adgroup')">입찰가 변경</button>
+        <div class="input-group">
+          <div class="input-wrapper">
+            <input type="number" id="adg_keyword_bid_val" value="70" step="10">
+            <span>원</span>
+          </div>
+          <button class="btn btn-sub" style="color:var(--danger); border-color:#fca5a5;" onclick="saveKeywordBidsBulk('adgroup')">입찰가 변경</button>
         </div>
 
         <hr class="divider">
@@ -226,7 +244,7 @@
           <div><input id="bid_weight" type="number" min="0" max="500" value="100"></div>
         </div>
         <div class="schedule-grid" id="days_grid"></div>
-        <button class="btn btn-point" style="background:#10b981; margin-top:8px;" onclick="saveScheduleBulk()">스케줄 저장</button>
+        <button class="btn btn-point" style="background:#10b981; margin-top:12px;" onclick="saveScheduleBulk()">스케줄 저장</button>
         
         <div id="log"></div>
       </div>
@@ -287,7 +305,6 @@
           let star = isPinned ? `<span class="pin-btn pinned" title="고정 해제" onclick="togglePin(event, '${acc.customer_id}')">⭐</span>` : `<span class="pin-btn" title="상단 고정" onclick="togglePin(event, '${acc.customer_id}')">☆</span>`;
           let activeClass = (acc.customer_id === currentCustomerId) ? 'active' : '';
           
-          /* 계정 리스트 렌더링 수정: 텍스트 박스가 유연하게 뻗어서 별을 우측으로 밀어냄 */
           html += `<div class="list-item ${activeClass}" id="acc_${acc.customer_id}" onclick="loadCampaigns('${acc.customer_id}')">
             <div class="clickable-text">
               <div class="item-title">${acc.account_name}</div>
@@ -329,13 +346,12 @@
       populateBizChannels('target_biz_channel_select');
       
       let html = `<div class="select-all-box">
-                    <label style="display:flex; gap:8px; cursor:pointer; width:100%;">
-                      <input type="checkbox" onchange="toggleAll(this, 'campaign-chk')"> <span>전체 선택</span>
+                    <label class="chk-container" style="width:100%;">
+                      <input type="checkbox" onchange="toggleAll(this, 'campaign-chk')"> <span>모든 캠페인 전체 선택</span>
                     </label>
                   </div>`;
       data.forEach(c => {
         let actClass = (c.nccCampaignId === currentCampaignId) ? 'active' : '';
-        /* 🔥 캠페인 리스트 정렬 렌더링 수정: 좌측 정렬 딱 맞게 */
         html += `<div class="list-item ${actClass}" id="camp_${c.nccCampaignId}">
                    <label class="chk-container" onclick="event.stopPropagation()">
                      <input type="checkbox" class="campaign-chk" value="${c.nccCampaignId}">
@@ -364,12 +380,11 @@
       if(data.error) { document.getElementById('adgroup_list').innerHTML = `<div style="color:red; padding:10px; font-size:12px;">에러: ${data.error}</div>`; return; }
       
       let html = `<div class="select-all-box">
-                    <label style="display:flex; gap:8px; cursor:pointer; width:100%;">
-                      <input type="checkbox" onchange="toggleAll(this, 'adgroup-chk')"> <span>전체 선택</span>
+                    <label class="chk-container" style="width:100%;">
+                      <input type="checkbox" onchange="toggleAll(this, 'adgroup-chk')"> <span>모든 광고그룹 전체 선택</span>
                     </label>
                   </div>`;
       data.forEach(g => {
-        /* 🔥 광고그룹 텍스트 클릭 시 체크박스가 연동되도록 클릭 이벤트 스마트 처리 */
         html += `<div class="list-item">
                    <label class="chk-container" onclick="event.stopPropagation()">
                      <input type="checkbox" class="adgroup-chk" value="${g.nccAdgroupId}">
