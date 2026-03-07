@@ -18,24 +18,25 @@
 
     body { font-family: 'Pretendard', -apple-system, sans-serif; padding: 0; margin: 0; background-color: var(--bg-main); color: var(--text-main); display: flex; flex-direction: column; height: 100vh; font-size: 14px; }
     
-    .header { background-color: var(--bg-panel); padding: 15px 25px; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; }
+    .header { background-color: var(--bg-panel); padding: 15px 25px; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
     .header-titles h1 { margin: 0; font-size: 18px; font-weight: 700; }
     .header-titles p { margin: 3px 0 0 0; font-size: 12px; color: var(--text-sub); }
 
     .container { display: flex; gap: 15px; padding: 15px; flex: 1; overflow: hidden; box-sizing: border-box; }
-    .panel { background: var(--bg-panel); padding: 20px; border-radius: 12px; border: 1px solid var(--border-color); display: flex; flex-direction: column; overflow-y: auto; box-sizing: border-box;}
+    .panel { background: var(--bg-panel); padding: 20px; border-radius: 12px; border: 1px solid var(--border-color); display: flex; flex-direction: column; overflow-y: auto; box-sizing: border-box; }
     
     .panel-1 { flex: 0.8; min-width: 250px; }
     .panel-2 { flex: 1.2; min-width: 350px; }
     .panel-3 { flex: 1.5; min-width: 400px; } 
 
-    h3 { margin-top: 0; color: var(--text-main); font-size: 15px; font-weight: 700; padding-bottom: 12px; margin-bottom: 15px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; }
+    h3 { margin-top: 0; color: var(--text-main); font-size: 15px; font-weight: 700; padding-bottom: 12px; margin-bottom: 15px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;}
     .help-text { font-size: 12px; color: var(--text-sub); margin-top: 3px; line-height: 1.5; word-break: keep-all; }
-    .badge { background: #fee2e2; color: #b91c1c; padding: 2px 5px; border-radius: 4px; font-size: 10px; font-weight: bold; margin-left: 5px; }
+    .badge { background: #dbeafe; color: #1e40af; padding: 3px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; margin-left: 5px; }
 
-    input[type="text"], input[type="password"], input[type="number"], select { width: 100%; padding: 10px; margin-bottom: 5px; box-sizing: border-box; border: 1px solid var(--border-color); border-radius: 8px; font-size: 13px; outline: none; transition: border-color 0.2s; background-color: #fafafa; }
-    input:focus, select:focus { border-color: var(--point-color); background-color: #fff; }
-    
+    input[type="text"], input[type="password"], input[type="number"], select, textarea { width: 100%; padding: 10px; margin-bottom: 5px; box-sizing: border-box; border: 1px solid var(--border-color); border-radius: 8px; font-size: 13px; outline: none; transition: border-color 0.2s; background-color: #fafafa; font-family: inherit; }
+    input:focus, select:focus, textarea:focus { border-color: var(--point-color); background-color: #fff; }
+    textarea { resize: vertical; }
+
     .btn { padding: 10px 14px; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 13px; transition: all 0.2s; text-align: center; display: inline-block; width: 100%; box-sizing: border-box; }
     .btn-point { background: var(--point-color); color: #fff; margin-top: 5px; }
     .btn-point:hover { background: var(--point-hover); }
@@ -43,29 +44,42 @@
     .btn-sub:hover { background: #f4f4f5; border-color: #d4d4d8; }
     
     .input-group { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
-    .input-group .input-wrapper { display: flex; flex: 1; align-items: center; gap: 6px; }
-    .input-group input { margin: 0; width: 100%; }
-    .input-group span { white-space: nowrap; color: var(--text-sub); font-size: 13px; }
+    .input-group .input-wrapper { display: flex; flex: 1; align-items: center; gap: 6px; min-width: 0; }
+    .input-group input, .input-group select { margin: 0; width: 100%; }
+    .input-group span { white-space: nowrap; color: var(--text-sub); font-size: 13px; flex-shrink: 0; }
     .input-group button { margin: 0; flex-shrink: 0; white-space: nowrap; }
 
-    .list-wrapper { flex: 1; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; background: #fafafa; padding: 5px; margin-bottom: 10px; min-height: 150px;}
+    .list-wrapper { 
+      overflow-y: auto; 
+      border: 1px solid var(--border-color); 
+      border-radius: 8px; 
+      background: #fafafa; 
+      padding: 5px; 
+      margin-bottom: 15px; 
+      flex-shrink: 0; 
+      resize: vertical; 
+    }
+    
+    #account_list { height: 600px; }
+    #campaign_list { height: 500px; }
+    #adgroup_list { height: 500px; }
+
     .list-item { padding: 12px; margin-bottom: 5px; border-radius: 8px; background: white; border: 1px solid transparent; display: flex; align-items: center; justify-content: flex-start; gap: 12px; transition: all 0.2s; cursor: pointer; text-align: left; }
     .list-item:hover { background-color: #f8fafc; border-color: #e2e8f0; }
     .list-item.active { border-color: var(--point-color); background-color: var(--bg-active); box-shadow: 0 2px 4px rgba(59, 130, 246, 0.05); }
     
     .clickable-text { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; overflow: hidden; text-align: left; }
-    .item-title { font-weight: 600; color: var(--text-main); font-size: 13px; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; width: 100%; }
-    .item-id { font-size: 11px; color: var(--text-sub); text-align: left; width: 100%; }
+    .item-title { font-weight: 600; color: var(--text-main); font-size: 13px; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; width: 100%; display: flex; align-items: center; }
+    .item-id { font-size: 11px; color: var(--text-sub); text-align: left; width: 100%; margin-left: 2px; }
 
     .chk-container { display: flex; align-items: center; justify-content: center; cursor: pointer; margin: 0; padding: 0; }
     .chk-container input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: var(--point-color); margin: 0; }
     .select-all-box { margin-bottom: 8px; padding: 10px 12px; background: #f8fafc; border-radius: 8px; border: 1px solid var(--border-color); font-size: 13px; color: var(--text-main); font-weight: 600; display: flex; gap: 12px; align-items: center; justify-content: flex-start; }
 
-    .feature-box { border: 1px solid var(--border-color); border-radius: 10px; padding: 18px; margin-top: 15px; background: #fff; }
+    .feature-box { border: 1px solid var(--border-color); border-radius: 10px; padding: 18px; margin-top: 15px; background: #fff; flex-shrink: 0;}
     .feature-box h4 { margin: 0 0 12px 0; font-size: 14px; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 5px; }
     .divider { border: 0; border-top: 1px solid var(--border-color); margin: 18px 0; }
 
-    /* 🔥 다중 스케줄 그리드 전용 디자인 */
     .schedule-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: 8px; }
     .hour-grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 4px; margin-top: 6px; }
     .box-btn { background: white; border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 0; text-align: center; cursor: pointer; font-size: 11px; font-weight: 500; color: var(--text-sub); user-select: none; transition: 0.1s; }
@@ -81,6 +95,15 @@
     
     #log, #campaign_log, #copy_log { margin-top: 10px; font-size: 11px; color: var(--text-sub); background: #fafafa; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); white-space: pre-wrap; max-height: 120px; overflow-y: auto; display: none; }
     #log:not(:empty), #campaign_log:not(:empty), #copy_log:not(:empty) { display: block; }
+
+    .radio-box { background: #fafafa; border: 1px solid var(--border-color); padding: 12px; border-radius: 8px; margin-top: 8px; }
+    .radio-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 12px; }
+    .radio-row:last-child { margin-bottom: 0; padding-top: 12px; border-top: 1px dashed var(--border-color); }
+    .radio-row input[type="radio"] { margin-top: 3px; accent-color: var(--point-color); width:16px; height:16px; cursor:pointer; }
+    .radio-content { flex: 1; }
+    .radio-title { font-size: 13px; font-weight: 600; color: var(--text-main); margin-bottom: 5px; display:block; cursor:pointer; }
+    
+    .type-badge { display: inline-block; padding: 3px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; margin-right: 6px; flex-shrink: 0; }
   </style>
 </head>
 <body>
@@ -95,18 +118,16 @@
   <div class="container">
     <div class="panel panel-1">
       <h3><span>🔑 1. 인증 및 계정</span></h3>
-      <div>
+      <div style="flex-shrink: 0;">
         <input id="api_key" type="text" placeholder="API Key 입력">
         <input id="secret_key" type="password" placeholder="Secret Key 입력">
-        
         <div style="margin: 5px 0 15px 0;">
           <label style="font-size:12px; color: var(--text-sub); display:flex; align-items:center; gap:5px; cursor:pointer;">
             <input type="checkbox" id="save_keys_chk" style="margin:0;"> 이 PC에 키 저장
           </label>
         </div>
       </div>
-      
-      <div style="font-size:13px; font-weight:700; margin-bottom: 5px; color: var(--text-sub);">광고주 목록</div>
+      <div style="font-size:13px; font-weight:700; margin-bottom: 5px; color: var(--text-sub); flex-shrink: 0;">광고주 목록</div>
       <div id="account_list" class="list-wrapper"></div>
     </div>
 
@@ -115,17 +136,21 @@
         <span>📁 2. 캠페인 선택/변경</span>
         <button class="btn btn-sub" onclick="refreshCampaigns()">🔄 새로고침</button>
       </h3>
-      <div class="help-text" style="margin-bottom: 10px;">👇 이름을 클릭하면 우측에 하위 그룹이 나타납니다.</div>
+      <div class="help-text" style="margin-bottom: 10px; flex-shrink:0;">👇 이름을 클릭하면 우측에 하위 그룹이 나타납니다. (우측 하단을 드래그해 창 크기를 늘릴 수 있습니다)</div>
       
       <div id="campaign_list" class="list-wrapper">
         <div style="padding:20px; text-align:center; color: var(--text-sub); font-size:12px;">좌측에서 업체를 선택해주세요.</div>
       </div>
       
-      <div id="campaign_editor_area" style="display:none; padding-top: 5px;">
+      <div id="campaign_editor_area" style="display:none; padding-top: 5px; flex-shrink: 0;">
         <div class="feature-box">
           <h4>📑 체크된 캠페인 [껍데기] 복사</h4>
-          <input type="text" id="camp_suffix" value="_복사본" placeholder="새 이름 뒤에 붙을 문구">
-          <button class="btn btn-point" style="background:#8b5cf6;" onclick="copySelectedCampaigns()">캠페인 복사 실행</button>
+          <div class="input-group">
+            <div class="input-wrapper">
+              <input type="text" id="camp_suffix" value="_복사본" placeholder="새 이름 꼬리표">
+            </div>
+            <button class="btn btn-point" style="background:#8b5cf6;" onclick="copySelectedCampaigns()">복사 실행</button>
+          </div>
         </div>
 
         <div class="feature-box">
@@ -143,37 +168,76 @@
 
           <hr class="divider">
 
-          <label class="item-title">하위 전체 [키워드 입찰가] 변경 <span class="badge">강력</span></label>
-          <div class="input-group">
-            <div class="input-wrapper">
-              <input type="number" id="camp_keyword_bid_val" value="70" step="10">
-              <span>원</span>
+          <label class="item-title">하위 전체 [키워드 입찰가] 변경 <span class="badge">스마트 견적</span></label>
+          <div class="radio-box">
+            <div class="radio-row">
+              <input type="radio" name="camp_bid_mode" id="camp_bid_direct" value="direct" checked>
+              <div class="radio-content">
+                <label for="camp_bid_direct" class="radio-title">단일 금액으로 일괄 덮어쓰기</label>
+                <div class="input-group" style="margin-top: 4px;">
+                  <div class="input-wrapper">
+                    <input type="number" id="camp_keyword_bid_val" value="70" step="10">
+                    <span>원</span>
+                  </div>
+                </div>
+                <div class="help-text" style="color:var(--danger);">* 0원 입력 시 '그룹 기본가 사용' 적용</div>
+              </div>
             </div>
-            <button class="btn btn-sub" style="color:var(--danger); border-color:#fca5a5;" onclick="saveKeywordBidsBulk('campaign')">입찰가 변경</button>
+            
+            <div class="radio-row">
+              <input type="radio" name="camp_bid_mode" id="camp_bid_estimate" value="estimate">
+              <div class="radio-content">
+                <label for="camp_bid_estimate" class="radio-title" style="color:#1e40af;">네이버 순위별 평균 입찰가 자동 맞춤</label>
+                <div class="input-group" style="margin-top: 4px;">
+                  <div class="input-wrapper">
+                    <select id="camp_rank_select">
+                      <optgroup label="PC 통합검색">
+                        <option value="PC_1">PC 통합검색 1위 평균 입찰가</option>
+                        <option value="PC_2">PC 통합검색 2위 평균 입찰가</option>
+                        <option value="PC_3">PC 통합검색 3위 평균 입찰가</option>
+                        <option value="PC_4">PC 통합검색 4위 평균 입찰가</option>
+                        <option value="PC_5">PC 통합검색 5위 평균 입찰가</option>
+                        <option value="PC_6">PC 통합검색 6위 평균 입찰가</option>
+                        <option value="PC_7">PC 통합검색 7위 평균 입찰가</option>
+                        <option value="PC_8">PC 통합검색 8위 평균 입찰가</option>
+                        <option value="PC_9">PC 통합검색 9위 평균 입찰가</option>
+                        <option value="PC_10">PC 통합검색 10위 평균 입찰가</option>
+                      </optgroup>
+                      <optgroup label="모바일 통합검색">
+                        <option value="MOBILE_1">모바일 통합검색 1위 평균 입찰가</option>
+                        <option value="MOBILE_2">모바일 통합검색 2위 평균 입찰가</option>
+                        <option value="MOBILE_3">모바일 통합검색 3위 평균 입찰가</option>
+                        <option value="MOBILE_4">모바일 통합검색 4위 평균 입찰가</option>
+                        <option value="MOBILE_5">모바일 통합검색 5위 평균 입찰가</option>
+                      </optgroup>
+                    </select>
+                  </div>
+                </div>
+                <div style="margin-top: 8px;">
+                  <textarea id="camp_rank_keywords" rows="3" placeholder="💡 특정 키워드만 콕 집어서 변경하려면 엑셀에서 복사해 그대로 붙여넣으세요.&#10;🚨 (오류 방지를 위해 쉼표 없이 반드시 '한 줄에 하나씩'만 입력)"></textarea>
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="help-text" style="color:var(--danger);">* 0원 입력 시 '그룹 기본가 사용'으로 전환</div>
+          <button class="btn btn-point" style="margin-top:10px; background:#1e40af;" onclick="saveKeywordBidsBulk('campaign')">입찰가 설정 실행</button>
 
           <hr class="divider">
 
           <label class="item-title">하위 전체 [그룹 요일/시간] 다중 변경</label>
-          <div class="help-text">켜고 싶은 시간대를 클릭하세요. (초록색이 켜짐 상태)</div>
-          
           <div class="schedule-grid" id="camp_days_grid"></div>
-          
           <div class="quick-preset">
-            <button type="button" class="btn-sub" onclick="setPreset('camp', 'all')">전체시간 켜기</button>
+            <button type="button" class="btn-sub" onclick="setPreset('camp', 'all')">전체 켜기</button>
             <button type="button" class="btn-sub" onclick="setPreset('camp', 'work')">09~18시 켜기</button>
             <button type="button" class="btn-sub" onclick="setPreset('camp', 'clear')">모두 끄기</button>
           </div>
           <div class="hour-grid" id="camp_hours_grid"></div>
-          
           <div class="input-group" style="margin-top: 10px;">
             <div class="input-wrapper" style="max-width: 130px;">
               <input id="camp_bid_weight" type="number" min="0" max="500" value="100">
-              <span>% (가중치)</span>
+              <span>% 가중치</span>
             </div>
+            <button class="btn btn-point" style="background:#10b981;" onclick="saveScheduleCampaignBulk()">스케줄 저장</button>
           </div>
-          <button class="btn btn-point" style="background:#10b981; margin-top:12px;" onclick="saveScheduleCampaignBulk()">스케줄 다중 변경 저장</button>
           
           <div id="campaign_log"></div>
         </div>
@@ -186,15 +250,13 @@
         <button class="btn btn-sub" onclick="refreshAdgroups()">🔄 새로고침</button>
       </h3>
       
-      <div id="adgroup_list" class="list-wrapper" style="max-height: 250px;">
+      <div id="adgroup_list" class="list-wrapper">
         <div style="padding:20px; text-align:center; color: var(--text-sub); font-size:12px;">중앙 패널에서 캠페인을 클릭해주세요.</div>
       </div>
       
       <div id="adgroup_copy_area" class="feature-box" style="display:none; border-color: #8b5cf6;">
         <h4 style="color:#6d28d9; font-size:15px;">🚀 체크된 그룹 다른 캠페인으로 '통째로' 복사</h4>
-        <div class="help-text" style="color:var(--danger); font-weight:600; margin-bottom: 10px;">
-          쇼핑검색 그룹은 반드시 쇼핑검색 캠페인으로만 복사하세요!
-        </div>
+        <div class="help-text" style="color:var(--danger); font-weight:600; margin-bottom: 10px;">쇼핑검색 그룹은 반드시 쇼핑검색 캠페인으로만 복사하세요!</div>
         <select id="target_campaign_select"></select>
         <select id="target_biz_channel_select"></select>
         <div class="help-text">* 쇼핑/브랜드 복사는 '원본 채널 유지' 권장</div>
@@ -218,36 +280,76 @@
 
         <hr class="divider">
 
-        <label class="item-title">하위 [키워드 입찰가] 변경 <span class="badge">강력</span></label>
-        <div class="input-group">
-          <div class="input-wrapper">
-            <input type="number" id="adg_keyword_bid_val" value="70" step="10">
-            <span>원</span>
+        <label class="item-title">하위 [키워드 입찰가] 변경 <span class="badge" style="background:#dbeafe; color:#1e40af;">스마트 견적</span></label>
+        <div class="radio-box">
+          <div class="radio-row">
+            <input type="radio" name="adg_bid_mode" id="adg_bid_direct" value="direct" checked>
+            <div class="radio-content">
+              <label for="adg_bid_direct" class="radio-title">단일 금액으로 일괄 덮어쓰기</label>
+              <div class="input-group" style="margin-top: 4px;">
+                <div class="input-wrapper">
+                  <input type="number" id="adg_keyword_bid_val" value="70" step="10">
+                  <span>원</span>
+                </div>
+              </div>
+              <div class="help-text" style="color:var(--danger);">* 0원 입력 시 '그룹 기본가 사용' 적용</div>
+            </div>
           </div>
-          <button class="btn btn-sub" style="color:var(--danger); border-color:#fca5a5;" onclick="saveKeywordBidsBulk('adgroup')">입찰가 변경</button>
+          
+          <div class="radio-row">
+            <input type="radio" name="adg_bid_mode" id="adg_bid_estimate" value="estimate">
+            <div class="radio-content">
+              <label for="adg_bid_estimate" class="radio-title" style="color:#1e40af;">네이버 순위별 평균 입찰가 자동 맞춤</label>
+              <div class="input-group" style="margin-top: 4px;">
+                <div class="input-wrapper">
+                  <select id="adg_rank_select">
+                    <optgroup label="PC 통합검색">
+                      <option value="PC_1">PC 통합검색 1위 평균 입찰가</option>
+                      <option value="PC_2">PC 통합검색 2위 평균 입찰가</option>
+                      <option value="PC_3">PC 통합검색 3위 평균 입찰가</option>
+                      <option value="PC_4">PC 통합검색 4위 평균 입찰가</option>
+                      <option value="PC_5">PC 통합검색 5위 평균 입찰가</option>
+                      <option value="PC_6">PC 통합검색 6위 평균 입찰가</option>
+                      <option value="PC_7">PC 통합검색 7위 평균 입찰가</option>
+                      <option value="PC_8">PC 통합검색 8위 평균 입찰가</option>
+                      <option value="PC_9">PC 통합검색 9위 평균 입찰가</option>
+                      <option value="PC_10">PC 통합검색 10위 평균 입찰가</option>
+                    </optgroup>
+                    <optgroup label="모바일 통합검색">
+                      <option value="MOBILE_1">모바일 통합검색 1위 평균 입찰가</option>
+                      <option value="MOBILE_2">모바일 통합검색 2위 평균 입찰가</option>
+                      <option value="MOBILE_3">모바일 통합검색 3위 평균 입찰가</option>
+                      <option value="MOBILE_4">모바일 통합검색 4위 평균 입찰가</option>
+                      <option value="MOBILE_5">모바일 통합검색 5위 평균 입찰가</option>
+                    </optgroup>
+                  </select>
+                </div>
+              </div>
+              <div style="margin-top: 8px;">
+                <textarea id="adg_rank_keywords" rows="3" placeholder="💡 특정 키워드만 콕 집어서 변경하려면 엑셀에서 복사해 그대로 붙여넣으세요.&#10;🚨 (오류 방지를 위해 쉼표 없이 반드시 '한 줄에 하나씩'만 입력)"></textarea>
+              </div>
+            </div>
+          </div>
         </div>
+        <button class="btn btn-point" style="margin-top:10px; background:#1e40af;" onclick="saveKeywordBidsBulk('adgroup')">입찰가 설정 실행</button>
 
         <hr class="divider">
 
         <label class="item-title">광고그룹 [요일/시간] 다중 변경</label>
-        <div class="help-text">켜고 싶은 시간대를 클릭하세요. (점심시간 등 제외 가능)</div>
-        
         <div class="schedule-grid" id="days_grid"></div>
-        
         <div class="quick-preset">
-          <button type="button" class="btn-sub" onclick="setPreset('adg', 'all')">전체시간 켜기</button>
+          <button type="button" class="btn-sub" onclick="setPreset('adg', 'all')">전체 켜기</button>
           <button type="button" class="btn-sub" onclick="setPreset('adg', 'work')">09~18시 켜기</button>
           <button type="button" class="btn-sub" onclick="setPreset('adg', 'clear')">모두 끄기</button>
         </div>
         <div class="hour-grid" id="hours_grid"></div>
-        
         <div class="input-group" style="margin-top: 10px;">
           <div class="input-wrapper" style="max-width: 130px;">
             <input id="bid_weight" type="number" min="0" max="500" value="100">
-            <span>% (가중치)</span>
+            <span>% 가중치</span>
           </div>
+          <button class="btn btn-point" style="background:#10b981;" onclick="saveScheduleBulk()">스케줄 저장</button>
         </div>
-        <button class="btn btn-point" style="background:#10b981; margin-top:12px;" onclick="saveScheduleBulk()">스케줄 다중 변경 저장</button>
         
         <div id="log"></div>
       </div>
@@ -260,12 +362,24 @@
   let accountsData = {{ accounts | tojson }};
 
   const DAYS = [ {n:1, label:"월"}, {n:2, label:"화"}, {n:3, label:"수"}, {n:4, label:"목"}, {n:5, label:"금"}, {n:6, label:"토"}, {n:7, label:"일"} ];
-  
-  // 🔥 요일 및 시간 다중선택 Set (기본: 모두 선택)
   const campSelectedDays = new Set([1,2,3,4,5]); 
   const selectedDays = new Set([1,2,3,4,5]); 
   const campSelectedHours = new Set(Array.from({length:24}, (_,i)=>i));
   const selectedHours = new Set(Array.from({length:24}, (_,i)=>i));
+
+  function getTypeBadgeHTML(type) {
+      if (!type) return '';
+      let label = type;
+      let bg = '#e5e7eb', color = '#374151'; 
+      
+      if (type === 'WEB_SITE') { label = '파워링크'; bg = '#dbeafe'; color = '#1e40af'; } 
+      else if (type === 'SHOPPING') { label = '쇼핑검색'; bg = '#d1fae5'; color = '#065f46'; } 
+      else if (type === 'CONTENT') { label = '파워컨텐츠'; bg = '#ffedd5'; color = '#92400e'; } 
+      else if (type === 'BRAND') { label = '브랜드검색'; bg = '#f3e8ff'; color = '#5b21b6'; } 
+      else if (type === 'PLACE') { label = '플레이스'; bg = '#cffafe'; color = '#164e63'; } 
+      
+      return `<span class="type-badge" style="background-color:${bg}; color:${color};">${label}</span>`;
+  }
 
   window.onload = function() {
     if(localStorage.getItem('naver_api_key')) {
@@ -274,7 +388,6 @@
       document.getElementById('save_keys_chk').checked = true;
     }
     
-    // 요일 그리드 렌더링
     const gridAdg = document.getElementById('days_grid'); const gridCamp = document.getElementById('camp_days_grid');
     DAYS.forEach(d => {
       const el1 = document.createElement('div'); el1.className = 'box-btn' + (selectedDays.has(d.n) ? ' active' : ''); el1.textContent = d.label;
@@ -285,34 +398,24 @@
       gridCamp.appendChild(el2);
     });
 
-    // 시간 24칸 그리드 렌더링
-    const hGridAdg = document.getElementById('hours_grid');
-    const hGridCamp = document.getElementById('camp_hours_grid');
+    const hGridAdg = document.getElementById('hours_grid'); const hGridCamp = document.getElementById('camp_hours_grid');
     for(let i=0; i<24; i++) {
         const el1 = document.createElement('div'); el1.className = 'box-btn active'; el1.textContent = i;
         el1.onclick = () => { selectedHours.has(i) ? selectedHours.delete(i) : selectedHours.add(i); el1.classList.toggle('active'); };
         hGridAdg.appendChild(el1);
-        
         const el2 = document.createElement('div'); el2.className = 'box-btn active'; el2.textContent = i;
         el2.onclick = () => { campSelectedHours.has(i) ? campSelectedHours.delete(i) : campSelectedHours.add(i); el2.classList.toggle('active'); };
         hGridCamp.appendChild(el2);
     }
-    
     renderAccounts();
   };
 
-  // 🔥 퀵 프리셋 버튼 기능
   function setPreset(type, mode) {
       const targetSet = type === 'camp' ? campSelectedHours : selectedHours;
       const gridId = type === 'camp' ? 'camp_hours_grid' : 'hours_grid';
       targetSet.clear();
-      
-      if (mode === 'all') {
-          for(let i=0; i<24; i++) targetSet.add(i);
-      } else if (mode === 'work') {
-          for(let i=9; i<=17; i++) targetSet.add(i); // 09~18시 (9,10...17)
-      }
-      
+      if (mode === 'all') for(let i=0; i<24; i++) targetSet.add(i);
+      else if (mode === 'work') for(let i=9; i<=17; i++) targetSet.add(i); 
       const container = document.getElementById(gridId);
       Array.from(container.children).forEach((el, index) => {
           if(targetSet.has(index)) el.classList.add('active');
@@ -383,19 +486,20 @@
       populateBizChannels('target_biz_channel_select');
       
       let html = `<div class="select-all-box">
-                    <label class="chk-container" style="width:100%;">
-                      <input type="checkbox" onchange="toggleAll(this, 'campaign-chk')"> <span>모든 캠페인 전체 선택</span>
+                    <label style="display:flex; gap:8px; cursor:pointer; width:100%;">
+                      <input type="checkbox" onchange="toggleAll(this, 'campaign-chk')"> <span>전체 선택</span>
                     </label>
                   </div>`;
       data.forEach(c => {
         let actClass = (c.nccCampaignId === currentCampaignId) ? 'active' : '';
+        let badgeHtml = getTypeBadgeHTML(c.campaignTp); 
         html += `<div class="list-item ${actClass}" id="camp_${c.nccCampaignId}">
                    <label class="chk-container" onclick="event.stopPropagation()">
                      <input type="checkbox" class="campaign-chk" value="${c.nccCampaignId}">
                    </label>
                    <div class="clickable-text" onclick="loadAdgroups('${c.nccCampaignId}')">
-                     <div class="item-title">${c.name}</div>
-                     <div class="item-id">${c.campaignTp} | ${c.nccCampaignId}</div>
+                     <div class="item-title">${badgeHtml} ${c.name}</div>
+                     <div class="item-id">ID: ${c.nccCampaignId}</div>
                    </div>
                  </div>`;
       });
@@ -417,17 +521,18 @@
       if(data.error) { document.getElementById('adgroup_list').innerHTML = `<div style="color:red; padding:10px; font-size:12px;">에러: ${data.error}</div>`; return; }
       
       let html = `<div class="select-all-box">
-                    <label class="chk-container" style="width:100%;">
-                      <input type="checkbox" onchange="toggleAll(this, 'adgroup-chk')"> <span>모든 광고그룹 전체 선택</span>
+                    <label style="display:flex; gap:8px; cursor:pointer; width:100%;">
+                      <input type="checkbox" onchange="toggleAll(this, 'adgroup-chk')"> <span>전체 선택</span>
                     </label>
                   </div>`;
       data.forEach(g => {
+        let badgeHtml = getTypeBadgeHTML(g.adgroupType); 
         html += `<div class="list-item">
                    <label class="chk-container" onclick="event.stopPropagation()">
                      <input type="checkbox" class="adgroup-chk" value="${g.nccAdgroupId}">
                    </label>
                    <div class="clickable-text" onclick="let cb = this.previousElementSibling.querySelector('input'); cb.checked = !cb.checked;">
-                     <div class="item-title">${g.name}</div>
+                     <div class="item-title">${badgeHtml} ${g.name}</div>
                      <div class="item-id">ID: ${g.nccAdgroupId}</div>
                    </div>
                  </div>`;
@@ -501,20 +606,52 @@
     .then(r => r.json()).then(data => { document.getElementById(logId).innerText = data.message || data.error; });
   }
 
+  // 🔥 쉼표(,) 입력 방지 방어 로직 추가
   function saveKeywordBidsBulk(entityType) {
     const auth = mustOpenAuth(); if(!auth) return;
     const entityIds = Array.from(document.querySelectorAll(entityType === 'campaign' ? '.campaign-chk:checked' : '.adgroup-chk:checked')).map(cb => cb.value);
     if(entityIds.length === 0) return alert(`대상을 체크해주세요.`);
-    const bidAmt = parseInt(document.getElementById(entityType === 'campaign' ? 'camp_keyword_bid_val' : 'adg_keyword_bid_val').value, 10);
-    if(bidAmt > 0 && bidAmt < 70) return alert("최소 70원 이상 입력해주세요.");
-    let confirmMsg = bidAmt === 0 ? "'그룹 기본 입찰가' 사용으로" : `${bidAmt.toLocaleString()}원으로`;
-    if(!confirm(`선택한 항목 내 [모든 키워드] 입찰가를\n${confirmMsg} 일괄 변경하시겠습니까?`)) return;
+    
+    const prefix = entityType === 'campaign' ? 'camp' : 'adg';
+    const modeNode = document.querySelector(`input[name="${prefix}_bid_mode"]:checked`);
+    if(!modeNode) return alert("입찰 모드를 선택해주세요.");
+    const mode = modeNode.value;
+    
+    let payload = { ...auth, customer_id: currentCustomerId, entity_type: entityType, entity_ids: entityIds, mode: mode };
+
+    const rawKws = document.getElementById(`${prefix}_rank_keywords`).value.trim();
+    
+    if (rawKws.includes(',')) {
+        return alert("🚨 [오류 방지] 키워드 구분은 쉼표(,)를 사용할 수 없습니다.\n반드시 '엔터(Enter)'를 쳐서 한 줄에 하나씩만 입력해주세요!");
+    }
+    
+    payload.keywords = rawKws;
+
+    let confirmMsg = "";
+    let targetText = rawKws ? "입력하신 특정 키워드들을" : "선택한 항목 안의 [모든 키워드]를";
+
+    if (mode === "direct") {
+        const bidAmt = parseInt(document.getElementById(`${prefix}_keyword_bid_val`).value, 10);
+        if (isNaN(bidAmt) || (bidAmt > 0 && bidAmt < 70)) return alert("입찰가는 최소 70원 이상이어야 합니다.");
+        payload.bid_amt = bidAmt;
+        confirmMsg = bidAmt === 0 ? "'그룹 기본 입찰가'로 변경" : `${bidAmt.toLocaleString()}원으로 일괄 덮어쓰기`;
+    } else {
+        const rankVal = document.getElementById(`${prefix}_rank_select`).value;
+        const [device, rank] = rankVal.split("_");
+        payload.device = device;
+        payload.rank = parseInt(rank, 10);
+        confirmMsg = `[${device} 통합검색 ${rank}위] 평균 입찰가로 각각 실시간 자동 세팅`;
+    }
+
+    if(!confirm(`${targetText}\n${confirmMsg} 하시겠습니까?`)) return;
+
     const logId = entityType === 'campaign' ? 'campaign_log' : 'log'; 
-    document.getElementById(logId).innerText = "⏳ 키워드 수가 많으면 수십 초가 소요될 수 있습니다...";
-    fetch('/update_keyword_bids', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...auth, customer_id: currentCustomerId, entity_type: entityType, entity_ids: entityIds, bid_amt: bidAmt}) })
+    document.getElementById(logId).innerText = "⏳ 네이버 서버와 통신 중입니다... (100개당 1초 소요)";
+    
+    fetch('/update_keyword_bids', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) })
     .then(r => r.json()).then(data => { 
         document.getElementById(logId).innerText = data.message || data.error; 
-        if(data.ok) alert("키워드 입찰가 변경이 완료되었습니다.");
+        if(data.ok) alert("키워드 입찰가 설정이 완료되었습니다.");
     });
   }
 
@@ -522,15 +659,10 @@
     const auth = mustOpenAuth(); if(!auth) return;
     const adgroupIds = Array.from(document.querySelectorAll('.adgroup-chk:checked')).map(cb => cb.value);
     if(adgroupIds.length === 0) return alert("대상을 체크해주세요.");
-    
     const hoursArr = Array.from(selectedHours.values()).sort((a,b)=>a-b);
     if(hoursArr.length === 0) return alert("시간을 최소 1개 이상 선택해주세요.");
-
     document.getElementById('log').innerText = "⏳ 진행 중...";
-    fetch('/update_schedule', { 
-        method:'POST', headers:{'Content-Type':'application/json'}, 
-        body: JSON.stringify({...auth, customer_id: currentCustomerId, adgroup_ids: adgroupIds, hours: hoursArr, bidWeight: parseInt(document.getElementById('bid_weight').value, 10), days: Array.from(selectedDays.values()).sort((a,b)=>a-b)}) 
-    })
+    fetch('/update_schedule', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...auth, customer_id: currentCustomerId, adgroup_ids: adgroupIds, hours: hoursArr, bidWeight: parseInt(document.getElementById('bid_weight').value, 10), days: Array.from(selectedDays.values()).sort((a,b)=>a-b)}) })
     .then(r => r.json()).then(data => { document.getElementById('log').innerText = data.message || data.error; });
   }
 
@@ -538,15 +670,10 @@
     const auth = mustOpenAuth(); if(!auth) return;
     const campaignIds = Array.from(document.querySelectorAll('.campaign-chk:checked')).map(cb => cb.value);
     if(campaignIds.length === 0) return alert("대상을 체크해주세요.");
-    
     const hoursArr = Array.from(campSelectedHours.values()).sort((a,b)=>a-b);
     if(hoursArr.length === 0) return alert("시간을 최소 1개 이상 선택해주세요.");
-
     document.getElementById('campaign_log').innerText = "⏳ 진행 중...";
-    fetch('/update_schedule_campaign_bulk', { 
-        method:'POST', headers:{'Content-Type':'application/json'}, 
-        body: JSON.stringify({...auth, customer_id: currentCustomerId, campaign_ids: campaignIds, hours: hoursArr, bidWeight: parseInt(document.getElementById('camp_bid_weight').value, 10), days: Array.from(campSelectedDays.values()).sort((a,b)=>a-b)}) 
-    })
+    fetch('/update_schedule_campaign_bulk', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...auth, customer_id: currentCustomerId, campaign_ids: campaignIds, hours: hoursArr, bidWeight: parseInt(document.getElementById('camp_bid_weight').value, 10), days: Array.from(campSelectedDays.values()).sort((a,b)=>a-b)}) })
     .then(r => r.json()).then(data => { document.getElementById('campaign_log').innerText = data.message || data.error; });
   }
 </script>
