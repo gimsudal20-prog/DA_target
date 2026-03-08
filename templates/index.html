@@ -23,8 +23,13 @@
     .account-list{max-height:420px;overflow:auto;display:flex;flex-direction:column;gap:8px}
     .account-item{padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);cursor:pointer}
     .account-item.active{background:rgba(37,99,235,.28);border-color:rgba(96,165,250,.55)}
+    .account-item.pinned{border-color:rgba(250,204,21,.45);box-shadow:inset 0 0 0 1px rgba(250,204,21,.12)}
     .account-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
-    .account-item .name{font-weight:700}
+    .account-left{display:flex;align-items:center;gap:8px;min-width:0}
+    .pin-star{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:999px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:#94a3b8;cursor:pointer;font-size:14px;line-height:1;flex:0 0 auto}
+    .pin-star.on{color:#facc15;border-color:rgba(250,204,21,.45);background:rgba(250,204,21,.12)}
+    .pin-star:hover{background:rgba(255,255,255,.08)}
+    .account-item .name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .account-item .sub{font-size:12px;color:#cbd5e1;margin-top:3px}
     .pin-btn{border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.08);color:#fff;border-radius:10px;padding:4px 8px;font-size:12px;cursor:pointer}
     .pin-btn.on{background:rgba(245,158,11,.18);border-color:rgba(245,158,11,.55);color:#fde68a}
@@ -911,12 +916,21 @@ function renderEmptyStates(){
 }
 function renderAccounts(){
   const wrap = document.getElementById('account_list'); wrap.innerHTML='';
-  accountsData.forEach(acc=>{
+  sortAccountsForView(accountsData).forEach(acc=>{
     const active = currentCustomerId === acc.customer_id;
+    const pinned = pinnedAccountIds.has(acc.customer_id);
     const el = document.createElement('div');
-    el.className='account-item' + (active ? ' active' : '');
+    el.className='account-item' + (active ? ' active' : '') + (pinned ? ' pinned' : '');
     el.dataset.customerId = acc.customer_id;
-    el.innerHTML = `<div class="account-head"><div class="name">${escapeHtml(acc.account_name)}</div></div><div class="sub">Customer ID: ${escapeHtml(acc.customer_id)}</div>`;
+    el.innerHTML = `
+      <div class="account-head">
+        <div class="account-left">
+          <button class="pin-star ${pinned ? 'on' : ''}" title="${pinned ? '상단 고정 해제' : '상단 고정'}" onclick="toggleAccountPin('${acc.customer_id}', event)">★</button>
+          <div class="name">${escapeHtml(acc.account_name)}</div>
+        </div>
+        ${pinned ? '<span class="badge amber">상단 고정</span>' : ''}
+      </div>
+      <div class="sub">Customer ID: ${escapeHtml(acc.customer_id)}</div>`;
     el.onclick = ()=>selectAccount(acc, el);
     wrap.appendChild(el);
   });
