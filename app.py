@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 app.py (Open API 전용 통합 버전)
-- 스마트 견적 70원 고정 버그 해결: 견적 API 파라미터를 ID가 아닌 keyword(텍스트)로 정상 호출
-- 네이버 입찰가 10원 단위 절사 규칙 적용
+- 스케줄(가중치) 변경 시 실패 응답을 무시하지 않고 상세 에러로 반환하도록 보완 (GPT 리뷰 반영)
 """
 
 from flask import Flask, render_template, request, jsonify
@@ -145,45 +144,76 @@ def update_budget():
         else: results["fail"] += 1
     return jsonify({"ok": True, "message": f"총 {len(entity_ids)}개 예산 업데이트 성공: {results['success']}개 / 실패: {results['fail']}개"})
 
+# 🔥 스케줄 에러 검증 보완
 @app.route("/update_schedule", methods=["POST"])
 def update_schedule():
     d = request.json or {}
     api_key, secret_key, cid, adgroup_ids = d.get("api_key"), d.get("secret_key"), d.get("customer_id"), d.get("adgroup_ids", [])
     days, hours, bid_weight = d.get("days",[]), d.get("hours",[]), int(d.get("bidWeight",100))
     codes = [f"SD{DAY_NUM_TO_CODE[int(d_num)]}{int(h):02d}{(int(h)+1):02d}" for d_num in days for h in hours]
+    
     results = {"success": 0, "fail": 0}
+    err_details = []
+    
     for owner_id in adgroup_ids:
         uri = f"/ncc/criterion/{owner_id.strip()}/SD"
         target_body = [{"customerId": int(cid), "ownerId": owner_id.strip(), "dictionaryCode": c, "type": "SD"} for c in codes]
-        if _do_req("PUT", api_key, secret_key, cid, uri, json_body=target_body).status_code != 200: results["fail"] += 1; continue 
+        
+        r_put = _do_req("PUT", api_key, secret_key, cid, uri, json_body=target_body)
+        if r_put.status_code != 200: 
+            results["fail"] += 1
+            err_details.append(f"[{owner_id}] 스케줄 시간 변경 실패: {r_put.text}")
+            continue 
+            
         if codes: 
             for i in range(0, len(codes), 50): 
-                _do_req("PUT", api_key, secret_key, cid, f"/ncc/criterion/{owner_id.strip()}/bidWeight", params={"codes": ",".join(codes[i:i+50]), "bidWeight": bid_weight})
+                r_weight = _do_req("PUT", api_key, secret_key, cid, f"/ncc/criterion/{owner_id.strip()}/bidWeight", params={"codes": ",".join(codes[i:i+50]), "bidWeight": bid_weight})
+                if r_weight.status_code != 200:
+                    err_details.append(f"[{owner_id}] 가중치 변경 실패: {r_weight.text}")
+                    
         results["success"] += 1
-    return jsonify({"ok": True, "message": f"총 {len(adgroup_ids)}개 스케줄 업데이트 성공: {results['success']}개 / 실패: {results['fail']}개"})
+        
+    msg = f"총 {len(adgroup_ids)}개 스케줄 업데이트 성공: {results['success']}개 / 실패: {results['fail']}개"
+    if err_details: msg += "\n\n[상세 에러 내역]\n" + "\n".join(err_details[:5])
+    return jsonify({"ok": True, "message": msg})
 
 @app.route("/update_schedule_campaign_bulk", methods=["POST"])
 def update_schedule_campaign_bulk():
     d = request.json or {}
     api_key, secret_key, cid, campaign_ids = d.get("api_key"), d.get("secret_key"), d.get("customer_id"), d.get("campaign_ids", [])
     days, hours, bid_weight = d.get("days",[]), d.get("hours",[]), int(d.get("bidWeight",100))
+    
     adgroup_ids = []
     for camp_id in campaign_ids:
         r_adgs = _do_req("GET", api_key, secret_key, cid, "/ncc/adgroups", params={"nccCampaignId": camp_id})
         if r_adgs.status_code == 200: adgroup_ids.extend([adg.get("nccAdgroupId") for adg in r_adgs.json()])
+        
     codes = [f"SD{DAY_NUM_TO_CODE[int(d_num)]}{int(h):02d}{(int(h)+1):02d}" for d_num in days for h in hours]
     results = {"success": 0, "fail": 0}
+    err_details = []
+    
     for owner_id in adgroup_ids:
         uri = f"/ncc/criterion/{owner_id}/SD"
         target_body = [{"customerId": int(cid), "ownerId": owner_id, "dictionaryCode": c, "type": "SD"} for c in codes]
-        if _do_req("PUT", api_key, secret_key, cid, uri, json_body=target_body).status_code != 200: results["fail"] += 1; continue 
+        
+        r_put = _do_req("PUT", api_key, secret_key, cid, uri, json_body=target_body)
+        if r_put.status_code != 200: 
+            results["fail"] += 1
+            err_details.append(f"[{owner_id}] 스케줄 시간 변경 실패: {r_put.text}")
+            continue 
+            
         if codes: 
             for i in range(0, len(codes), 50): 
-                _do_req("PUT", api_key, secret_key, cid, f"/ncc/criterion/{owner_id}/bidWeight", params={"codes": ",".join(codes[i:i+50]), "bidWeight": bid_weight})
+                r_weight = _do_req("PUT", api_key, secret_key, cid, f"/ncc/criterion/{owner_id}/bidWeight", params={"codes": ",".join(codes[i:i+50]), "bidWeight": bid_weight})
+                if r_weight.status_code != 200:
+                    err_details.append(f"[{owner_id}] 가중치 변경 실패: {r_weight.text}")
+                    
         results["success"] += 1
-    return jsonify({"ok": True, "message": f"하위 광고그룹 총 {len(adgroup_ids)}개 스케줄 일괄 변경 완료!\n(성공: {results['success']} / 실패: {results['fail']})"})
+        
+    msg = f"하위 광고그룹 총 {len(adgroup_ids)}개 스케줄 일괄 변경 완료!\n(성공: {results['success']} / 실패: {results['fail']})"
+    if err_details: msg += "\n\n[상세 에러 내역]\n" + "\n".join(err_details[:5])
+    return jsonify({"ok": True, "message": msg})
 
-# 🔥 에러 픽스: 스마트 견적 정확한 텍스트 기반 조회 적용
 @app.route("/update_keyword_bids", methods=["POST"])
 def update_keyword_bids():
     d = request.json or {}
@@ -194,7 +224,6 @@ def update_keyword_bids():
 
     if not entity_ids: return jsonify({"error": "대상이 없습니다."}), 400
 
-    # 1. 대상 그룹의 키워드 수집
     adgroup_ids = []
     if entity_type == "campaign":
         for camp_id in entity_ids:
@@ -232,14 +261,12 @@ def update_keyword_bids():
     success_cnt, fail_cnt = 0, 0
     err_details = []
 
-    # 2. 입찰가 세팅
     if mode == "estimate":
         device, rank = d.get("device", "PC"), int(d.get("rank", 1))
         bid_map = {}
         
         for i in range(0, len(filtered_kws), 100):
             chunk = filtered_kws[i:i+100]
-            # 🚨 핵심: /id 엔드포인트 대신 /keyword 엔드포인트를 사용하고 "keyword" 텍스트를 전송해야 정확히 받아옴!
             est_payload = {
                 "device": device,
                 "items": [{"key": kw["keyword"], "position": rank} for kw in chunk]
@@ -255,13 +282,8 @@ def update_keyword_bids():
         for kw in filtered_kws:
             est_bid = bid_map.get(kw["keyword"], 0)
             final_bid = int(est_bid)
-            
-            # 네이버 정책: 10원 단위 절사
             final_bid = (final_bid // 10) * 10
-            
-            # 0원이거나 70원 미만이면 최소가 방어
-            if final_bid < 70:
-                final_bid = 70
+            if final_bid < 70: final_bid = 70
                 
             kw["bidAmt"] = final_bid
             kw["useGroupBidAmt"] = False
@@ -273,7 +295,6 @@ def update_keyword_bids():
             kw["bidAmt"] = target_bid
             kw["useGroupBidAmt"] = use_group_bid
 
-    # 3. 실서버 업데이트
     update_payload = []
     for kw in filtered_kws:
         item = copy.deepcopy(kw)
@@ -295,8 +316,7 @@ def update_keyword_bids():
                     if len(err_details) < 5: err_details.append(f"[{item.get('keyword')}] 실패: {r_single.text}")
 
     msg = f"키워드 입찰가 변경 완료!\n(성공: {success_cnt}개, 실패: {fail_cnt}개)"
-    if mode == "estimate":
-        msg += f"\n* [{device} {rank}위] 평균 입찰가 적용 (10원 단위 절사). 데이터가 없는 키워드는 70원으로 세팅되었습니다."
+    if mode == "estimate": msg += f"\n* [{device} {rank}위] 평균 입찰가 적용 (10원 단위 절사)"
     if err_details: msg += "\n\n[상세 에러 내역]\n" + "\n".join(err_details)
     
     return jsonify({"ok": True, "message": msg})
