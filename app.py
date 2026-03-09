@@ -1584,13 +1584,20 @@ def _estimate_keyword_bids_by_avg_position(api_key: str, secret_key: str, cid: s
             warnings.append(f"평균순위 추정 실패({device}, {position}위): {res.text}")
             continue
         payload = res.json() or {}
-        items = payload.get("items") if isinstance(payload, dict) else payload
+        items = None
+        if isinstance(payload, dict):
+            # 공식 릴리즈 노트 예시는 items, 실제 응답은 estimate 로 내려오는 경우도 방어
+            items = payload.get("items")
+            if not isinstance(items, list):
+                items = payload.get("estimate")
+        elif isinstance(payload, list):
+            items = payload
         if not isinstance(items, list):
             warnings.append(f"평균순위 추정 응답 형식이 예상과 다릅니다: {payload}")
             continue
         for item in items:
             try:
-                key = str(item.get("key") or "").strip()
+                key = str(item.get("key") or item.get("nccKeywordId") or "").strip()
                 bid = int(item.get("bid"))
             except Exception:
                 continue
@@ -1709,8 +1716,9 @@ def update_keyword_bids_avg_position():
     position = int(d.get("position") or 1)
     if device not in {"PC", "MOBILE"}:
         return jsonify({"error": "device는 PC 또는 MOBILE 이어야 합니다."}), 400
-    if position < 1 or position > 15:
-        return jsonify({"error": "목표 평균순위는 1~15 사이로 입력해주세요."}), 400
+    max_position = 10 if device == "PC" else 5
+    if position < 1 or position > max_position:
+        return jsonify({"error": f"목표 평균순위는 {device} 기준 1~{max_position} 사이로 입력해주세요."}), 400
     if not entity_ids:
         return jsonify({"error": "대상이 없습니다."}), 400
 
