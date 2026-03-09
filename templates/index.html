@@ -661,6 +661,39 @@ let campaignTypeFilter = 'ALL';
 let adgroupQuery = '';
 let detailState = {keywords:[], ads:[], exts:[], negatives:[]};
 let shoppingRefCandidates = [];
+const PINNED_ACCOUNTS_KEY = 'naver_pinned_accounts';
+let pinnedAccountIds = new Set();
+
+function loadPinnedAccounts(){
+  try{
+    const raw = localStorage.getItem(PINNED_ACCOUNTS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    pinnedAccountIds = new Set(Array.isArray(arr) ? arr.map(String) : []);
+  }catch(_e){
+    pinnedAccountIds = new Set();
+  }
+}
+function savePinnedAccounts(){
+  try{ localStorage.setItem(PINNED_ACCOUNTS_KEY, JSON.stringify(Array.from(pinnedAccountIds))); }catch(_e){}
+}
+function sortAccountsForView(list){
+  const arr = Array.isArray(list) ? [...list] : [];
+  return arr.sort((a,b)=>{
+    const ap = pinnedAccountIds.has(String(a.customer_id)) ? 1 : 0;
+    const bp = pinnedAccountIds.has(String(b.customer_id)) ? 1 : 0;
+    if(ap !== bp) return bp - ap;
+    return String(a.account_name || '').localeCompare(String(b.account_name || ''), 'ko');
+  });
+}
+function toggleAccountPin(customerId, evt){
+  if(evt){ evt.preventDefault(); evt.stopPropagation(); }
+  const key = String(customerId || '');
+  if(!key) return;
+  if(pinnedAccountIds.has(key)) pinnedAccountIds.delete(key);
+  else pinnedAccountIds.add(key);
+  savePinnedAccounts();
+  renderAccounts();
+}
 
 const extensionTypeLabels = {
   HEADLINE:'추가제목', SUB_LINKS:'서브링크', DESCRIPTION_EXTRA:'홍보문구', DESCRIPTION:'추가설명',
@@ -673,6 +706,7 @@ window.onload = async function(){
   const savedApi = localStorage.getItem('naver_api_key');
   const savedSecret = localStorage.getItem('naver_secret_key');
   if(savedApi){ document.getElementById('api_key').value = savedApi; document.getElementById('secret_key').value = savedSecret || ''; document.getElementById('save_keys_chk').checked = true; }
+  loadPinnedAccounts();
   renderAccounts();
   renderExtensionTypeOptions();
   renderEmptyStates();
