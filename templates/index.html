@@ -363,7 +363,7 @@
           <button class="tab active" data-pane="pane_register" onclick="switchWorkspace('pane_register', this)">1. 기본 등록</button>
           <button class="tab" data-pane="pane_assets" onclick="switchWorkspace('pane_assets', this)">2. 소재 · 확장 · 제외</button>
           <button class="tab" data-pane="pane_bidtime" onclick="switchWorkspace('pane_bidtime', this)">3. 입찰가 · 시간대</button>
-          <button class="tab" data-pane="pane_ops" onclick="switchWorkspace('pane_ops', this)">4. 운영 · 삭제</button>
+          <button class="tab" data-pane="pane_ops" onclick="switchWorkspace('pane_ops', this)">4. 복사 · 삭제 · 예산변경</button>
           <button class="tab" data-pane="pane_bulk_reg" onclick="switchWorkspace('pane_bulk_reg', this)">5. 대량 작업</button>
         </div>
         <div class="selection-quickbar">
@@ -533,16 +533,23 @@
       </section>
 
             <section class="card work-pane workspace-panel" id="pane_bidtime" data-display="block">
-        <div class="workspace-head"><div><h3 style="margin:0;font-size:18px">입찰가 · 시간대 변경</h3><div class="mini">입찰가 운영과 시간대 일괄 설정만 따로 분리해서 빠르게 실행할 수 있게 정리했습니다.</div></div></div>
-        <div class="section-grid">
+        <div class="workspace-head"><div><h3 style="margin:0;font-size:18px">입찰가 · 시간대 변경</h3><div class="mini">고정 입찰가 변경, 평균순위 입찰가 변경, 시간대 일괄 설정을 각각 따로 실행할 수 있게 분리했습니다.</div></div></div>
+        <div class="section-grid" style="grid-template-columns:repeat(3, minmax(0,1fr));align-items:start">
           <div class="card" style="box-shadow:none;border-radius:18px">
-            <h3 style="margin:0 0 10px;font-size:16px">입찰가 운영</h3>
+            <h3 style="margin:0 0 10px;font-size:16px">고정 입찰가 변경</h3>
             <div class="form-grid">
               <div class="full"><label class="label">적용 범위</label><select id="bid_scope_type" onchange="updateActionStates()"><option value="campaign">선택 캠페인 하위 키워드 전체</option><option value="adgroup">선택 광고그룹 하위 키워드 전체</option></select></div>
-              <div><label class="label">고정 입찰가</label><input id="bid_scope_fixed_val" type="number" value="70" min="0"></div>
-              <div><label class="label">목표 평균순위</label><select id="avg_position_val"></select><div class="field-help" id="avg_position_help">PC는 1~10위, 모바일은 1~5위만 선택할 수 있습니다.</div></div>
+              <div class="full"><label class="label">변경 입찰가</label><input id="bid_scope_fixed_val" type="number" value="70" min="0"></div>
+              <div class="full btn-row"><button class="btn btn-sub" data-require="scope-selected" onclick="saveKeywordBidsByScope()">고정 입찰가 일괄 변경</button></div>
+              <div class="full panel-note">선택한 범위의 키워드 입찰가를 동일 금액으로 바로 변경합니다.</div>
+            </div>
+          </div>
+          <div class="card" style="box-shadow:none;border-radius:18px">
+            <h3 style="margin:0 0 10px;font-size:16px">평균순위 입찰가 변경</h3>
+            <div class="form-grid">
               <div><label class="label">디바이스</label><select id="avg_position_device" onchange="syncAvgPositionLimit()"><option value="PC">PC 평균순위</option><option value="MOBILE">모바일 평균순위</option></select></div>
-              <div class="full btn-row"><button class="btn btn-sub" data-require="scope-selected" onclick="saveKeywordBidsByScope()">고정 입찰가 일괄 변경</button><button class="btn btn-primary" data-require="scope-selected" onclick="applyAvgPositionBids()">평균순위 입찰가 변경</button></div>
+              <div><label class="label">목표 평균순위</label><select id="avg_position_val"></select><div class="field-help" id="avg_position_help">PC는 1~10위, 모바일은 1~5위만 선택할 수 있습니다.</div></div>
+              <div class="full btn-row"><button class="btn btn-primary" data-require="scope-selected" onclick="applyAvgPositionBids()">평균순위 입찰가 변경</button></div>
               <div class="full panel-note">평균순위 입찰가 변경은 파워링크 키워드만 지원합니다. 쇼핑/기타 광고그룹은 자동으로 건너뜁니다.</div>
             </div>
           </div>
@@ -565,29 +572,36 @@
       </section>
 
       <section class="card work-pane workspace-panel" id="pane_ops" data-display="block">
-        <div class="workspace-head"><div><h3 style="margin:0;font-size:18px">운영 · 삭제</h3><div class="mini">복사, 예산, 상태 변경과 삭제를 마지막 섹션에 모았습니다.</div></div></div>
+        <div class="workspace-head"><div><h3 style="margin:0;font-size:18px">복사 · 삭제 · 예산변경</h3><div class="mini">운영 섹션은 복사, 삭제, 예산변경 중심으로 다시 정리했습니다. 캠페인 ON/OFF는 예산변경 카드 안에서 함께 처리할 수 있습니다.</div></div></div>
 
-          <div class="section-grid">
+          <div class="section-grid" style="grid-template-columns:repeat(3, minmax(0,1fr));align-items:start">
             <div class="card" style="box-shadow:none;border-radius:18px">
-              <h3 style="margin:0 0 10px;font-size:16px">캠페인 운영</h3>
+              <h3 style="margin:0 0 10px;font-size:16px">복사</h3>
               <div class="form-grid">
-                <div class="full"><label class="label">복사 접미사</label><input id="camp_suffix" type="text" value="_복사"></div>
-                <div class="full btn-row"><button class="btn btn-purple" data-require="campaign-selected" onclick="copySelectedCampaigns()">선택 캠페인 복사</button><button class="btn btn-red" data-require="campaign-selected" onclick="deleteSelectedCampaigns()">선택 캠페인 삭제</button></div>
-                <div><label class="label">일예산</label><input id="campaign_budget_val" type="number" value="50000" min="0"></div>
-                <div><label class="label">운영 상태</label><div class="field-help" style="margin-top:28px">입찰가/시간대 변경은 왼쪽 <b>입찰가 · 시간대 변경</b> 섹션에서 실행</div></div>
-                <div class="full btn-row"><button class="btn btn-sub" data-require="campaign-selected" onclick="saveBudgetBulk('campaign')">선택 캠페인 예산 변경</button><button class="btn btn-green" data-require="campaign-selected" onclick="setCampaignState(true)">선택 캠페인 ON</button><button class="btn btn-sub" data-require="campaign-selected" onclick="setCampaignState(false)">선택 캠페인 OFF</button></div>
+                <div class="full"><label class="label">캠페인 복사 접미사</label><input id="camp_suffix" type="text" value="_복사"></div>
+                <div class="full btn-row"><button class="btn btn-purple" data-require="campaign-selected" onclick="copySelectedCampaigns()">선택 캠페인 복사</button></div>
+                <div class="full"><label class="label">광고그룹 대상 캠페인</label><select id="target_campaign_select"></select></div>
+                <div class="full"><label class="label">광고그룹 복사 접미사</label><input id="adg_suffix" type="text" value="_복사"></div>
+                <div class="full"><label class="label">비즈채널</label><select id="target_biz_channel_select"></select></div>
+                <div class="full btn-row"><button class="btn btn-purple" data-require="adgroup-selected" onclick="execAdgroupsCopyToTarget()">선택 광고그룹 통째 복사</button></div>
               </div>
             </div>
             <div class="card" style="box-shadow:none;border-radius:18px">
-              <h3 style="margin:0 0 10px;font-size:16px">광고그룹 운영</h3>
+              <h3 style="margin:0 0 10px;font-size:16px">예산변경</h3>
               <div class="form-grid">
-                <div class="full"><label class="label">대상 캠페인</label><select id="target_campaign_select"></select></div>
-                <div class="full"><label class="label">복사 접미사</label><input id="adg_suffix" type="text" value="_복사"></div>
-                <div class="full"><label class="label">비즈채널</label><select id="target_biz_channel_select"></select></div>
-                <div class="full btn-row"><button class="btn btn-purple" data-require="adgroup-selected" onclick="execAdgroupsCopyToTarget()">선택 광고그룹 통째 복사</button><button class="btn btn-red" data-require="adgroup-selected" onclick="deleteSelectedAdgroups()">선택 광고그룹 삭제</button></div>
-                <div><label class="label">일예산</label><input id="adgroup_budget_val" type="number" value="10000" min="0"></div>
-                <div><label class="label">운영 안내</label><div class="field-help" style="margin-top:28px">키워드/평균순위 입찰가 변경은 왼쪽 <b>입찰가 · 시간대 변경</b> 섹션에서 실행</div></div>
-                <div class="full btn-row"><button class="btn btn-sub" data-require="adgroup-selected" onclick="saveBudgetBulk('adgroup')">광고그룹 예산 변경</button></div>
+                <div><label class="label">캠페인 일예산</label><input id="campaign_budget_val" type="number" value="50000" min="0"></div>
+                <div><label class="label">광고그룹 일예산</label><input id="adgroup_budget_val" type="number" value="10000" min="0"></div>
+                <div class="full btn-row"><button class="btn btn-sub" data-require="campaign-selected" onclick="saveBudgetBulk('campaign')">선택 캠페인 예산 변경</button><button class="btn btn-sub" data-require="adgroup-selected" onclick="saveBudgetBulk('adgroup')">광고그룹 예산 변경</button></div>
+                <div class="full"><div class="panel-note">상태 변경도 여기서 바로 처리할 수 있습니다.</div></div>
+                <div class="full btn-row"><button class="btn btn-green" data-require="campaign-selected" onclick="setCampaignState(true)">선택 캠페인 ON</button><button class="btn btn-sub" data-require="campaign-selected" onclick="setCampaignState(false)">선택 캠페인 OFF</button></div>
+              </div>
+            </div>
+            <div class="card" style="box-shadow:none;border-radius:18px">
+              <h3 style="margin:0 0 10px;font-size:16px">삭제</h3>
+              <div class="form-grid">
+                <div class="full panel-note">삭제 버튼을 누르면 경고창이 한 번 더 뜬 뒤 바로 삭제됩니다.</div>
+                <div class="full btn-row"><button class="btn btn-red" data-require="campaign-selected" onclick="deleteSelectedCampaigns()">선택 캠페인 삭제</button></div>
+                <div class="full btn-row"><button class="btn btn-red" data-require="adgroup-selected" onclick="deleteSelectedAdgroups()">선택 광고그룹 삭제</button></div>
               </div>
             </div>
           </div>
