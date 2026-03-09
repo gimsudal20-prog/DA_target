@@ -187,9 +187,33 @@
     @media (max-width:1600px){.detail-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
     @media (max-width:1280px){.detail-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.campaign-list,.adgroup-list,.detail-list{height:320px}.workspace-switch{grid-template-columns:1fr}.selection-quickbar{flex-direction:column;align-items:flex-start}}
 
+
+    .loading-bar{position:fixed;top:0;left:0;height:3px;width:100%;background:linear-gradient(90deg,#2563eb 0%,#60a5fa 35%,#2563eb 70%,#60a5fa 100%);background-size:200% 100%;animation:loadingBar 1s linear infinite;z-index:1200;display:none;box-shadow:0 0 0 1px rgba(37,99,235,.08)}
+    .loading-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.18);backdrop-filter:blur(2px);display:none;align-items:flex-start;justify-content:center;padding-top:88px;z-index:1199}
+    .loading-backdrop.show,.loading-bar.show{display:flex}
+    .loading-card{min-width:280px;max-width:min(92vw,420px);display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:18px;background:rgba(255,255,255,.96);border:1px solid rgba(37,99,235,.12);box-shadow:0 24px 50px rgba(15,23,42,.16)}
+    .loading-spinner{width:18px;height:18px;border-radius:999px;border:2px solid rgba(37,99,235,.2);border-top-color:#2563eb;animation:spin .8s linear infinite;flex:0 0 auto}
+    .loading-text{display:grid;gap:2px}
+    .loading-text strong{font-size:13px}
+    .loading-text span{font-size:12px;color:var(--muted)}
+    body.is-busy{overflow:hidden}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @keyframes loadingBar{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
 </style>
 </head>
 <body>
+
+  <div id="global_loading_bar" class="loading-bar"></div>
+  <div id="global_loading" class="loading-backdrop" aria-live="polite" aria-busy="true">
+    <div class="loading-card">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">
+        <strong id="global_loading_title">실행 중입니다</strong>
+        <span id="global_loading_desc">잠시만 기다려주세요.</span>
+      </div>
+    </div>
+  </div>
   <div class="app">
     <aside class="sidebar">
       <div class="account-stick">
@@ -702,6 +726,65 @@ const extensionTypeLabels = {
 };
 const easyExtensionTypes = ['HEADLINE','DESCRIPTION_EXTRA','DESCRIPTION','SUB_LINKS'];
 
+
+let pendingRequestCount = 0;
+let lastIdleStatus = '준비됨';
+function describeRequest(url){
+  const map = {
+    '/get_campaigns':['캠페인 불러오는 중','광고주의 캠페인 목록을 조회하고 있어요.'],
+    '/get_adgroups':['광고그룹 불러오는 중','선택한 캠페인의 광고그룹을 조회하고 있어요.'],
+    '/get_keywords':['키워드 불러오는 중','선택한 광고그룹의 키워드를 조회하고 있어요.'],
+    '/get_ads':['소재 불러오는 중','선택한 광고그룹의 소재를 조회하고 있어요.'],
+    '/get_ad_extensions':['확장소재 불러오는 중','선택한 광고그룹의 확장소재를 조회하고 있어요.'],
+    '/get_restricted_keywords':['제외키워드 불러오는 중','등록된 제외키워드를 확인하고 있어요.'],
+    '/get_biz_channels':['비즈채널 불러오는 중','사용 가능한 비즈채널 목록을 조회하고 있어요.'],
+    '/create_campaign':['캠페인 생성 중','입력한 정보로 새 캠페인을 만들고 있어요.'],
+    '/create_adgroup_simple':['광고그룹 생성 중','선택한 캠페인 아래 광고그룹을 만들고 있어요.'],
+    '/create_keywords_simple':['키워드 등록 중','키워드를 순서대로 등록하고 있어요.'],
+    '/create_text_ad_simple':['기본소재 등록 중','파워링크 기본소재를 등록하고 있어요.'],
+    '/create_extension_simple':['확장소재 등록 중','선택한 유형의 확장소재를 등록하고 있어요.'],
+    '/create_shopping_ad_simple':['쇼핑소재 등록 중','쇼핑검색 상품형 소재를 등록하고 있어요.'],
+    '/create_restricted_keywords_simple':['제외키워드 등록 중','중복을 확인한 뒤 제외키워드를 등록하고 있어요.'],
+    '/update_keyword_bids':['입찰가 변경 중','선택한 키워드의 입찰가를 변경하고 있어요.'],
+    '/update_keyword_bids_avg_position':['평균순위 입찰가 계산 중','목표 순위 기준으로 예상 입찰가를 계산하고 반영하고 있어요.'],
+    '/update_schedule':['시간대 설정 중','선택한 광고그룹의 시간대를 일괄 적용하고 있어요.'],
+    '/update_schedule_campaign_bulk':['캠페인 하위 광고그룹 시간대 설정 중','선택한 캠페인의 하위 광고그룹에 시간대를 적용하고 있어요.'],
+    '/set_campaign_state':['캠페인 상태 변경 중','선택한 캠페인의 ON/OFF 상태를 변경하고 있어요.'],
+    '/copy_campaigns':['캠페인 복사 중','선택한 캠페인을 복사하고 있어요.'],
+    '/copy_adgroups_to_target':['광고그룹 복사 중','선택한 광고그룹을 대상 캠페인으로 복사하고 있어요.'],
+    '/delete_selected':['삭제 처리 중','선택한 항목을 삭제하고 있어요.'],
+    '/bulk_register':['대량 등록 중','입력한 데이터를 순서대로 등록하고 있어요.'],
+    '/bulk_delete':['대량 삭제 중','입력한 데이터를 순서대로 삭제하고 있어요.']
+  };
+  return map[url] || ['실행 중입니다','요청을 처리하고 있어요. 잠시만 기다려주세요.'];
+}
+function showBusy(url){
+  pendingRequestCount += 1;
+  const [title, desc] = describeRequest(url);
+  const wrap = document.getElementById('global_loading');
+  const bar = document.getElementById('global_loading_bar');
+  const titleEl = document.getElementById('global_loading_title');
+  const descEl = document.getElementById('global_loading_desc');
+  if(titleEl) titleEl.textContent = title;
+  if(descEl) descEl.textContent = desc;
+  if(wrap) wrap.classList.add('show');
+  if(bar) bar.classList.add('show');
+  document.body.classList.add('is-busy');
+  const statusEl = document.getElementById('current_status');
+  if(statusEl) statusEl.textContent = `실행 중 · ${title}`;
+}
+function hideBusy(){
+  pendingRequestCount = Math.max(0, pendingRequestCount - 1);
+  if(pendingRequestCount > 0) return;
+  const wrap = document.getElementById('global_loading');
+  const bar = document.getElementById('global_loading_bar');
+  if(wrap) wrap.classList.remove('show');
+  if(bar) bar.classList.remove('show');
+  document.body.classList.remove('is-busy');
+  const statusEl = document.getElementById('current_status');
+  if(statusEl) statusEl.textContent = lastIdleStatus || '준비됨';
+}
+
 window.onload = async function(){
   const savedApi = localStorage.getItem('naver_api_key');
   const savedSecret = localStorage.getItem('naver_secret_key');
@@ -720,6 +803,7 @@ window.onload = async function(){
   const firstPaneBtn = document.querySelector('.workspace-tabs .tab.active');
   if(firstPaneBtn) switchWorkspace(firstPaneBtn.dataset.pane, firstPaneBtn);
   syncShoppingReferenceSelection();
+  setStatus('준비됨');
 }
 
 function formatWon(v){
@@ -860,14 +944,19 @@ function ensureReady(requireCampaign=false, requireAdgroup=false){
   return c;
 }
 async function postJson(url, body){
-  const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-  const text = await res.text();
-  let data = {};
-  try{ data = text ? JSON.parse(text) : {}; }catch(_e){ data = {error:text || `${res.status} ${res.statusText}`}; }
-  if(!res.ok){ throw new Error(data.error || data.details || `${res.status} ${res.statusText}`); }
-  return data;
+  showBusy(url);
+  try{
+    const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    const text = await res.text();
+    let data = {};
+    try{ data = text ? JSON.parse(text) : {}; }catch(_e){ data = {error:text || `${res.status} ${res.statusText}`}; }
+    if(!res.ok){ throw new Error(data.error || data.details || `${res.status} ${res.statusText}`); }
+    return data;
+  }finally{
+    hideBusy();
+  }
 }
-function setStatus(msg){ document.getElementById('current_status').textContent = msg; }
+function setStatus(msg){ lastIdleStatus = msg || '준비됨'; if(pendingRequestCount === 0){ document.getElementById('current_status').textContent = lastIdleStatus; } }
 function setLog(id, lines){ const el = document.getElementById(id); if(el) el.textContent = Array.isArray(lines) ? lines.join('\n') : (lines || ''); }
 function setActionLog(lines){ ['bidtime_log','ops_log'].forEach(id=>{ const el=document.getElementById(id); if(el) el.textContent = Array.isArray(lines) ? lines.join('\n') : (lines || ''); }); }
 function toggleScheduleDay(day){ if(selectedScheduleDays.has(day)) selectedScheduleDays.delete(day); else selectedScheduleDays.add(day); initScheduleControls(); }
@@ -1376,6 +1465,7 @@ function applyShoppingReferenceCandidates(ads){
   }
   renderShoppingRefChips();
   syncShoppingReferenceSelection();
+  setStatus('준비됨');
 }
 async function syncShoppingAdgroupContext(forceFetch=false){
   const select = document.getElementById('create_shopping_adgroup');
@@ -1411,6 +1501,7 @@ function pickShoppingRef(ref){
   const select = document.getElementById('create_shopping_ref_select');
   if(select) select.value = ref;
   syncShoppingReferenceSelection();
+  setStatus('준비됨');
 }
 function syncShoppingReferenceSelection(){
   const select = document.getElementById('create_shopping_ref_select');
