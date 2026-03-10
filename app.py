@@ -545,6 +545,17 @@ def _fetch_adgroup_detail(api_key: str, secret_key: str, cid: str, adgroup_id: s
     return res, None
 
 
+def _fetch_first_biz_channel_id(api_key: str, secret_key: str, cid: str) -> str:
+    res = _do_req("GET", api_key, secret_key, cid, "/ncc/channels")
+    if res.status_code != 200:
+        return ""
+    for item in (res.json() or []):
+        norm = _normalize_channel_item(item if isinstance(item, dict) else {})
+        cid_val = str(norm.get("id") or "").strip()
+        if cid_val:
+            return cid_val
+    return ""
+
 def _is_shopping_adgroup(adgroup_obj: Dict[str, Any] | None) -> bool:
     adg_type = str((adgroup_obj or {}).get("adgroupType") or "").upper()
     return adg_type in {"SHOPPING", "CATALOG", "SHOPPING_BRAND"}
@@ -641,9 +652,12 @@ def _fetch_restricted_keywords(api_key: str, secret_key: str, cid: str, adgroup_
     return res, []
 
 
-def _build_extension_payload(owner_id: str, ext_type: str, data: Dict[str, Any], customer_id: int) -> Dict[str, Any]:
+def _build_extension_payload(owner_id: str, ext_type: str, data: Dict[str, Any], customer_id: int, position: int | None = None) -> Dict[str, Any]:
     ext_type = _normalize_extension_type(ext_type)
     payload: Dict[str, Any] = {"ownerId": owner_id, "customerId": customer_id, "type": ext_type}
+    if position in {1, 2} and ext_type == "HEADLINE":
+        # 광고주센터 UI의 노출위치(1/2)는 추가제목 쪽에 맞춰 우선순위로 함께 전송
+        payload["priority"] = int(position)
     if ext_type == "HEADLINE":
         payload["adExtension"] = {"headline": str(data.get("headline") or "").strip()}
     elif ext_type in {"DESCRIPTION_EXTRA", "DESCRIPTION"}:
@@ -710,24 +724,37 @@ def _bulk_create_keywords(api_key: str, secret_key: str, cid: str, rows: List[Di
             continue
         grouped[adg_id].append((idx, payload))
 
+    batch_size = 30
     for adg_id, items in grouped.items():
-        payloads = [x[1] for x in items]
-        res = _do_req("POST", api_key, secret_key, cid, "/ncc/keywords", params={"nccAdgroupId": adg_id}, json_body=payloads)
-        if res.status_code in [200, 201]:
-            for idx, payload in items:
-                success += 1
-                results.append(_result_item(idx, True, str(payload.get("keyword")), "생성 완료"))
-        else:
-            for idx, payload in items:
-                single = _do_req("POST", api_key, secret_key, cid, "/ncc/keywords", params={"nccAdgroupId": adg_id}, json_body=payload)
-                if single.status_code in [200, 201]:
+        for start_idx in range(0, len(items), batch_size):
+            chunk = items[start_idx:start_idx + batch_size]
+            payloads = [x[1] for x in chunk]
+            res = _do_req("POST", api_key, secret_key, cid, "/ncc/keywords", params={"nccAdgroupId": adg_id}, json_body=payloads)
+            if res.status_code in [200, 201]:
+                for idx, payload in chunk:
                     success += 1
                     results.append(_result_item(idx, True, str(payload.get("keyword")), "생성 완료"))
-                else:
-                    fail += 1
-                    results.append(_result_item(idx, False, str(payload.get("keyword")), single.text))
+                continue
+            with ThreadPoolExecutor(max_workers=min(8, len(chunk))) as ex:
+                future_map = {
+                    ex.submit(_do_req, "POST", api_key, secret_key, cid, "/ncc/keywords", {"nccAdgroupId": adg_id}, payload): (idx, payload)
+                    for idx, payload in chunk
+                }
+                for fut in as_completed(future_map):
+                    idx, payload = future_map[fut]
+                    try:
+                        single = fut.result()
+                    except Exception as e:
+                        fail += 1
+                        results.append(_result_item(idx, False, str(payload.get("keyword")), str(e)))
+                        continue
+                    if single.status_code in [200, 201]:
+                        success += 1
+                        results.append(_result_item(idx, True, str(payload.get("keyword")), "생성 완료"))
+                    else:
+                        fail += 1
+                        results.append(_result_item(idx, False, str(payload.get("keyword")), single.text))
     return success, fail, sorted(results, key=lambda x: x["row_no"])
-
 
 def _post_one_ad(api_key: str, secret_key: str, cid: str, row_no: int, payload: Dict[str, Any]):
     adg_id = str(payload.get("nccAdgroupId") or "").strip()
@@ -904,10 +931,13 @@ def _bulk_create_restricted_keywords(api_key: str, secret_key: str, cid: str, ro
     return success, fail, sorted(results, key=lambda x: x["row_no"])
 
 
-def _copy_adgroup_children(api_key, secret_key, cid, old_adg_id, new_adg_id, biz_channel_id):
+def _copy_adgroup_children(api_key, secret_key, cid, old_adg_id, new_adg_id, biz_channel_id, include_keywords=True, include_ads=True, include_extensions=True, include_negatives=True):
     errors = []
-    r_kw = _do_req("GET", api_key, secret_key, cid, "/ncc/keywords", params={"nccAdgroupId": old_adg_id})
-    if r_kw.status_code == 200:
+    if include_keywords:
+        r_kw = _do_req("GET", api_key, secret_key, cid, "/ncc/keywords", params={"nccAdgroupId": old_adg_id})
+    else:
+        r_kw = None
+    if r_kw is not None and r_kw.status_code == 200:
         new_kws = []
         for kw in r_kw.json() or []:
             item = copy.deepcopy(kw)
@@ -925,8 +955,11 @@ def _copy_adgroup_children(api_key, secret_key, cid, old_adg_id, new_adg_id, biz
                         if r_single.status_code not in [200, 201]:
                             errors.append(f"키워드 에러: {r_single.text}")
 
-    r_ad = _do_req("GET", api_key, secret_key, cid, "/ncc/ads", params={"nccAdgroupId": old_adg_id})
-    if r_ad.status_code == 200:
+    if include_ads:
+        r_ad = _do_req("GET", api_key, secret_key, cid, "/ncc/ads", params={"nccAdgroupId": old_adg_id})
+    else:
+        r_ad = None
+    if r_ad is not None and r_ad.status_code == 200:
         ads = r_ad.json() or []
 
         def _post_ad(ad):
@@ -959,8 +992,11 @@ def _copy_adgroup_children(api_key, secret_key, cid, old_adg_id, new_adg_id, biz
                 if err_msg:
                     errors.append(err_msg)
 
-    r_ext = _do_req("GET", api_key, secret_key, cid, "/ncc/ad-extensions", params={"ownerId": old_adg_id})
-    if r_ext.status_code == 200:
+    if include_extensions:
+        r_ext = _do_req("GET", api_key, secret_key, cid, "/ncc/ad-extensions", params={"ownerId": old_adg_id})
+    else:
+        r_ext = None
+    if r_ext is not None and r_ext.status_code == 200:
         for ext in r_ext.json() or []:
             item = copy.deepcopy(ext)
             for k in ['adExtensionId', 'regTm', 'editTm', 'status', 'statusReason', 'inspectStatus', 'delFlag', 'referenceKey']:
@@ -974,10 +1010,13 @@ def _copy_adgroup_children(api_key, secret_key, cid, old_adg_id, new_adg_id, biz
                 errors.append(f"확장소재 에러: {res.text}")
 
     rk_list = []
-    r_rk = _do_req("GET", api_key, secret_key, cid, f"/ncc/adgroups/{old_adg_id}/restricted-keywords")
-    if r_rk.status_code == 200 and r_rk.json():
-        rk_list = r_rk.json()
+    if include_negatives:
+        r_rk = _do_req("GET", api_key, secret_key, cid, f"/ncc/adgroups/{old_adg_id}/restricted-keywords")
     else:
+        r_rk = None
+    if r_rk is not None and r_rk.status_code == 200 and r_rk.json():
+        rk_list = r_rk.json()
+    elif include_negatives:
         r_rk2 = _do_req("GET", api_key, secret_key, cid, "/ncc/restricted-keywords", params={"nccAdgroupId": old_adg_id})
         if r_rk2.status_code == 200 and r_rk2.json():
             rk_list = r_rk2.json()
@@ -1152,25 +1191,38 @@ def create_adgroup_simple():
     campaign_id = str(d.get("campaign_id") or "").strip()
     name = str(d.get("name") or "").strip()
     campaign_tp = _normalize_campaign_tp(d.get("campaign_tp"))
+    adgroup_tp = _normalize_adgroup_tp(d.get("adgroup_type"), campaign_tp)
     biz_channel_id = str(d.get("biz_channel_id") or "").strip()
     if not campaign_id or not name:
         return jsonify({"error": "캠페인과 광고그룹명은 필수입니다."}), 400
+    if campaign_tp == "WEB_SITE" and not biz_channel_id:
+        biz_channel_id = _fetch_first_biz_channel_id(d.get("api_key"), d.get("secret_key"), d.get("customer_id"))
+        if not biz_channel_id:
+            return jsonify({"error": "파워링크 광고그룹은 비즈채널이 필요합니다. 비즈채널을 먼저 선택하거나 생성해주세요."}), 400
     payload = {
         "customerId": int(d.get("customer_id")),
         "nccCampaignId": campaign_id,
         "name": name,
-        "adgroupType": _normalize_adgroup_tp(d.get("adgroup_type"), campaign_tp),
+        "adgroupType": adgroup_tp,
         "useDailyBudget": bool(d.get("use_daily_budget", True)),
         "dailyBudget": int(d.get("daily_budget") or 0),
         "bidAmt": int(d.get("bid_amt") or 70),
     }
-    if biz_channel_id:
+    if campaign_tp == "WEB_SITE" and biz_channel_id:
         payload["pcChannelId"] = biz_channel_id
         payload["mobileChannelId"] = biz_channel_id
     res = _do_req("POST", d.get("api_key"), d.get("secret_key"), d.get("customer_id"), "/ncc/adgroups", json_body=payload)
     if res.status_code in [200, 201]:
         return jsonify({"ok": True, "item": res.json(), "message": "광고그룹 생성 완료"})
-    return jsonify({"error": "광고그룹 생성 실패", "details": res.text, "payload": payload}), 400
+    detail = res.text
+    try:
+        j = res.json()
+        detail = j.get("title") or j.get("message") or detail
+        if j.get("detail"):
+            detail = f"{detail} | {j.get('detail')}"
+    except Exception:
+        pass
+    return jsonify({"error": "광고그룹 생성 실패", "details": detail, "payload": payload}), 400
 
 
 @app.route("/create_keywords_simple", methods=["POST"])
@@ -1191,16 +1243,77 @@ def create_keywords_simple():
     return jsonify({"ok": True, "total": len(rows), "success": success, "fail": fail, "results": results})
 
 
-@app.route("/create_text_ad_simple", methods=["POST"])
-def create_text_ad_simple():
-    d = request.json or {}
-    adgroup_id = str(d.get("adgroup_id") or "").strip()
-    headline = str(d.get("headline") or "").strip()
-    description = str(d.get("description") or "").strip()
-    pc_url = str(d.get("pc_url") or "").strip()
-    mobile_url = str(d.get("mobile_url") or "").strip() or pc_url
-    if not adgroup_id or not headline or not description or not pc_url or not mobile_url:
-        return jsonify({"error": "광고그룹, 제목, 설명, PC URL, 모바일 URL은 필수입니다."}), 400
+def _parse_target_ids(payload: Dict[str, Any], single_key: str, multi_key: str) -> List[str]:
+    ids: List[str] = []
+    raw_multi = payload.get(multi_key)
+    if isinstance(raw_multi, list):
+        ids.extend([str(x).strip() for x in raw_multi if str(x).strip()])
+    elif isinstance(raw_multi, str) and raw_multi.strip():
+        ids.extend([x.strip() for x in raw_multi.replace(",", "\n").splitlines() if x.strip()])
+    raw_single = str(payload.get(single_key) or "").strip()
+    if raw_single:
+        ids.append(raw_single)
+    uniq: List[str] = []
+    seen = set()
+    for x in ids:
+        if x not in seen:
+            seen.add(x)
+            uniq.append(x)
+    return uniq
+
+
+def _count_keyword_insertions(text_value: str) -> int:
+    return len(re.findall(r"\{키워드(?::[^}]+)?\}", str(text_value or "")))
+
+
+def _apply_keyword_insertion_template(text_value: str, replace_keyword: str) -> str:
+    text_value = str(text_value or "").strip()
+    if not text_value:
+        return text_value
+    if "{키워드}" in text_value:
+        if not replace_keyword:
+            raise ValueError("키워드삽입 사용 시 대체키워드를 입력해야 합니다.")
+        text_value = text_value.replace("{키워드}", f"{{키워드:{replace_keyword}}}")
+    return text_value
+
+
+def _visible_keyword_length(text_value: str) -> int:
+    text_value = str(text_value or "").strip()
+    # 대체키워드(:... 부분)는 글자수 제한에서 제외하고, {키워드} 토큰 길이만 반영합니다.
+    text_value = re.sub(r"\{키워드:[^}]+\}", "{키워드}", text_value)
+    return len(text_value)
+
+
+def _text_ad_length_errors(headline: str, description: str) -> List[str]:
+    errors: List[str] = []
+    headline = str(headline or "").strip()
+    description = str(description or "").strip()
+    headline_visible_len = _visible_keyword_length(headline)
+    description_visible_len = _visible_keyword_length(description)
+    if not (1 <= headline_visible_len <= 15):
+        errors.append(f"제목은 대체키워드 제외 기준 1~15자여야 합니다. (현재 {headline_visible_len}자)")
+    if not (20 <= description_visible_len <= 45):
+        errors.append(f"설명은 대체키워드 제외 기준 20~45자여야 합니다. (현재 {description_visible_len}자)")
+    return errors
+
+
+def _parse_extension_position(value: Any) -> int | None:
+    try:
+        pos = int(str(value or "").strip())
+    except Exception:
+        return None
+    return pos if pos in {1, 2} else None
+
+
+def _boolish(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {'1', 'true', 'y', 'yes', 'on'}
+
+
+def _create_text_ad_for_adgroup(d: Dict[str, Any], adgroup_id: str, headline: str, description: str, pc_url: str, mobile_url: str) -> Dict[str, Any]:
     payload = {
         "customerId": int(d.get("customer_id")),
         "nccAdgroupId": adgroup_id,
@@ -1214,9 +1327,105 @@ def create_text_ad_simple():
         },
     }
     res = _do_req("POST", d.get("api_key"), d.get("secret_key"), d.get("customer_id"), "/ncc/ads", params={"nccAdgroupId": adgroup_id}, json_body=payload)
-    if res.status_code in [200, 201]:
-        return jsonify({"ok": True, "item": res.json(), "message": "기본소재 생성 완료"})
-    return jsonify({"error": "소재 생성 실패", "details": res.text, "payload": payload}), 400
+    ok = res is not None and res.status_code in [200, 201]
+    return {
+        "ok": ok,
+        "adgroup_id": adgroup_id,
+        "detail": (res.text if res is not None else "응답 없음"),
+        "item": (res.json() if ok else None),
+    }
+
+
+def _create_shopping_ad_for_adgroup(d: Dict[str, Any], adgroup_id: str, reference_key: str, ad_type: str) -> Dict[str, Any]:
+    payload = {
+        "customerId": int(d.get("customer_id")),
+        "nccAdgroupId": adgroup_id,
+        "type": ad_type,
+        "referenceKey": reference_key,
+        "useGroupBidAmt": bool(d.get("use_group_bid_amt", True)),
+        "bidAmt": int(d.get("bid_amt") or 0),
+        "userLock": bool(d.get("user_lock", False)),
+        "ad": {},
+    }
+    res = _do_req("POST", d.get("api_key"), d.get("secret_key"), d.get("customer_id"), "/ncc/ads", params={"nccAdgroupId": adgroup_id, "isList": "true"}, json_body=[payload])
+    ok = res is not None and res.status_code in [200, 201]
+    return {
+        "ok": ok,
+        "adgroup_id": adgroup_id,
+        "detail": (res.text if res is not None else "응답 없음"),
+        "item": (res.json() if ok else None),
+    }
+
+
+def _create_extension_for_owner(d: Dict[str, Any], owner_id: str, ext_type: str, data: Dict[str, Any], position: int | None = None) -> Dict[str, Any]:
+    payload = _build_extension_payload(owner_id, ext_type, data, int(d.get("customer_id")), position=position)
+    if not payload.get("adExtension"):
+        return {"ok": False, "owner_id": owner_id, "detail": "확장소재 내용이 비어 있습니다."}
+    res = _do_req("POST", d.get("api_key"), d.get("secret_key"), d.get("customer_id"), "/ncc/ad-extensions", params={"ownerId": owner_id}, json_body=payload)
+    ok = res is not None and res.status_code in [200, 201]
+    return {
+        "ok": ok,
+        "owner_id": owner_id,
+        "detail": (res.text if res is not None else "응답 없음"),
+        "item": (res.json() if ok else None),
+    }
+
+
+@app.route("/create_text_ad_simple", methods=["POST"])
+def create_text_ad_simple():
+    d = request.json or {}
+    adgroup_ids = _parse_target_ids(d, "adgroup_id", "adgroup_ids")
+    raw_headline = str(d.get("headline") or d.get("headline_template") or "").strip()
+    raw_description = str(d.get("description") or d.get("description_template") or "").strip()
+    replace_keyword = str(d.get("replace_keyword") or "").strip()
+    pc_url = str(d.get("pc_url") or "").strip()
+    mobile_url = str(d.get("mobile_url") or "").strip() or pc_url
+    if not adgroup_ids or not raw_headline or not raw_description or not pc_url or not mobile_url:
+        return jsonify({"error": "광고그룹, 제목, 설명, PC URL, 모바일 URL은 필수입니다."}), 400
+    try:
+        headline = _apply_keyword_insertion_template(raw_headline, replace_keyword)
+        description = _apply_keyword_insertion_template(raw_description, replace_keyword)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    headline_insert_cnt = _count_keyword_insertions(headline)
+    desc_insert_cnt = _count_keyword_insertions(description)
+    if headline_insert_cnt > 1:
+        return jsonify({"error": "키워드삽입은 제목에 1회까지만 사용할 수 있습니다."}), 400
+    if desc_insert_cnt > 2:
+        return jsonify({"error": "키워드삽입은 설명에 2회까지만 사용할 수 있습니다."}), 400
+    length_errors = _text_ad_length_errors(headline, description)
+    if length_errors:
+        return jsonify({"error": " / ".join(length_errors), "headline": headline, "description": description}), 400
+
+    results = [_create_text_ad_for_adgroup(d, adg_id, headline, description, pc_url, mobile_url) for adg_id in adgroup_ids]
+    success = sum(1 for r in results if r.get("ok"))
+    fail = len(results) - success
+    if len(adgroup_ids) == 1:
+        r = results[0]
+        if r.get("ok"):
+            return jsonify({"ok": True, "item": r.get("item"), "message": "기본소재 생성 완료"})
+        payload = {
+            "customerId": int(d.get("customer_id")),
+            "nccAdgroupId": adgroup_ids[0],
+            "type": "TEXT_45",
+            "userLock": bool(d.get("user_lock", False)),
+            "ad": {
+                "headline": headline,
+                "description": description,
+                "pc": {"final": pc_url, "display": _display_url_from_final(pc_url)},
+                "mobile": {"final": mobile_url, "display": _display_url_from_final(mobile_url)},
+            },
+        }
+        return jsonify({"error": "소재 생성 실패", "details": r.get("detail"), "payload": payload}), 400
+    return jsonify({
+        "ok": True,
+        "total": len(results),
+        "success": success,
+        "fail": fail,
+        "results": results,
+        "message": f"기본소재 등록 완료 · 성공 {success}건 / 실패 {fail}건",
+    })
 
 
 @app.route("/create_ad_advanced", methods=["POST"])
@@ -1242,17 +1451,19 @@ def create_ad_advanced():
     return jsonify({"error": "고급 소재 생성 실패", "details": res.text, "payload": payload}), 400
 
 
+
 @app.route("/create_extension_simple", methods=["POST"])
 def create_extension_simple():
     d = request.json or {}
-    owner_id = str(d.get("owner_id") or "").strip()
+    owner_ids = _parse_target_ids(d, "owner_id", "owner_ids")
     ext_type = _normalize_extension_type(d.get("type"))
-    if not owner_id or not ext_type:
+    if not owner_ids or not ext_type:
         return jsonify({"error": "광고그룹과 확장소재 유형은 필수입니다."}), 400
     if ext_type not in {"HEADLINE", "DESCRIPTION_EXTRA", "DESCRIPTION", "SUB_LINKS"}:
         return jsonify({"error": "현재 간편 등록은 추가제목 / 홍보문구 / 추가설명 / 서브링크만 지원합니다."}), 400
 
     data: Dict[str, Any] = {}
+    position = _parse_extension_position(d.get("position"))
     if ext_type == "HEADLINE":
         headline = str(d.get("headline") or "").strip()
         if not headline or len(headline) > 15:
@@ -1287,37 +1498,77 @@ def create_extension_simple():
             return jsonify({"error": "서브링크는 최소 3개, 최대 4개까지 등록할 수 있습니다."}), 400
         data["links"] = links
 
-    payload = _build_extension_payload(owner_id, ext_type, data, int(d.get("customer_id")))
-    if not payload.get("adExtension"):
-        return jsonify({"error": "확장소재 내용이 비어 있습니다."}), 400
-    res = _do_req("POST", d.get("api_key"), d.get("secret_key"), d.get("customer_id"), "/ncc/ad-extensions", params={"ownerId": owner_id}, json_body=payload)
-    if res.status_code in [200, 201]:
-        return jsonify({"ok": True, "item": res.json(), "message": "확장소재 등록 완료"})
-    return jsonify({"error": "확장소재 등록 실패", "details": res.text, "payload": payload}), 400
+    results = []
+    success = fail = 0
+    for owner_id in owner_ids:
+        payload = _build_extension_payload(owner_id, ext_type, data, int(d.get("customer_id")), position=position)
+        if not payload.get("adExtension"):
+            results.append({"ok": False, "owner_id": owner_id, "detail": "확장소재 내용이 비어 있습니다."})
+            fail += 1
+            continue
+        res = _do_req("POST", d.get("api_key"), d.get("secret_key"), d.get("customer_id"), "/ncc/ad-extensions", params={"ownerId": owner_id}, json_body=payload)
+        if res.status_code in [200, 201]:
+            success += 1
+            item = None
+            try:
+                item = res.json()
+            except Exception:
+                item = None
+            results.append({"ok": True, "owner_id": owner_id, "detail": "등록 완료", "item": item})
+        else:
+            fail += 1
+            results.append({"ok": False, "owner_id": owner_id, "detail": res.text, "payload": payload})
+
+    if len(owner_ids) == 1:
+        r = results[0]
+        if r.get("ok"):
+            return jsonify({"ok": True, "item": r.get("item"), "message": "확장소재 등록 완료"})
+        return jsonify({"error": "확장소재 등록 실패", "details": r.get("detail"), "payload": r.get("payload")}), 400
+
+    return jsonify({
+        "ok": fail == 0,
+        "total": len(owner_ids),
+        "success": success,
+        "fail": fail,
+        "results": results,
+        "message": f"확장소재 등록 완료 (성공 {success}건 / 실패 {fail}건)"
+    })
 
 
 @app.route("/create_shopping_ad_simple", methods=["POST"])
 def create_shopping_ad_simple():
     d = request.json or {}
-    adgroup_id = str(d.get("adgroup_id") or "").strip()
+    adgroup_ids = _parse_target_ids(d, "adgroup_id", "adgroup_ids")
     reference_key = str(d.get("reference_key") or "").strip()
     ad_type = str(d.get("ad_type") or "SHOPPING_PRODUCT_AD").strip() or "SHOPPING_PRODUCT_AD"
-    if not adgroup_id or not reference_key:
+    if not adgroup_ids or not reference_key:
         return jsonify({"error": "광고그룹과 상품번호(referenceKey)는 필수입니다."}), 400
-    payload = {
-        "customerId": int(d.get("customer_id")),
-        "nccAdgroupId": adgroup_id,
-        "type": ad_type,
-        "referenceKey": reference_key,
-        "useGroupBidAmt": bool(d.get("use_group_bid_amt", True)),
-        "bidAmt": int(d.get("bid_amt") or 0),
-        "userLock": bool(d.get("user_lock", False)),
-        "ad": {},
-    }
-    res = _do_req("POST", d.get("api_key"), d.get("secret_key"), d.get("customer_id"), "/ncc/ads", params={"nccAdgroupId": adgroup_id, "isList": "true"}, json_body=[payload])
-    if res.status_code in [200, 201]:
-        return jsonify({"ok": True, "item": res.json(), "message": "쇼핑 소재 등록 완료"})
-    return jsonify({"error": "쇼핑 소재 등록 실패", "details": res.text, "payload": payload}), 400
+    results = [_create_shopping_ad_for_adgroup(d, adg_id, reference_key, ad_type) for adg_id in adgroup_ids]
+    success = sum(1 for r in results if r.get("ok"))
+    fail = len(results) - success
+    if len(adgroup_ids) == 1:
+        r = results[0]
+        if r.get("ok"):
+            return jsonify({"ok": True, "item": r.get("item"), "message": "쇼핑 소재 등록 완료"})
+        payload = {
+            "customerId": int(d.get("customer_id")),
+            "nccAdgroupId": adgroup_ids[0],
+            "type": ad_type,
+            "referenceKey": reference_key,
+            "useGroupBidAmt": bool(d.get("use_group_bid_amt", True)),
+            "bidAmt": int(d.get("bid_amt") or 0),
+            "userLock": bool(d.get("user_lock", False)),
+            "ad": {},
+        }
+        return jsonify({"error": "쇼핑 소재 등록 실패", "details": r.get("detail"), "payload": payload}), 400
+    return jsonify({
+        "ok": True,
+        "total": len(results),
+        "success": success,
+        "fail": fail,
+        "results": results,
+        "message": f"쇼핑 소재 등록 완료 · 성공 {success}건 / 실패 {fail}건",
+    })
 
 
 @app.route("/create_extension_raw", methods=["POST"])
@@ -1417,6 +1668,10 @@ def copy_adgroups_to_target():
     target_camp_id = d.get("target_campaign_id")
     suffix = d.get("suffix", "_복사본")
     biz_channel_id = d.get("biz_channel_id")
+    include_keywords = _boolish(d.get("include_keywords"), True)
+    include_ads = _boolish(d.get("include_ads"), True)
+    include_extensions = _boolish(d.get("include_extensions"), True)
+    include_negatives = _boolish(d.get("include_negatives"), True)
     results, all_errors = {"success": 0, "fail": 0}, []
     for src_id in src_ids:
         r_get = _do_req("GET", api_key, secret_key, cid, f"/ncc/adgroups/{src_id}")
@@ -1428,7 +1683,7 @@ def copy_adgroups_to_target():
         r_post = _do_req("POST", api_key, secret_key, cid, "/ncc/adgroups", json_body=new_adg)
         if r_post.status_code in [200, 201]:
             results["success"] += 1
-            errs = _copy_adgroup_children(api_key, secret_key, cid, src_id, r_post.json().get("nccAdgroupId"), biz_channel_id)
+            errs = _copy_adgroup_children(api_key, secret_key, cid, src_id, r_post.json().get("nccAdgroupId"), biz_channel_id, include_keywords=include_keywords, include_ads=include_ads, include_extensions=include_extensions, include_negatives=include_negatives)
             all_errors.extend([f"[{new_adg['name']}] {e}" for e in errs])
         else:
             results["fail"] += 1
@@ -1567,7 +1822,31 @@ def _resolve_web_site_adgroup_ids(api_key: str, secret_key: str, cid: str, entit
     return _unique_keep_order(adgroup_ids), skipped_non_web, warnings
 
 
-def _estimate_keyword_bids_by_avg_position(api_key: str, secret_key: str, cid: str, keyword_ids: List[str], device: str, position: int):
+def _normalize_bid_amt(value: Any, max_bid: Optional[int] = None) -> Optional[int]:
+    try:
+        bid = int(float(value))
+    except Exception:
+        return None
+    bid = int(round(bid / 10.0) * 10)
+    if max_bid is not None:
+        bid = min(bid, int(max_bid))
+    bid = max(70, min(100000, bid))
+    return bid
+
+
+def _is_keyword_editable_for_avg_position(row: Dict[str, Any], include_paused: bool = False, include_pending: bool = False):
+    if bool(row.get("delFlag")):
+        return False, "삭제됨"
+    status = str(row.get("status") or "").upper()
+    if (not include_paused) and status in {"PAUSE", "PAUSED", "STOP", "STOPPED", "LIMITEDBYBUDGET"}:
+        return False, f"상태:{status or 'PAUSE'}"
+    inspect = str(row.get("inspectStatus") or "").upper()
+    if (not include_pending) and inspect and inspect not in {"APPROVED", "NONE", "NORMAL"}:
+        return False, f"검수:{inspect}"
+    return True, ""
+
+
+def _estimate_keyword_bids_by_avg_position(api_key: str, secret_key: str, cid: str, keyword_ids: List[str], device: str, position: int, max_bid: Optional[int] = None):
     estimated: Dict[str, int] = {}
     warnings: List[str] = []
     device = str(device or "PC").upper()
@@ -1586,7 +1865,6 @@ def _estimate_keyword_bids_by_avg_position(api_key: str, secret_key: str, cid: s
         payload = res.json() or {}
         items = None
         if isinstance(payload, dict):
-            # 공식 릴리즈 노트 예시는 items, 실제 응답은 estimate 로 내려오는 경우도 방어
             items = payload.get("items")
             if not isinstance(items, list):
                 items = payload.get("estimate")
@@ -1598,18 +1876,20 @@ def _estimate_keyword_bids_by_avg_position(api_key: str, secret_key: str, cid: s
         for item in items:
             try:
                 key = str(item.get("key") or item.get("nccKeywordId") or "").strip()
-                bid = int(item.get("bid"))
+                bid = _normalize_bid_amt(item.get("bid"), max_bid=max_bid)
             except Exception:
-                continue
-            if key:
-                estimated[key] = max(70, bid)
+                bid = None
+                key = ""
+            if key and bid is not None:
+                estimated[key] = bid
     return estimated, warnings
 
 
-def _apply_keyword_bid_map(api_key: str, secret_key: str, cid: str, adgroup_ids: List[str], bid_map: Dict[str, int]):
+def _apply_keyword_bid_map(api_key: str, secret_key: str, cid: str, adgroup_ids: List[str], bid_map: Dict[str, int], keyword_meta: Optional[Dict[str, Dict[str, Any]]] = None):
     success_cnt = fail_cnt = skipped_cnt = 0
     err_details: List[str] = []
     cleanup_keys = ['regTm', 'editTm', 'status', 'statusReason', 'inspectStatus', 'delFlag', 'managedKeyword', 'referenceKey']
+    keyword_meta = keyword_meta or {}
     for adg_id in adgroup_ids:
         r_kw = _do_req("GET", api_key, secret_key, cid, "/ncc/keywords", params={"nccAdgroupId": adg_id})
         if r_kw.status_code != 200:
@@ -1626,9 +1906,16 @@ def _apply_keyword_bid_map(api_key: str, secret_key: str, cid: str, adgroup_ids:
             if kid not in bid_map:
                 skipped_cnt += 1
                 continue
+            target_bid = int(bid_map[kid])
+            meta = keyword_meta.get(kid, {})
+            current_bid = _normalize_bid_amt(meta.get("current_bid", kw.get("bidAmt")))
+            current_use_group = bool(meta.get("use_group_bid", kw.get("useGroupBidAmt")))
+            if (current_bid == target_bid) and (not current_use_group):
+                skipped_cnt += 1
+                continue
             item = copy.deepcopy(kw)
             item["useGroupBidAmt"] = False
-            item["bidAmt"] = int(bid_map[kid])
+            item["bidAmt"] = target_bid
             for k in cleanup_keys:
                 item.pop(k, None)
             update_payload.append(item)
@@ -1649,6 +1936,7 @@ def _apply_keyword_bid_map(api_key: str, secret_key: str, cid: str, adgroup_ids:
                         if len(err_details) < 5:
                             err_details.append(f"[{item.get('keyword', '알수없음')}] 변경 실패: {r_single.text}")
     return success_cnt, fail_cnt, skipped_cnt, err_details
+
 
 @app.route("/update_keyword_bids", methods=["POST"])
 def update_keyword_bids():
@@ -1714,6 +2002,17 @@ def update_keyword_bids_avg_position():
     entity_ids = d.get("entity_ids", []) or []
     device = str(d.get("device") or "PC").upper()
     position = int(d.get("position") or 1)
+    preview_only = bool(d.get("preview_only"))
+    include_paused = bool(d.get("include_paused"))
+    include_pending = bool(d.get("include_pending"))
+    max_bid_raw = d.get("max_bid")
+    max_bid = None
+    if str(max_bid_raw or "").strip() != "":
+        try:
+            max_bid = _normalize_bid_amt(max_bid_raw)
+        except Exception:
+            max_bid = None
+
     if device not in {"PC", "MOBILE"}:
         return jsonify({"error": "device는 PC 또는 MOBILE 이어야 합니다."}), 400
     max_position = 10 if device == "PC" else 5
@@ -1730,8 +2029,11 @@ def update_keyword_bids_avg_position():
         return jsonify({"error": msg}), 400
 
     keyword_ids: List[str] = []
+    keyword_meta: Dict[str, Dict[str, Any]] = {}
     keyword_count = 0
     fetch_fail = 0
+    skipped_paused = 0
+    skipped_pending = 0
     for adg_id in adgroup_ids:
         r_kw = _do_req("GET", api_key, secret_key, cid, "/ncc/keywords", params={"nccAdgroupId": adg_id})
         if r_kw.status_code != 200:
@@ -1741,13 +2043,30 @@ def update_keyword_bids_avg_position():
             continue
         rows = r_kw.json() or []
         keyword_count += len(rows)
-        keyword_ids.extend([str(x.get("nccKeywordId") or "").strip() for x in rows if str(x.get("nccKeywordId") or "").strip()])
+        for kw in rows:
+            kid = str(kw.get("nccKeywordId") or "").strip()
+            if not kid:
+                continue
+            ok, reason = _is_keyword_editable_for_avg_position(kw, include_paused=include_paused, include_pending=include_pending)
+            if not ok:
+                if str(reason).startswith("상태:"):
+                    skipped_paused += 1
+                else:
+                    skipped_pending += 1
+                continue
+            keyword_ids.append(kid)
+            keyword_meta[kid] = {
+                "keyword": str(kw.get("keyword") or ""),
+                "current_bid": kw.get("bidAmt"),
+                "use_group_bid": bool(kw.get("useGroupBidAmt")),
+                "adgroup_id": adg_id,
+            }
 
     keyword_ids = _unique_keep_order(keyword_ids)
     if not keyword_ids:
-        return jsonify({"error": "평균순위 추정에 사용할 키워드가 없습니다."}), 400
+        return jsonify({"error": "평균순위 추정에 사용할 활성 키워드가 없습니다."}), 400
 
-    estimated_bid_map, estimate_warnings = _estimate_keyword_bids_by_avg_position(api_key, secret_key, cid, keyword_ids, device, position)
+    estimated_bid_map, estimate_warnings = _estimate_keyword_bids_by_avg_position(api_key, secret_key, cid, keyword_ids, device, position, max_bid=max_bid)
     warnings.extend(estimate_warnings)
     if not estimated_bid_map:
         msg = f"{device} {position}위 평균순위 추정값을 받지 못했습니다."
@@ -1755,17 +2074,92 @@ def update_keyword_bids_avg_position():
             msg += "\n" + "\n".join(warnings[:5])
         return jsonify({"error": msg}), 400
 
-    success_cnt, fail_cnt, skipped_cnt, err_details = _apply_keyword_bid_map(api_key, secret_key, cid, adgroup_ids, estimated_bid_map)
+    preview_rows = []
+    changed_bids = []
+    unchanged_cnt = 0
+    for kid in keyword_ids:
+        if kid not in estimated_bid_map:
+            continue
+        meta = keyword_meta.get(kid, {})
+        current_bid = _normalize_bid_amt(meta.get("current_bid"))
+        new_bid = estimated_bid_map[kid]
+        will_change = (current_bid != new_bid) or bool(meta.get("use_group_bid"))
+        if will_change:
+            changed_bids.append(new_bid)
+        else:
+            unchanged_cnt += 1
+        if len(preview_rows) < 30:
+            preview_rows.append({
+                "keyword": meta.get("keyword") or kid,
+                "keyword_id": kid,
+                "current_bid": current_bid,
+                "new_bid": new_bid,
+                "use_group_bid": bool(meta.get("use_group_bid")),
+                "will_change": will_change,
+            })
+
+    def _calc_stats(values: List[int]):
+        if not values:
+            return {"min": None, "max": None, "median": None}
+        vals = sorted(values)
+        n = len(vals)
+        if n % 2:
+            median = vals[n // 2]
+        else:
+            median = int(round((vals[n // 2 - 1] + vals[n // 2]) / 2.0 / 10.0) * 10)
+        return {"min": vals[0], "max": vals[-1], "median": median}
+
+    stats = _calc_stats(list(estimated_bid_map.values()))
+    if preview_only:
+        lines = [
+            f"{device} 평균순위 {position}위 기준 변경사항 확인 완료",
+            f"추정 성공 키워드: {len(estimated_bid_map)}개 / 적용 대상 키워드: {len(keyword_ids)}개",
+            f"변경 예정: {len(changed_bids)}개 / 동일해서 유지: {unchanged_cnt}개",
+        ]
+        if stats["min"] is not None:
+            lines.append(f"예상 입찰가 범위: 최소 {stats['min']:,}원 · 중앙 {stats['median']:,}원 · 최대 {stats['max']:,}원")
+        if max_bid is not None:
+            lines.append(f"최대 입찰가 상한 적용: {max_bid:,}원")
+        if skipped_paused:
+            lines.append(f"중지 상태 제외: {skipped_paused}개")
+        if skipped_pending:
+            lines.append(f"검수보류/비승인 제외: {skipped_pending}개")
+        if skipped_non_web:
+            lines.append(f"쇼핑/기타 광고그룹 제외: {skipped_non_web}개")
+        for msg in warnings[:5]:
+            lines.append(msg)
+        return jsonify({
+            "ok": True,
+            "preview": True,
+            "message": "\n".join(lines),
+            "stats": stats,
+            "rows": preview_rows,
+            "estimated": len(estimated_bid_map),
+            "changed": len(changed_bids),
+            "unchanged": unchanged_cnt,
+            "skipped_paused": skipped_paused,
+            "skipped_pending": skipped_pending,
+        })
+
+    success_cnt, fail_cnt, skipped_cnt, err_details = _apply_keyword_bid_map(api_key, secret_key, cid, adgroup_ids, estimated_bid_map, keyword_meta=keyword_meta)
     lines = [
         f"{device} 평균순위 {position}위 기준 입찰가 적용 완료!",
         f"파워링크 광고그룹: {len(adgroup_ids)}개",
         f"추정 성공 키워드: {len(estimated_bid_map)}개 / 전체 조회 키워드: {keyword_count}개",
-        f"입찰가 변경 성공: {success_cnt}개 / 실패: {fail_cnt}개",
+        f"입찰가 변경 성공: {success_cnt}개 / 실패: {fail_cnt}개 / 동일해서 유지: {unchanged_cnt}개",
     ]
+    if stats["min"] is not None:
+        lines.append(f"예상 입찰가 범위: 최소 {stats['min']:,}원 · 중앙 {stats['median']:,}원 · 최대 {stats['max']:,}원")
+    if max_bid is not None:
+        lines.append(f"최대 입찰가 상한 적용: {max_bid:,}원")
     if skipped_non_web:
         lines.append(f"쇼핑/기타 광고그룹 건너뜀: {skipped_non_web}개")
     if fetch_fail:
         lines.append(f"키워드 조회 실패 광고그룹: {fetch_fail}개")
+    if skipped_paused:
+        lines.append(f"중지 상태 제외: {skipped_paused}개")
+    if skipped_pending:
+        lines.append(f"검수보류/비승인 제외: {skipped_pending}개")
     if skipped_cnt:
         lines.append(f"추정값 없음/변경 생략 키워드: {skipped_cnt}개")
     for msg in (warnings[:5] + err_details[:5]):
@@ -1778,6 +2172,8 @@ def update_keyword_bids_avg_position():
         "fail": fail_cnt,
         "skipped": skipped_cnt,
         "skipped_non_web": skipped_non_web,
+        "unchanged": unchanged_cnt,
+        "stats": stats,
     })
 
 def _delete_payload_rows(api_key: str, secret_key: str, cid: str, entity_type: str, rows: List[Dict[str, Any]]):
