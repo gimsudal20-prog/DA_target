@@ -13,7 +13,7 @@ import re
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Tuple, Optional
 from urllib.parse import urlparse
 
 import pandas as pd
@@ -416,7 +416,6 @@ def _prepare_payload_row(row: Dict[str, Any], entity_type: str, cid: str) -> Dic
     if entity_type == "adgroup":
         campaign_tp = _normalize_campaign_tp(payload.get("campaignTp") or payload.get("parentCampaignTp") or "")
         payload["adgroupType"] = _normalize_adgroup_tp(payload.get("adgroupType"), campaign_tp)
-        # 간편 비즈채널 매핑
         biz_channel_id = str(payload.get("nccBusinessChannelId") or "").strip()
         if biz_channel_id and _looks_like_biz_channel_id(biz_channel_id):
             payload.setdefault("pcChannelId", biz_channel_id)
@@ -597,6 +596,167 @@ def _fetch_target_restrict_object(api_key: str, secret_key: str, cid: str, owner
     return res, None
 
 
+def _fetch_target_object(api_key: str, secret_key: str, cid: str, owner_id: str, target_type: str):
+    res = _do_req("GET", api_key, secret_key, cid, "/ncc/targets", params={"ownerId": owner_id, "types": target_type})
+    if res.status_code != 200:
+        return res, None
+    data = res.json() or []
+    if isinstance(data, dict):
+        data = [data]
+    for item in data:
+        if isinstance(item, dict) and str(item.get("targetTp") or "").upper() == str(target_type or "").upper():
+            return res, item
+    return res, None
+
+
+def _get_pc_mobile_tuple(media_type: Any) -> Tuple[bool, bool]:
+    media = str(media_type or "ALL").strip().upper()
+    if media == "PC":
+        return True, False
+    if media == "MOBILE":
+        return False, True
+    return True, True
+
+
+def _normalize_media_detail(media_detail: Any) -> Dict[str, bool]:
+    raw = media_detail if isinstance(media_detail, dict) else {}
+    return {
+        "search_naver": _boolish(raw.get("search_naver"), True),
+        "search_partner": _boolish(raw.get("search_partner"), True),
+        "contents_naver": _boolish(raw.get("contents_naver"), True),
+        "contents_partner": _boolish(raw.get("contents_partner"), True),
+    }
+
+
+def _build_media_target_payload(media_detail: Any) -> Dict[str, Any]:
+    detail = _normalize_media_detail(media_detail)
+    search: List[str] = []
+    contents: List[str] = []
+    if detail["search_naver"]:
+        search.append("naver")
+    if detail["search_partner"]:
+        search.append("partner")
+    if detail["contents_naver"]:
+        contents.append("naver")
+    if detail["contents_partner"]:
+        contents.append("partner")
+    if len(search) == 2 and len(contents) == 2:
+        return {
+            "type": 1,
+            "search": [],
+            "contents": [],
+            "white": {"media": None, "mediaGroup": None},
+            "black": {"media": None, "mediaGroup": None},
+        }
+    if not search and not contents:
+        raise ValueError("세부 매체는 최소 1개 이상 선택해야 합니다.")
+    return {
+        "type": 2,
+        "search": search,
+        "contents": contents,
+        "black": {"media": [], "mediaGroup": []},
+        "white": {"media": None, "mediaGroup": None},
+    }
+
+
+def _update_pc_mobile_target(api_key: str, secret_key: str, cid: str, owner_id: str, media_type: Any):
+    pc, mobile = _get_pc_mobile_tuple(media_type)
+    res_target, target_obj = _fetch_target_object(api_key, secret_key, cid, owner_id, "PC_MOBILE_TARGET")
+    if res_target.status_code == 200 and target_obj and target_obj.get("nccTargetId"):
+        payload = {
+            "nccTargetId": target_obj.get("nccTargetId"),
+            "ownerId": owner_id,
+            "targetTp": "PC_MOBILE_TARGET",
+            "target": {"pc": pc, "mobile": mobile},
+            "delFlag": False,
+        }
+        res_put = _do_req("PUT", api_key, secret_key, cid, f"/ncc/targets/{target_obj.get('nccTargetId')}", json_body=payload)
+        if res_put.status_code in [200, 201]:
+            return True, "PC_MOBILE_TARGET 업데이트 완료"
+        fallback_detail = res_put.text
+    else:
+        fallback_detail = res_target.text if res_target is not None else "PC_MOBILE_TARGET 조회 실패"
+
+    # 하위 호환용 fallback
+    res_get = _do_req("GET", api_key, secret_key, cid, f"/ncc/adgroups/{owner_id}")
+    if res_get.status_code != 200:
+        return False, f"타겟/광고그룹 조회 실패: {fallback_detail}"
+    obj = res_get.json() or {}
+    obj["pcDevice"], obj["mobileDevice"] = pc, mobile
+    res_put2 = _do_req("PUT", api_key, secret_key, cid, f"/ncc/adgroups/{owner_id}", params={"fields": "pcDevice,mobileDevice"}, json_body=obj)
+    if res_put2.status_code in [200, 201]:
+        return True, "pcDevice/mobileDevice fallback 업데이트 완료"
+    return False, f"타겟/광고그룹 업데이트 실패: {fallback_detail} | {res_put2.text}"
+
+
+def _update_media_target(api_key: str, secret_key: str, cid: str, owner_id: str, media_detail: Any):
+    try:
+        target_payload = _build_media_target_payload(media_detail)
+    except ValueError as e:
+        return False, str(e)
+
+    res_target, target_obj = _fetch_target_object(api_key, secret_key, cid, owner_id, "MEDIA_TARGET")
+    if res_target.status_code == 200 and target_obj and target_obj.get("nccTargetId"):
+        payload = {
+            "nccTargetId": target_obj.get("nccTargetId"),
+            "ownerId": owner_id,
+            "targetTp": "MEDIA_TARGET",
+            "target": target_payload,
+            "delFlag": False,
+        }
+        res_put = _do_req("PUT", api_key, secret_key, cid, f"/ncc/targets/{target_obj.get('nccTargetId')}", json_body=payload)
+        if res_put.status_code in [200, 201]:
+            return True, "MEDIA_TARGET 업데이트 완료"
+        return False, res_put.text
+    fallback_detail = res_target.text if res_target is not None else "MEDIA_TARGET 조회 실패"
+    return False, f"MEDIA_TARGET 조회 실패: {fallback_detail}"
+
+
+def _update_adgroup_search_options(api_key: str, secret_key: str, cid: str, adgroup_id: str, use_keyword_plus: Optional[bool] = None, keyword_plus_weight: Optional[int] = None, use_close_variant: Optional[bool] = None):
+    if use_keyword_plus is None and keyword_plus_weight is None and use_close_variant is None:
+        return True, "변경사항 없음"
+    res_get = _do_req("GET", api_key, secret_key, cid, f"/ncc/adgroups/{adgroup_id}")
+    if res_get.status_code != 200:
+        return False, f"광고그룹 조회 실패: {res_get.text}"
+    obj = res_get.json() or {}
+    fields: List[str] = []
+    ignored_msgs: List[str] = []
+
+    if use_keyword_plus is not None:
+        obj["useKeywordPlus"] = bool(use_keyword_plus)
+        fields.append("useKeywordPlus")
+        if keyword_plus_weight is None:
+            keyword_plus_weight = int(obj.get("keywordPlusWeight") or 100)
+        try:
+            keyword_plus_weight = max(1, min(999999, int(keyword_plus_weight)))
+        except Exception:
+            keyword_plus_weight = 100
+        obj["keywordPlusWeight"] = int(keyword_plus_weight)
+        fields.append("keywordPlusWeight")
+    elif keyword_plus_weight is not None:
+        try:
+            keyword_plus_weight = max(1, min(999999, int(keyword_plus_weight)))
+        except Exception:
+            keyword_plus_weight = 100
+        obj["keywordPlusWeight"] = int(keyword_plus_weight)
+        fields.append("keywordPlusWeight")
+
+    if use_close_variant is not None:
+        ignored_msgs.append("일치검색은 API 수정 미지원으로 적용 제외")
+
+    fields = list(dict.fromkeys(fields))
+    if not fields:
+        return True, " / ".join(ignored_msgs) if ignored_msgs else "변경사항 없음"
+
+    res_put = _do_req("PUT", api_key, secret_key, cid, f"/ncc/adgroups/{adgroup_id}", params={"fields": ",".join(fields)}, json_body=obj)
+    if res_put.status_code in [200, 201]:
+        msg = "광고그룹 검색옵션 업데이트 완료"
+        if ignored_msgs:
+            msg += " / " + " / ".join(ignored_msgs)
+        return True, msg
+    return False, res_put.text
+
+
 def _extract_restricted_rows_from_target(target_obj: Dict[str, Any]) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     if not isinstance(target_obj, dict):
@@ -656,7 +816,6 @@ def _build_extension_payload(owner_id: str, ext_type: str, data: Dict[str, Any],
     ext_type = _normalize_extension_type(ext_type)
     payload: Dict[str, Any] = {"ownerId": owner_id, "customerId": customer_id, "type": ext_type}
     if position in {1, 2} and ext_type == "HEADLINE":
-        # 광고주센터 UI의 노출위치(1/2)는 추가제목 쪽에 맞춰 우선순위로 함께 전송
         payload["priority"] = int(position)
     if ext_type == "HEADLINE":
         payload["adExtension"] = {"headline": str(data.get("headline") or "").strip()}
@@ -1193,6 +1352,11 @@ def create_adgroup_simple():
     campaign_tp = _normalize_campaign_tp(d.get("campaign_tp"))
     adgroup_tp = _normalize_adgroup_tp(d.get("adgroup_type"), campaign_tp)
     biz_channel_id = str(d.get("biz_channel_id") or "").strip()
+    media_type = str(d.get("media_type") or "ALL").strip().upper()
+    media_detail = _normalize_media_detail(d.get("media_detail"))
+    use_keyword_plus = d.get("use_keyword_plus")
+    use_close_variant = d.get("use_close_variant")
+    keyword_plus_weight = d.get("keyword_plus_weight")
     if not campaign_id or not name:
         return jsonify({"error": "캠페인과 광고그룹명은 필수입니다."}), 400
     if campaign_tp == "WEB_SITE" and not biz_channel_id:
@@ -1213,7 +1377,32 @@ def create_adgroup_simple():
         payload["mobileChannelId"] = biz_channel_id
     res = _do_req("POST", d.get("api_key"), d.get("secret_key"), d.get("customer_id"), "/ncc/adgroups", json_body=payload)
     if res.status_code in [200, 201]:
-        return jsonify({"ok": True, "item": res.json(), "message": "광고그룹 생성 완료"})
+        item = res.json() or {}
+        new_adgroup_id = str(item.get("nccAdgroupId") or item.get("id") or "").strip()
+        warnings: List[str] = []
+        if new_adgroup_id:
+            ok_media_pm, detail_media_pm = _update_pc_mobile_target(d.get("api_key"), d.get("secret_key"), d.get("customer_id"), new_adgroup_id, media_type)
+            if not ok_media_pm:
+                warnings.append(f"PC/모바일 매체 적용 실패: {detail_media_pm}")
+            ok_media_network, detail_media_network = _update_media_target(d.get("api_key"), d.get("secret_key"), d.get("customer_id"), new_adgroup_id, media_detail)
+            if not ok_media_network:
+                warnings.append(f"세부 매체 적용 실패: {detail_media_network}")
+            if campaign_tp == "WEB_SITE":
+                ukp = None if use_keyword_plus is None else bool(use_keyword_plus)
+                ucv = None if use_close_variant is None else bool(use_close_variant)
+                kwp = None
+                if str(keyword_plus_weight or "").strip() != "":
+                    try:
+                        kwp = int(keyword_plus_weight)
+                    except Exception:
+                        kwp = None
+                ok_opts, detail_opts = _update_adgroup_search_options(d.get("api_key"), d.get("secret_key"), d.get("customer_id"), new_adgroup_id, use_keyword_plus=ukp, keyword_plus_weight=kwp, use_close_variant=ucv)
+                if not ok_opts:
+                    warnings.append(f"파워링크 검색옵션 적용 실패: {detail_opts}")
+        message = "광고그룹 생성 완료"
+        if warnings:
+            message += " (일부 후처리 실패)"
+        return jsonify({"ok": True, "item": item, "message": message, "warnings": warnings})
     detail = res.text
     try:
         j = res.json()
@@ -1279,7 +1468,6 @@ def _apply_keyword_insertion_template(text_value: str, replace_keyword: str) -> 
 
 def _visible_keyword_length(text_value: str) -> int:
     text_value = str(text_value or "").strip()
-    # 대체키워드(:... 부분)는 글자수 제한에서 제외하고, {키워드} 토큰 길이만 반영합니다.
     text_value = re.sub(r"\{키워드:[^}]+\}", "{키워드}", text_value)
     return len(text_value)
 
@@ -1691,11 +1879,107 @@ def copy_adgroups_to_target():
     return jsonify({"ok": True, "message": f"복사 완료! (성공: {results['success']}, 실패: {results['fail']})\n" + "\n".join(all_errors[:10])})
 
 
+@app.route("/update_media", methods=["POST"])
+def update_media():
+    d = request.json or {}
+    api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
+    entity_ids = [str(x).strip() for x in (d.get("entity_ids") or []) if str(x).strip()]
+    media_type = str(d.get("media_type") or "ALL").strip().upper()
+    media_detail = _normalize_media_detail(d.get("media_detail"))
+    if not entity_ids:
+        return jsonify({"error": "선택된 광고그룹이 없습니다."}), 400
+    results = []
+    success = fail = 0
+    for eid in entity_ids:
+        row_ok = True
+        row_msgs: List[str] = []
+        ok_pm, detail_pm = _update_pc_mobile_target(api_key, secret_key, cid, eid, media_type)
+        row_ok = row_ok and ok_pm
+        row_msgs.append(f"PC/모바일: {detail_pm}")
+        ok_media, detail_media = _update_media_target(api_key, secret_key, cid, eid, media_detail)
+        row_ok = row_ok and ok_media
+        row_msgs.append(f"세부매체: {detail_media}")
+        results.append({"nccAdgroupId": eid, "ok": row_ok, "detail": " | ".join(row_msgs)})
+        if row_ok:
+            success += 1
+        else:
+            fail += 1
+    status_code = 200 if success > 0 else 400
+    return jsonify({"ok": success > 0, "message": f"총 {len(entity_ids)}개 매체 변경 성공: {success}개 / 실패: {fail}개", "success": success, "fail": fail, "results": results}), status_code
+
+
+@app.route("/update_adgroup_options", methods=["POST"])
+def update_adgroup_options():
+    d = request.json or {}
+    api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
+    entity_ids = [str(x).strip() for x in (d.get("entity_ids") or []) if str(x).strip()]
+    media_type = d.get("media_type")
+    media_detail = _normalize_media_detail(d.get("media_detail"))
+    use_keyword_plus = d.get("use_keyword_plus")
+    use_close_variant = d.get("use_close_variant")
+    keyword_plus_weight = d.get("keyword_plus_weight")
+    if not entity_ids:
+        return jsonify({"error": "선택된 광고그룹이 없습니다."}), 400
+
+    results = []
+    success = fail = skipped = 0
+    for adg_id in entity_ids:
+        detail_res, adgroup_obj = _fetch_adgroup_detail(api_key, secret_key, cid, adg_id)
+        if detail_res.status_code != 200 or not adgroup_obj:
+            fail += 1
+            results.append({"nccAdgroupId": adg_id, "ok": False, "detail": f"광고그룹 조회 실패: {detail_res.text}"})
+            continue
+
+        row_msgs: List[str] = []
+        row_ok = True
+
+        if str(media_type or "").strip() != "" or d.get("media_detail") is not None:
+            ok_media_pm, detail_media_pm = _update_pc_mobile_target(api_key, secret_key, cid, adg_id, media_type or "ALL")
+            row_msgs.append(f"PC/모바일 매체: {detail_media_pm}")
+            row_ok = row_ok and ok_media_pm
+            ok_media_network, detail_media_network = _update_media_target(api_key, secret_key, cid, adg_id, media_detail)
+            row_msgs.append(f"세부 매체: {detail_media_network}")
+            row_ok = row_ok and ok_media_network
+
+        is_web_site = str(adgroup_obj.get("adgroupType") or "").upper() == "WEB_SITE"
+        if use_keyword_plus is not None or use_close_variant is not None or str(keyword_plus_weight or "").strip() != "":
+            if not is_web_site:
+                skipped += 1
+                row_msgs.append("파워링크 그룹이 아니어서 확장검색/일치검색은 건너뜀")
+            else:
+                kwp = None
+                if str(keyword_plus_weight or "").strip() != "":
+                    try:
+                        kwp = int(keyword_plus_weight)
+                    except Exception:
+                        kwp = None
+                ok_opts, detail_opts = _update_adgroup_search_options(api_key, secret_key, cid, adg_id, use_keyword_plus=None if use_keyword_plus is None else bool(use_keyword_plus), keyword_plus_weight=kwp, use_close_variant=None if use_close_variant is None else bool(use_close_variant))
+                row_msgs.append(f"검색옵션: {detail_opts}")
+                row_ok = row_ok and ok_opts
+
+        if row_ok:
+            success += 1
+        else:
+            fail += 1
+        results.append({"nccAdgroupId": adg_id, "ok": row_ok, "detail": " | ".join(row_msgs) if row_msgs else "변경 완료"})
+
+    status_code = 200 if success > 0 else 400
+    return jsonify({
+        "ok": success > 0,
+        "message": f"총 {len(entity_ids)}개 광고그룹 설정 변경 완료 · 성공 {success}개 / 실패 {fail}개 / 건너뜀 {skipped}개",
+        "success": success,
+        "fail": fail,
+        "skipped": skipped,
+        "results": results,
+    }), status_code
+
+
 @app.route("/update_budget", methods=["POST"])
 def update_budget():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
     entity_type, entity_ids, budget = d.get("entity_type"), d.get("entity_ids", []), int(d.get("budget", 0))
+    use_daily_budget = bool(d.get("use_daily_budget", budget > 0))
     results = {"success": 0, "fail": 0}
     for eid in entity_ids:
         uri = f"/ncc/campaigns/{str(eid).strip()}" if entity_type == "campaign" else f"/ncc/adgroups/{str(eid).strip()}"
@@ -1704,7 +1988,8 @@ def update_budget():
             results["fail"] += 1
             continue
         obj = r_get.json()
-        obj["useDailyBudget"], obj["dailyBudget"] = (budget > 0), budget
+        obj["useDailyBudget"] = use_daily_budget
+        obj["dailyBudget"] = budget if use_daily_budget else 0
         if "budget" in obj:
             del obj["budget"]
         r_put = _do_req("PUT", api_key, secret_key, cid, uri, params={"fields": "budget"}, json_body=obj)
@@ -1715,69 +2000,277 @@ def update_budget():
     return jsonify({"ok": True, "message": f"총 {len(entity_ids)}개 예산 업데이트 성공: {results['success']}개 / 실패: {results['fail']}개"})
 
 
+def _normalize_schedule_days(values: Any) -> List[int]:
+    out: List[int] = []
+    if not isinstance(values, list):
+        return out
+    for v in values:
+        try:
+            n = int(v)
+        except Exception:
+            continue
+        if n in DAY_NUM_TO_CODE and n not in out:
+            out.append(n)
+    return out
+
+
+def _normalize_schedule_hours(values: Any) -> List[int]:
+    raw: List[int] = []
+    if not isinstance(values, list):
+        return raw
+    uniq: List[int] = []
+    seen = set()
+    for v in values:
+        try:
+            n = int(v)
+        except Exception:
+            continue
+        if 0 <= n <= 23 and n not in seen:
+            seen.add(n)
+            uniq.append(n)
+    uniq.sort()
+
+    if not uniq:
+        return []
+
+    is_contiguous = len(uniq) >= 2 and all(uniq[i] == uniq[i - 1] + 1 for i in range(1, len(uniq)))
+    if is_contiguous:
+        return uniq[:-1]
+
+    return uniq
+
+
+def _build_schedule_codes(days: List[int], hours: List[int]) -> List[str]:
+    codes: List[str] = []
+    for d_num in days:
+        day_code = DAY_NUM_TO_CODE.get(int(d_num))
+        if not day_code:
+            continue
+        for h in hours:
+            start_h = int(h)
+            end_h = start_h + 1
+            if 0 <= start_h <= 23 and 1 <= end_h <= 24:
+                codes.append(f"SD{day_code}{start_h:02d}{end_h:02d}")
+    return codes
+
+
 @app.route("/update_schedule", methods=["POST"])
 def update_schedule():
-    d = request.json or {}
-    api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
-    adgroup_ids = d.get("adgroup_ids", [])
-    days, hours, bid_weight = d.get("days", []), d.get("hours", []), int(d.get("bidWeight", 100))
-    codes = [f"SD{DAY_NUM_TO_CODE[int(d_num)]}{int(h):02d}{(int(h) + 1):02d}" for d_num in days for h in hours]
-    results = {"success": 0, "fail": 0}
+    d = request.get_json(silent=True) or {}
+    api_key = d.get("api_key")
+    secret_key = d.get("secret_key")
+    cid = d.get("customer_id")
+
+    adgroup_ids = _unique_keep_order([str(x).strip() for x in (d.get("adgroup_ids") or []) if str(x).strip()])
+    days = _normalize_schedule_days(d.get("days") or [])
+
+    raw_hours = []
+    for x in (d.get("hours") or []):
+        try:
+            n = int(x)
+        except Exception:
+            continue
+        if 0 <= n <= 23:
+            raw_hours.append(n)
+    raw_hours = sorted(set(raw_hours))
+    hours = _normalize_schedule_hours(d.get("hours") or [])
+
+    try:
+        bid_weight = int(d.get("bidWeight", 100))
+    except Exception:
+        bid_weight = 100
+
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API Key / Secret Key / Customer ID가 필요합니다."}), 400
+    if not adgroup_ids:
+        return jsonify({"error": "광고그룹이 선택되지 않았습니다."}), 400
+    if not days:
+        return jsonify({"error": "요일을 1개 이상 선택해주세요."}), 400
+    if not raw_hours:
+        return jsonify({"error": "시간을 1개 이상 선택해주세요."}), 400
+    if not hours:
+        return jsonify({"error": "연속 시간 선택 시 마지막 시간은 종료시각으로 처리됩니다. 예: 8~20 선택 → 실제 적용 8~19"}), 400
+
+    codes = _build_schedule_codes(days, hours)
+
+    results = []
+    success = 0
+    fail = 0
+
     for owner_id in adgroup_ids:
         owner_id = str(owner_id).strip()
         uri = f"/ncc/criterion/{owner_id}/SD"
         target_body = [{"customerId": int(cid), "ownerId": owner_id, "dictionaryCode": c, "type": "SD"} for c in codes]
+
         put_res = _do_req("PUT", api_key, secret_key, cid, uri, json_body=target_body)
         if put_res.status_code != 200:
-            results["fail"] += 1
+            fail += 1
+            results.append({
+                "ownerId": owner_id,
+                "ok": False,
+                "step": "criterion_put",
+                "details": put_res.text,
+                "codes": codes,
+            })
             continue
-        bid_fail = False
-        if codes:
+
+        if bid_weight != 100 and codes:
+            bid_fail = False
+            bid_error_text = ""
             for i in range(0, len(codes), 50):
-                bw_res = _do_req("PUT", api_key, secret_key, cid, f"/ncc/criterion/{owner_id}/bidWeight", params={"codes": ",".join(codes[i:i + 50]), "bidWeight": bid_weight})
+                chunk = codes[i:i + 50]
+                bw_res = _do_req(
+                    "PUT",
+                    api_key,
+                    secret_key,
+                    cid,
+                    f"/ncc/criterion/{owner_id}/bidWeight",
+                    params={"codes": ",".join(chunk), "bidWeight": bid_weight},
+                )
                 if bw_res.status_code != 200:
                     bid_fail = True
+                    bid_error_text = bw_res.text
                     break
-        if bid_fail:
-            results["fail"] += 1
-        else:
-            results["success"] += 1
-    return jsonify({"ok": True, "message": f"총 {len(adgroup_ids)}개 스케줄 업데이트 성공: {results['success']}개 / 실패: {results['fail']}개"})
+            if bid_fail:
+                fail += 1
+                results.append({
+                    "ownerId": owner_id,
+                    "ok": False,
+                    "step": "bid_weight_put",
+                    "details": bid_error_text,
+                    "codes": codes,
+                })
+                continue
+
+        success += 1
+        results.append({"ownerId": owner_id, "ok": True, "codes": codes})
+
+    status_code = 200 if success > 0 else 400
+    return jsonify({
+        "ok": success > 0,
+        "message": f"총 {len(adgroup_ids)}개 스케줄 업데이트 성공: {success}개 / 실패: {fail}개",
+        "success": success,
+        "fail": fail,
+        "raw_hours": raw_hours,
+        "applied_hours": hours,
+        "results": results[:20],
+    }), status_code
 
 
 @app.route("/update_schedule_campaign_bulk", methods=["POST"])
 def update_schedule_campaign_bulk():
-    d = request.json or {}
-    api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
-    campaign_ids = d.get("campaign_ids", [])
-    days, hours, bid_weight = d.get("days", []), d.get("hours", []), int(d.get("bidWeight", 100))
+    d = request.get_json(silent=True) or {}
+    api_key = d.get("api_key")
+    secret_key = d.get("secret_key")
+    cid = d.get("customer_id")
+
+    campaign_ids = _unique_keep_order([str(x).strip() for x in (d.get("campaign_ids") or []) if str(x).strip()])
+    days = _normalize_schedule_days(d.get("days") or [])
+
+    raw_hours = []
+    for x in (d.get("hours") or []):
+        try:
+            n = int(x)
+        except Exception:
+            continue
+        if 0 <= n <= 23:
+            raw_hours.append(n)
+    raw_hours = sorted(set(raw_hours))
+    hours = _normalize_schedule_hours(d.get("hours") or [])
+
+    try:
+        bid_weight = int(d.get("bidWeight", 100))
+    except Exception:
+        bid_weight = 100
+
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API Key / Secret Key / Customer ID가 필요합니다."}), 400
+    if not campaign_ids:
+        return jsonify({"error": "캠페인이 선택되지 않았습니다."}), 400
+    if not days:
+        return jsonify({"error": "요일을 1개 이상 선택해주세요."}), 400
+    if not raw_hours:
+        return jsonify({"error": "시간을 1개 이상 선택해주세요."}), 400
+    if not hours:
+        return jsonify({"error": "연속 시간 선택 시 마지막 시간은 종료시각으로 처리됩니다. 예: 8~20 선택 → 실제 적용 8~19"}), 400
+
     adgroup_ids = []
+    fetch_errors = []
     for camp_id in campaign_ids:
         r_adgs = _do_req("GET", api_key, secret_key, cid, "/ncc/adgroups", params={"nccCampaignId": camp_id})
         if r_adgs.status_code == 200:
-            adgroup_ids.extend([adg.get("nccAdgroupId") for adg in r_adgs.json() or []])
-    codes = [f"SD{DAY_NUM_TO_CODE[int(d_num)]}{int(h):02d}{(int(h) + 1):02d}" for d_num in days for h in hours]
-    results = {"success": 0, "fail": 0}
+            adgroup_ids.extend([adg.get("nccAdgroupId") for adg in r_adgs.json() or [] if adg.get("nccAdgroupId")])
+        else:
+            fetch_errors.append(f"[{camp_id}] {r_adgs.text}")
+
+    adgroup_ids = _unique_keep_order(adgroup_ids)
+    if not adgroup_ids:
+        return jsonify({"error": "하위 광고그룹을 불러오지 못했습니다.", "details": fetch_errors[:10]}), 400
+
+    codes = _build_schedule_codes(days, hours)
+
+    results = []
+    success = 0
+    fail = 0
     for owner_id in adgroup_ids:
         owner_id = str(owner_id).strip()
         uri = f"/ncc/criterion/{owner_id}/SD"
         target_body = [{"customerId": int(cid), "ownerId": owner_id, "dictionaryCode": c, "type": "SD"} for c in codes]
+
         put_res = _do_req("PUT", api_key, secret_key, cid, uri, json_body=target_body)
         if put_res.status_code != 200:
-            results["fail"] += 1
+            fail += 1
+            results.append({
+                "ownerId": owner_id,
+                "ok": False,
+                "step": "criterion_put",
+                "details": put_res.text,
+                "codes": codes,
+            })
             continue
-        bid_fail = False
-        if codes:
+
+        if bid_weight != 100 and codes:
+            bid_fail = False
+            bid_error_text = ""
             for i in range(0, len(codes), 50):
-                bw_res = _do_req("PUT", api_key, secret_key, cid, f"/ncc/criterion/{owner_id}/bidWeight", params={"codes": ",".join(codes[i:i + 50]), "bidWeight": bid_weight})
+                chunk = codes[i:i + 50]
+                bw_res = _do_req(
+                    "PUT",
+                    api_key,
+                    secret_key,
+                    cid,
+                    f"/ncc/criterion/{owner_id}/bidWeight",
+                    params={"codes": ",".join(chunk), "bidWeight": bid_weight},
+                )
                 if bw_res.status_code != 200:
                     bid_fail = True
+                    bid_error_text = bw_res.text
                     break
-        if bid_fail:
-            results["fail"] += 1
-        else:
-            results["success"] += 1
-    return jsonify({"ok": True, "message": f"하위 광고그룹 총 {len(adgroup_ids)}개 스케줄 변경 성공: {results['success']}개 / 실패: {results['fail']}개"})
+            if bid_fail:
+                fail += 1
+                results.append({
+                    "ownerId": owner_id,
+                    "ok": False,
+                    "step": "bid_weight_put",
+                    "details": bid_error_text,
+                    "codes": codes,
+                })
+                continue
+
+        success += 1
+        results.append({"ownerId": owner_id, "ok": True, "codes": codes})
+
+    status_code = 200 if success > 0 else 400
+    return jsonify({
+        "ok": success > 0,
+        "message": f"하위 광고그룹 총 {len(adgroup_ids)}개 스케줄 변경 성공: {success}개 / 실패: {fail}개",
+        "success": success,
+        "fail": fail,
+        "raw_hours": raw_hours,
+        "applied_hours": hours,
+        "fetch_errors": fetch_errors[:10],
+        "results": results[:20],
+    }), status_code
 
 
 
