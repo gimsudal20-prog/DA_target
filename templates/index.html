@@ -26,8 +26,13 @@
     .account-item { padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.02); margin-bottom: 8px; cursor: pointer; transition: 0.2s; }
     .account-item:hover { background: rgba(255,255,255,0.08); }
     .account-item.active { background: rgba(37,99,235,0.3); border-color: rgba(96,165,250,0.5); }
-    .account-item .name { font-weight: bold; font-size: 13px; }
+    .account-item .row { display: flex; align-items: flex-start; gap: 8px; }
+    .account-item .main { flex: 1; min-width: 0; }
+    .account-item .name { font-weight: bold; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .account-item .sub { font-size: 11px; color: #9ca3af; margin-top: 4px; }
+    .account-pin { width: 28px; height: 28px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.04); color: #9ca3af; cursor: pointer; flex-shrink: 0; transition: 0.2s; }
+    .account-pin:hover { background: rgba(255,255,255,0.12); color: #fbbf24; }
+    .account-pin.active { background: rgba(245,158,11,0.18); border-color: rgba(251,191,36,0.45); color: #fbbf24; }
     
     /* 2. Master Panel */
     .master-panel { width: 380px; background: #fff; border-right: 1px solid var(--line); display: flex; flex-direction: column; flex-shrink: 0; }
@@ -91,6 +96,10 @@
     
     .tab-content { display: none; }
     .tab-content.active { display: block; }
+
+    .quick-select-row { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 12px; }
+    .type-select-btn { background: #fff; border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .type-select-btn:hover { background: #f8fafc; color: var(--text); border-color: #cbd5e1; }
     
     /* Schedule Grid */
     .schedule-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
@@ -154,11 +163,21 @@
           <div style="display:flex; align-items:center; gap:6px;"><input type="checkbox" id="camp_select_all" onclick="toggleSelectAll('campaign')"> 캠페인</div>
           <span id="master_camp_count" class="badge blue">0</span>
         </div>
+        <div class="quick-select-row">
+          <button class="type-select-btn" type="button" onclick="selectByType('campaign', 'WEB_SITE')">파워링크 전체선택</button>
+          <button class="type-select-btn" type="button" onclick="selectByType('campaign', 'SHOPPING')">쇼핑검색 전체선택</button>
+          <button class="type-select-btn" type="button" onclick="clearSelectionByType('campaign')">선택해제</button>
+        </div>
         <div id="campaign_list"><div style="padding: 20px; text-align: center; color: var(--muted); font-size: 12px;">광고주를 선택해주세요.</div></div>
 
         <div class="list-group-title" style="margin-top: 24px; border-top: 1px solid var(--line); padding-top: 16px;">
           <div style="display:flex; align-items:center; gap:6px;"><input type="checkbox" id="adg_select_all" onclick="toggleSelectAll('adgroup')"> 광고그룹</div>
           <span id="master_adg_count" class="badge green">0</span>
+        </div>
+        <div class="quick-select-row">
+          <button class="type-select-btn" type="button" onclick="selectByType('adgroup', 'WEB_SITE')">파워링크 전체선택</button>
+          <button class="type-select-btn" type="button" onclick="selectByType('adgroup', 'SHOPPING_LIKE')">쇼핑검색 전체선택</button>
+          <button class="type-select-btn" type="button" onclick="clearSelectionByType('adgroup')">선택해제</button>
         </div>
         <div id="adgroup_list"><div style="padding: 20px; text-align: center; color: var(--muted); font-size: 12px;">캠페인을 선택하면 표시됩니다.</div></div>
       </div>
@@ -199,7 +218,19 @@
             <div style="border: 1px solid var(--line); border-radius: 8px; max-height: 500px; overflow-y: auto;">
                 <div id="sub_kw" class="tab-content active"><div id="table_keywords" style="padding: 20px; text-align: center; color: var(--muted);">데이터가 없습니다.</div></div>
                 <div id="sub_ad" class="tab-content"><div id="table_ads" style="padding: 20px; text-align: center; color: var(--muted);">데이터가 없습니다.</div></div>
-                <div id="sub_ext" class="tab-content"><div id="table_exts" style="padding: 20px; text-align: center; color: var(--muted);">데이터가 없습니다.</div></div>
+                <div id="sub_ext" class="tab-content">
+                    <div style="padding:12px; border-bottom:1px solid var(--line); display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                        <label style="font-size:12px; color:var(--muted);">추가제목 노출위치 필터</label>
+                        <select id="ext_pin_filter" onchange="renderExtensionTable()" style="max-width:220px;">
+                            <option value="ALL">전체</option>
+                            <option value="PIN1">위치1만</option>
+                            <option value="PIN2">위치2만</option>
+                            <option value="PIN0">모든 위치(핀 없음)</option>
+                        </select>
+                        <span id="ext_filter_result_count" style="font-size:12px; color:var(--muted);">0건</span>
+                    </div>
+                    <div id="table_exts" style="padding: 20px; text-align: center; color: var(--muted);">데이터가 없습니다.</div>
+                </div>
                 <div id="sub_neg" class="tab-content"><div id="table_negatives" style="padding: 20px; text-align: center; color: var(--muted);">데이터가 없습니다.</div></div>
             </div>
           </div>
@@ -294,13 +325,18 @@
                             <label>설명 (최대 45자)</label>
                             <input type="text" id="create_ad_desc" placeholder="예: 빠르고 정확한 서비스를 제공합니다.">
                         </div>
+                        <div class="btn-row" style="margin-top:-6px; margin-bottom:12px;">
+                            <button type="button" class="btn btn-sub" style="padding:6px 10px; font-size:12px;" onclick="insertKeywordToken('create_ad_headline')">제목 키워드삽입</button>
+                            <button type="button" class="btn btn-sub" style="padding:6px 10px; font-size:12px;" onclick="insertKeywordToken('create_ad_desc')">설명 키워드삽입</button>
+                        </div>
                         <div class="form-group">
                             <label>대체키워드 (키워드삽입용)</label>
                             <input type="text" id="create_ad_replace_keyword" placeholder="대체키워드 입력">
+                            <div class="field-help">위 버튼으로 {키워드}를 넣고, 대체키워드에는 실제 치환될 기본 문구를 입력합니다.</div>
                         </div>
                         <div class="grid-2">
-                            <div class="form-group"><label>PC URL</label><input type="text" id="create_ad_pc" placeholder="https://..."></div>
-                            <div class="form-group"><label>Mobile URL</label><input type="text" id="create_ad_mobile" placeholder="https://..."></div>
+                            <div class="form-group"><label>PC 연결 URL</label><input type="text" id="create_ad_pc" placeholder="https://..."></div>
+                            <div class="form-group"><label>모바일 연결 URL</label><input type="text" id="create_ad_mobile" placeholder="https://..."></div>
                         </div>
                         <label style="display:flex; gap:6px; font-size:12px; margin-bottom:12px; color:var(--muted);"><input type="checkbox" id="create_ad_multi"> 좌측에서 선택(체크)한 광고그룹 전체에 동일 소재 등록</label>
                         <button class="btn btn-primary" style="width: 100%;" onclick="createTextAd()">소재 등록</button>
@@ -333,6 +369,8 @@
                             <select id="create_ext_type" onchange="syncExtensionForm()">
                                 <option value="HEADLINE">추가제목</option>
                                 <option value="DESCRIPTION_EXTRA">홍보문구</option>
+                                <option value="SHOPPING_PROMO_TEXT">쇼핑 추가홍보문구</option>
+                                <option value="SHOPPING_EXTRA">쇼핑상품부가정보</option>
                                 <option value="DESCRIPTION">추가설명</option>
                                 <option value="SUB_LINKS">서브링크</option>
                             </select>
@@ -351,6 +389,13 @@
 
                         <div id="ext_position_wrap"><div class="form-group"><label>노출 위치</label><select id="create_ext_position"><option value="1">1번</option><option value="2">2번</option></select></div></div>
                         <div id="ext_headline_wrap" class="form-group"><label>내용 (문구)</label><input type="text" id="create_ext_text" placeholder="내용 입력"></div>
+                        <div id="ext_shopping_promo_wrap" style="display:none;">
+                            <div class="grid-2" style="grid-template-columns: 1fr 1fr;">
+                                <div class="form-group"><label>문구 1</label><input type="text" id="create_ext_basic_text" placeholder="10자 이내" maxlength="10"></div>
+                                <div class="form-group"><label>문구 2</label><input type="text" id="create_ext_additional_text" placeholder="30자 이내" maxlength="30"></div>
+                            </div>
+                            <div class="field-help">문구 1은 필수, 문구 2는 선택입니다.</div>
+                        </div>
                         
                         <div id="ext_sublinks_wrap" style="display:none;">
                             <div class="field-help">서브링크명 및 URL을 입력하세요. (최소 3개)</div>
@@ -361,7 +406,8 @@
                                 <div class="form-group"><label>이름 4</label><input type="text" id="ext_link_name_4"></div><div class="form-group"><label>URL 4</label><input type="text" id="ext_link_url_4"></div>
                             </div>
                         </div>
-                        <label style="display:flex; gap:6px; font-size:12px; margin-bottom:12px; color:var(--muted);"><input type="checkbox" id="create_ext_multi"> 좌측에서 선택(체크)한 그룹 전체 등록</label>
+                        <label style="display:flex; gap:6px; font-size:12px; margin-bottom:8px; color:var(--muted);"><input type="checkbox" id="create_ext_multi"> 좌측에서 선택(체크)한 그룹 전체 등록</label>
+                        <label style="display:flex; gap:6px; font-size:12px; margin-bottom:12px; color:var(--muted);"><input type="checkbox" id="create_ext_campaign_multi"> 좌측에서 선택(체크)한 캠페인 전체 적용</label>
                         <button class="btn btn-primary" style="width: 100%;" onclick="createExtensionEasy()">확장소재 등록</button>
                     </div>
 
@@ -373,6 +419,8 @@
                             <label>제외키워드 (엔터로 구분)</label>
                             <textarea id="create_negative_text" rows="5" placeholder="무료&#10;중고"></textarea>
                         </div>
+                        <label style="display:flex; gap:6px; font-size:12px; margin-bottom:8px; color:var(--muted);"><input type="checkbox" id="create_negative_multi"> 좌측에서 선택(체크)한 그룹 전체 등록</label>
+                        <label style="display:flex; gap:6px; font-size:12px; margin-bottom:12px; color:var(--muted);"><input type="checkbox" id="create_negative_campaign_multi"> 좌측에서 선택(체크)한 캠페인 전체 적용</label>
                         <button class="btn btn-red" style="width: 100%;" onclick="createNegatives()">등록하기</button>
                     </div>
                 </div>
@@ -383,7 +431,8 @@
             <div class="tabs sub-tabs">
                 <button class="tab-btn active" onclick="switchSubTab('b_bid', this, '#tab_bulk')">입찰가 일괄 변경</button>
                 <button class="tab-btn" onclick="switchSubTab('b_time', this, '#tab_bulk')">시간대 설정</button>
-                <button class="tab-btn" onclick="switchSubTab('b_copy', this, '#tab_bulk')">복사 (캠페인/항목)</button>
+                <button class="tab-btn" onclick="switchSubTab('b_copy', this, '#tab_bulk')">복사 (캠페인/광고그룹/항목)</button>
+                <button class="tab-btn" onclick="switchSubTab('b_headline_bulk', this, '#tab_bulk')">소재 대량등록</button>
                 <button class="tab-btn" onclick="switchSubTab('b_status', this, '#tab_bulk')">상태/예산 변경</button>
                 <button class="tab-btn" style="color:var(--red);" onclick="switchSubTab('b_delete', this, '#tab_bulk')">🗑 일괄 삭제</button>
             </div>
@@ -444,12 +493,36 @@
                         <button class="btn btn-purple" style="width:100%" onclick="copySelectedCampaigns()">선택 캠페인 복사</button>
                     </div>
                     <div class="card">
+                        <div class="card-title">광고그룹 전체 복사</div>
+                        <div class="form-group"><label>대상 (도착지) 캠페인</label><select id="copy_adgroup_target_campaign_select"></select></div>
+                        <div class="form-group"><label>접미사</label><input type="text" id="adgroup_copy_suffix" value="_복사본"></div>
+                        <div class="form-group">
+                            <label>같이 복사할 항목</label>
+                            <div style="display:flex; gap:12px; font-size:12px; flex-wrap:wrap;">
+                                <label><input type="checkbox" id="copy_adgroup_include_keywords" checked> 키워드</label>
+                                <label><input type="checkbox" id="copy_adgroup_include_ads" checked> 소재</label>
+                                <label><input type="checkbox" id="copy_adgroup_include_extensions" checked> 확장소재</label>
+                                <label><input type="checkbox" id="copy_adgroup_include_negatives" checked> 제외키워드</label>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>추가 옵션</label>
+                            <div style="display:flex; gap:12px; font-size:12px; flex-wrap:wrap;">
+                                <label><input type="checkbox" id="copy_adgroup_copy_media" checked> 매체 설정 복사 (PC/모바일 + 세부 매체)</label>
+                                <label><input type="checkbox" id="copy_adgroup_copy_as_off"> OFF 상태로 복사</label>
+                            </div>
+                        </div>
+                        <button class="btn btn-purple" style="width:100%" onclick="copySelectedAdgroups()">선택 광고그룹 전체 복사</button>
+                    </div>
+                    <div class="card" style="grid-column:1/-1;">
                         <div class="card-title">광고그룹 내 항목 부분 복사</div>
-                        <div class="form-group"><label>대상 (도착지) 캠페인</label><select id="copy_target_campaign_select" onchange="loadCopyTargetAdgroups()"></select></div>
-                        <div class="form-group"><label>대상 (도착지) 광고그룹</label><select id="copy_target_adgroup_select"></select></div>
+                        <div class="grid-2">
+                            <div class="form-group"><label>대상 (도착지) 캠페인</label><select id="copy_entity_target_campaign_select" onchange="loadCopyEntityTargetAdgroups()"></select></div>
+                            <div class="form-group"><label>대상 (도착지) 광고그룹</label><select id="copy_entity_target_adgroup_select"></select></div>
+                        </div>
                         <div class="form-group">
                             <label>복사할 항목</label>
-                            <div style="display:flex; gap:12px; font-size:12px;">
+                            <div style="display:flex; gap:12px; font-size:12px; flex-wrap:wrap;">
                                 <label><input type="checkbox" id="copy_include_keywords" checked> 키워드</label>
                                 <label><input type="checkbox" id="copy_include_ads" checked> 소재</label>
                                 <label><input type="checkbox" id="copy_include_extensions" checked> 확장소재</label>
@@ -457,6 +530,62 @@
                             </div>
                         </div>
                         <button class="btn btn-purple" style="width:100%" onclick="execCopyEntities()">선택 항목 대상 그룹으로 복사</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="b_headline_bulk" class="tab-content">
+                <div class="card" style="margin-bottom:16px;">
+                    <div class="card-title">파워링크 소재 대량등록</div>
+                    <div class="field-help" style="margin-bottom:14px;">
+                        업로드 열: <strong>그룹id, 소재제목, 설명, pc연결url, mo연결url</strong><br>
+                        소재제목/설명에 <strong>{병원}</strong>처럼 넣으면 자동으로 <strong>{키워드:병원}</strong> 형식으로 등록됩니다.
+                    </div>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label>업로드 파일</label>
+                            <input type="file" id="bulk_text_ad_file" accept=".csv,.txt,.tsv,.xls,.xlsx">
+                            <div class="field-note">csv / xls / xlsx 지원</div>
+                        </div>
+                        <div class="form-group">
+                            <label>템플릿</label>
+                            <div class="btn-row">
+                                <button type="button" class="btn btn-sub" style="flex:1;" onclick="downloadBulkTextAdTemplate()">CSV 템플릿 다운로드</button>
+                                <button type="button" class="btn btn-primary" style="flex:1;" onclick="bulkUploadTextAds()">소재 대량등록 실행</button>
+                            </div>
+                            <div class="field-note">mo연결url이 비어 있으면 PC URL로 자동 입력됩니다.</div>
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-top:8px;">
+                        <label>처리 결과</label>
+                        <textarea id="bulk_text_ad_result" rows="10" readonly placeholder="실행 결과가 여기에 표시됩니다."></textarea>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-title">추가제목 대량등록</div>
+                    <div class="field-help" style="margin-bottom:14px;">
+                        업로드 열: <strong>그룹id, 추가제목, pin</strong><br>
+                        pin 값은 <strong>1 / 2</strong> 또는 비움(모든 위치)으로 입력하면 됩니다. 등록 후 재조회로 실제 pin 반영까지 검증합니다.
+                    </div>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label>업로드 파일</label>
+                            <input type="file" id="bulk_headline_file" accept=".csv,.txt,.tsv,.xls,.xlsx">
+                            <div class="field-note">csv / xls / xlsx 지원</div>
+                        </div>
+                        <div class="form-group">
+                            <label>템플릿</label>
+                            <div class="btn-row">
+                                <button type="button" class="btn btn-sub" style="flex:1;" onclick="downloadBulkHeadlineTemplate()">CSV 템플릿 다운로드</button>
+                                <button type="button" class="btn btn-primary" style="flex:1;" onclick="bulkUploadHeadlines()">추가제목 대량등록 실행</button>
+                            </div>
+                            <div class="field-note">pin을 비우면 모든 위치 노출로 등록합니다.</div>
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-top:8px;">
+                        <label>처리 결과</label>
+                        <textarea id="bulk_headline_result" rows="10" readonly placeholder="실행 결과가 여기에 표시됩니다."></textarea>
                     </div>
                 </div>
             </div>
@@ -536,6 +665,7 @@
                             <option value="DESCRIPTION_EXTRA">홍보문구만 삭제</option>
                             <option value="DESCRIPTION">추가설명만 삭제</option>
                             <option value="SUB_LINKS">서브링크만 삭제</option>
+                            <option value="SHOPPING_PROMO_TEXT">쇼핑 추가홍보문구만 삭제</option>
                         </select>
                     </div>
                     <button class="btn btn-red" style="width:100%; font-size:15px; padding:14px;" onclick="executeBulkDelete()">⚠ 선택 범위 내 일괄 삭제 실행</button>
@@ -556,6 +686,8 @@ let detailState = { keywords:[], ads:[], exts:[], negatives:[] };
 
 let checkedCampaignIds = new Set();
 let checkedAdgroupIds = new Set();
+let favoriteAccountIds = new Set();
+const ACCOUNT_FAVORITES_KEY = 'naver_account_favorites';
 
 let selectedScheduleDays = new Set([1,2,3,4,5,6,7]);
 let selectedScheduleHours = new Set();
@@ -573,6 +705,23 @@ function getMediaLabel(raw) {
     if (raw?.pcDevice === false && raw?.mobileDevice === true) return '모바일';
     if (raw?.pcDevice !== false && raw?.mobileDevice !== false) return '전체';
     return '미설정';
+}
+function getEntityStatusValue(row) {
+    const src = (row && typeof row === 'object' && row.raw && typeof row.raw === 'object') ? row.raw : (row || {});
+    const lockVal = typeof src.userLock === 'boolean' ? src.userLock : (typeof row?.userLock === 'boolean' ? row.userLock : null);
+    if (lockVal !== null) return lockVal ? 'OFF' : 'ON';
+    const enableVal = typeof src.enable === 'boolean' ? src.enable : (typeof row?.enable === 'boolean' ? row.enable : null);
+    if (enableVal !== null) return enableVal ? 'ON' : 'OFF';
+    const pausedVal = typeof src.paused === 'boolean' ? src.paused : (typeof row?.paused === 'boolean' ? row.paused : null);
+    if (pausedVal !== null) return pausedVal ? 'OFF' : 'ON';
+    const status = String(src.status || row?.status || '').toUpperCase();
+    if (['PAUSE', 'PAUSED', 'STOP', 'STOPPED', 'LIMITEDBYBUDGET'].includes(status)) return 'OFF';
+    if (status) return 'ON';
+    return '-';
+}
+function getEntityStatusLabel(row) {
+    const v = getEntityStatusValue(row);
+    return v === 'ON' ? 'ON' : v === 'OFF' ? 'OFF' : '-';
 }
 function getMediaDetailPayload(prefix) {
     return {
@@ -609,17 +758,100 @@ function toggleBudgetInput(checkboxId, inputId) {
 function syncCreateAdgroupForm() {
     const campId = document.getElementById('create_adgroup_campaign')?.value || currentCampaignId;
     const camp = campaigns.find(x => x.id === campId);
-    const selectedType = document.getElementById('new_adgroup_type')?.value || (camp?.campaignTp === 'SHOPPING' ? 'SHOPPING' : 'WEB_SITE');
-    const isWeb = selectedType === 'WEB_SITE' && camp?.campaignTp !== 'SHOPPING';
+    const selectedType = document.getElementById('new_adgroup_type')?.value || (isShoppingLikeType(camp?.campaignTp) ? 'SHOPPING' : 'WEB_SITE');
+    const isWeb = !isShoppingLikeType(camp?.campaignTp) && selectedType === 'WEB_SITE';
     const typeEl = document.getElementById('new_adgroup_type');
     const bizWrap = document.getElementById('new_biz_channel_wrap');
     const powerWrap = document.getElementById('new_powerlink_options_wrap');
-    if (typeEl && camp) typeEl.value = camp.campaignTp === 'SHOPPING' ? 'SHOPPING' : 'WEB_SITE';
+    if (typeEl && camp) typeEl.value = isShoppingLikeType(camp?.campaignTp) ? 'SHOPPING' : 'WEB_SITE';
     if (bizWrap) bizWrap.style.display = isWeb ? '' : 'none';
     if (powerWrap) powerWrap.style.display = isWeb ? '' : 'none';
 }
 function escapeHtml(str) { return String(str||'').replace(/[&<>"]/g, s => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[s])); }
 function escapeAttr(v) { return String(v ?? '').replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function loadFavoriteAccountIds() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(ACCOUNT_FAVORITES_KEY) || '[]');
+        return new Set((Array.isArray(raw) ? raw : []).map(x => String(x)));
+    } catch(e) {
+        return new Set();
+    }
+}
+function saveFavoriteAccountIds() {
+    localStorage.setItem(ACCOUNT_FAVORITES_KEY, JSON.stringify(Array.from(favoriteAccountIds)));
+}
+function isFavoriteAccount(customerId) {
+    return favoriteAccountIds.has(String(customerId));
+}
+function toggleFavoriteAccount(customerId, event) {
+    if(event) { event.preventDefault(); event.stopPropagation(); }
+    const key = String(customerId || '');
+    if(!key) return;
+    if(favoriteAccountIds.has(key)) favoriteAccountIds.delete(key);
+    else favoriteAccountIds.add(key);
+    saveFavoriteAccountIds();
+    renderAccounts();
+}
+function isShoppingLikeType(value) {
+    const s = String(value || '').toUpperCase();
+    return ['SHOPPING', 'SHOPPING_BRAND', 'CATALOG', 'PRODUCT', 'SHOPPING_PRODUCT'].includes(s) || s.includes('SHOPPING') || s.includes('CATALOG') || (s.includes('PRODUCT') && s !== 'WEB_SITE');
+}
+function getFilteredMasterItems(type) {
+    const q = document.getElementById('master_search').value.toLowerCase();
+    const source = type === 'campaign' ? campaigns : (currentCampaignId ? adgroups : []);
+    return source.filter(x => !q || String(x?.name || '').toLowerCase().includes(q));
+}
+function isTypeMatch(type, item, targetType) {
+    const rawType = type === 'campaign' ? item?.campaignTp : item?.adgroupType;
+    if(targetType === 'SHOPPING_LIKE') return isShoppingLikeType(rawType);
+    return String(rawType || '').toUpperCase() === String(targetType || '').toUpperCase();
+}
+function syncSelectAllCheckbox(type, items) {
+    const isCamp = type === 'campaign';
+    const box = document.getElementById(isCamp ? 'camp_select_all' : 'adg_select_all');
+    const set = isCamp ? checkedCampaignIds : checkedAdgroupIds;
+    if(!box) return;
+    if(!items.length) {
+        box.checked = false;
+        box.indeterminate = false;
+        return;
+    }
+    const selectedCount = items.filter(x => set.has(x.id)).length;
+    box.checked = selectedCount > 0 && selectedCount === items.length;
+    box.indeterminate = selectedCount > 0 && selectedCount < items.length;
+}
+function selectByType(type, targetType) {
+    if(type === 'adgroup' && !currentCampaignId) {
+        showToast('먼저 캠페인을 선택해주세요.', 'error');
+        return;
+    }
+    const items = getFilteredMasterItems(type).filter(x => isTypeMatch(type, x, targetType));
+    if(!items.length) {
+        showToast('선택할 대상이 없습니다.', 'info');
+        return;
+    }
+    const set = type === 'campaign' ? checkedCampaignIds : checkedAdgroupIds;
+    items.forEach(x => set.add(x.id));
+    renderMasterList();
+}
+function clearSelectionByType(type, targetType = null) {
+    const items = getFilteredMasterItems(type).filter(x => !targetType || isTypeMatch(type, x, targetType));
+    const set = type === 'campaign' ? checkedCampaignIds : checkedAdgroupIds;
+    items.forEach(x => set.delete(x.id));
+    renderMasterList();
+}
+
+function clearAdgroupDetailView() {
+    detailState = { keywords:[], ads:[], exts:[], negatives:[] };
+    document.getElementById('cnt_kw').textContent = '0';
+    document.getElementById('cnt_ad').textContent = '0';
+    document.getElementById('cnt_ext').textContent = '0';
+    document.getElementById('cnt_neg').textContent = '0';
+    ['table_keywords', 'table_ads', 'table_exts', 'table_negatives'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = '<div style="padding:20px;text-align:center;color:#9ca3af;">데이터가 없습니다.</div>';
+    });
+}
 
 function showToast(message, type = 'info') {
     const container = document.getElementById('toast-container');
@@ -660,6 +892,7 @@ async function postJson(url, body, txt) {
 
 // --- 2. Initialize ---
 window.onload = async function() {
+    favoriteAccountIds = loadFavoriteAccountIds();
     const savedApi = localStorage.getItem('naver_api_key');
     const savedSecret = localStorage.getItem('naver_secret_key');
     if (savedApi) { 
@@ -691,20 +924,31 @@ window.onload = async function() {
 // --- 3. Accounts & Master List ---
 function renderAccounts() {
     const wrap = document.getElementById('account_list'); wrap.innerHTML = '';
-    const sorted = [...accountsData].sort((a,b) => String(a.account_name||'').localeCompare(String(b.account_name||''), 'ko'));
+    const sorted = [...accountsData].sort((a,b) => {
+        const aFav = isFavoriteAccount(a.customer_id) ? 1 : 0;
+        const bFav = isFavoriteAccount(b.customer_id) ? 1 : 0;
+        if(aFav !== bFav) return bFav - aFav;
+        return String(a.account_name||'').localeCompare(String(b.account_name||''), 'ko');
+    });
     sorted.forEach(acc => {
-        const active = currentCustomerId === acc.customer_id;
+        const active = String(currentCustomerId || '') === String(acc.customer_id || '');
+        const fav = isFavoriteAccount(acc.customer_id);
         const el = document.createElement('div');
         el.className = 'account-item' + (active ? ' active' : '');
-        el.innerHTML = `<div class="name">${escapeHtml(acc.account_name)}</div><div class="sub">ID: ${escapeHtml(acc.customer_id)}</div>`;
-        el.onclick = () => selectAccount(acc, el);
+        el.innerHTML = `
+            <div class="row">
+                <div class="main">
+                    <div class="name">${escapeHtml(acc.account_name)}</div>
+                    <div class="sub">ID: ${escapeHtml(acc.customer_id)}</div>
+                </div>
+                <button type="button" class="account-pin ${fav ? 'active' : ''}" title="${fav ? '즐겨찾기 해제' : '즐겨찾기 추가'}" onclick="toggleFavoriteAccount('${escapeAttr(acc.customer_id)}', event)">${fav ? '★' : '☆'}</button>
+            </div>`;
+        el.onclick = () => selectAccount(acc);
         wrap.appendChild(el);
     });
 }
 
-async function selectAccount(acc, el) {
-    document.querySelectorAll('.account-item').forEach(x => x.classList.remove('active'));
-    el.classList.add('active');
+async function selectAccount(acc) {
     currentCustomerId = acc.customer_id; 
     document.getElementById('bc_account').textContent = acc.account_name;
     document.getElementById('master_header_title').textContent = `${acc.account_name} 캠페인`;
@@ -713,6 +957,7 @@ async function selectAccount(acc, el) {
     checkedCampaignIds.clear(); checkedAdgroupIds.clear();
     campaigns = []; adgroups = [];
     
+    renderAccounts();
     updateBreadcrumb();
     await Promise.all([refreshCampaigns(), loadChannels()]);
 }
@@ -721,6 +966,12 @@ async function refreshCampaigns() {
     const c = ensureReady(); if(!c) return;
     try {
         campaigns = await postJson('/get_campaigns', c, '캠페인 목록 조회 중...');
+        if(currentCampaignId && !campaigns.some(x => String(x.id) === String(currentCampaignId))) {
+            currentCampaignId = null;
+            currentAdgroupId = null;
+            adgroups = [];
+            clearAdgroupDetailView();
+        }
         checkedCampaignIds.clear(); checkedAdgroupIds.clear();
         renderMasterList(); updateSelectOptions();
     } catch(err) { showToast(`캠페인 조회 실패: ${err.message}`, 'error'); }
@@ -730,9 +981,20 @@ async function refreshAdgroups() {
     const c = ensureReady(true); if(!c) return;
     try {
         adgroups = await postJson('/get_adgroups', { ...c, campaign_id: currentCampaignId }, '광고그룹 목록 조회 중...');
+        if(currentAdgroupId && !adgroups.some(x => String(x.id) === String(currentAdgroupId))) {
+            currentAdgroupId = null;
+            clearAdgroupDetailView();
+        }
         checkedAdgroupIds.clear();
         renderMasterList(); updateSelectOptions();
-    } catch(err) { showToast(`광고그룹 조회 실패: ${err.message}`, 'error'); }
+    } catch(err) {
+        adgroups = [];
+        currentAdgroupId = null;
+        checkedAdgroupIds.clear();
+        clearAdgroupDetailView();
+        renderMasterList(); updateSelectOptions();
+        showToast(`광고그룹 조회 실패: ${err.message}`, 'error');
+    }
 }
 
 async function loadChannels() {
@@ -749,8 +1011,9 @@ function renderMasterList() {
     
     // Campaigns
     const campList = document.getElementById('campaign_list'); campList.innerHTML = '';
-    const filteredCamps = campaigns.filter(x => !q || x.name.toLowerCase().includes(q));
+    const filteredCamps = campaigns.filter(x => !q || String(x?.name || '').toLowerCase().includes(q));
     document.getElementById('master_camp_count').textContent = filteredCamps.length;
+    syncSelectAllCheckbox('campaign', filteredCamps);
     
     if(!filteredCamps.length) campList.innerHTML = `<div style="padding:16px;text-align:center;color:#9ca3af;font-size:12px;">결과가 없습니다.</div>`;
     else filteredCamps.forEach(c => {
@@ -761,7 +1024,7 @@ function renderMasterList() {
             <div><input type="checkbox" ${isChecked} onclick="event.stopPropagation(); toggleListCheck('campaign', '${c.id}')"></div>
             <div class="main" onclick="selectCampaign('${c.id}')">
                 <div class="title">${escapeHtml(c.name)}</div>
-                <div class="meta"><span class="badge ${c.badgeColor}">${escapeHtml(c.label)}</span> 예산: ${formatWon(c.raw?.dailyBudget)}</div>
+                <div class="meta"><span class="badge ${c.badgeColor}">${escapeHtml(c.label)}</span> 상태: ${getEntityStatusLabel(c)} · 예산: ${formatWon(c.raw?.dailyBudget)}</div>
             </div>`;
         campList.appendChild(div);
     });
@@ -770,10 +1033,12 @@ function renderMasterList() {
     const adgList = document.getElementById('adgroup_list'); adgList.innerHTML = '';
     if(!currentCampaignId) {
         document.getElementById('master_adg_count').textContent = '0';
+        syncSelectAllCheckbox('adgroup', []);
         adgList.innerHTML = `<div style="padding:16px;text-align:center;color:#9ca3af;font-size:12px;">캠페인을 선택하세요.</div>`;
     } else {
-        const filteredAdg = adgroups.filter(x => !q || x.name.toLowerCase().includes(q));
+        const filteredAdg = adgroups.filter(x => !q || String(x?.name || '').toLowerCase().includes(q));
         document.getElementById('master_adg_count').textContent = filteredAdg.length;
+        syncSelectAllCheckbox('adgroup', filteredAdg);
         filteredAdg.forEach(a => {
             const div = document.createElement('div');
             div.className = 'list-item' + (a.id === currentAdgroupId ? ' active' : '');
@@ -782,7 +1047,7 @@ function renderMasterList() {
                 <div><input type="checkbox" ${isChecked} onclick="event.stopPropagation(); toggleListCheck('adgroup', '${a.id}')"></div>
                 <div class="main" onclick="selectAdgroup('${a.id}')">
                     <div class="title">${escapeHtml(a.name)}</div>
-                    <div class="meta">예산: ${formatBudget(a.raw?.useDailyBudget, a.raw?.dailyBudget)} | 입찰가: ${formatWon(a.raw?.bidAmt)} | 매체: ${getMediaLabel(a.raw)}</div>
+                    <div class="meta">상태: ${getEntityStatusLabel(a)} | 예산: ${formatBudget(a.raw?.useDailyBudget, a.raw?.dailyBudget)} | 입찰가: ${formatWon(a.raw?.bidAmt)} | 매체: ${getMediaLabel(a.raw)}</div>
                 </div>`;
             adgList.appendChild(div);
         });
@@ -793,14 +1058,14 @@ function renderMasterList() {
 function toggleListCheck(type, id) {
     const set = type === 'campaign' ? checkedCampaignIds : checkedAdgroupIds;
     if(set.has(id)) set.delete(id); else set.add(id);
-    updateBreadcrumb();
+    renderMasterList();
 }
 
 function toggleSelectAll(type) {
     const isCamp = type === 'campaign';
     const q = document.getElementById('master_search').value.toLowerCase();
     const source = isCamp ? campaigns : adgroups;
-    const filtered = source.filter(x => !q || x.name.toLowerCase().includes(q));
+    const filtered = source.filter(x => !q || String(x?.name || '').toLowerCase().includes(q));
     const set = isCamp ? checkedCampaignIds : checkedAdgroupIds;
     const box = document.getElementById(isCamp ? 'camp_select_all' : 'adg_select_all');
     
@@ -812,7 +1077,7 @@ function toggleSelectAll(type) {
 async function selectCampaign(id) {
     currentCampaignId = id; currentAdgroupId = null; checkedAdgroupIds.clear();
     const camp = campaigns.find(x => x.id === id);
-    if(camp) document.getElementById('new_adgroup_type').value = camp.campaignTp === 'SHOPPING' ? 'SHOPPING' : 'WEB_SITE';
+    if(camp) document.getElementById('new_adgroup_type').value = isShoppingLikeType(camp?.campaignTp) ? 'SHOPPING' : 'WEB_SITE';
     syncCreateAdgroupForm();
     updateBreadcrumb(); renderMasterList(); await refreshAdgroups();
 }
@@ -840,11 +1105,16 @@ function updateBreadcrumb() {
 
 function updateSelectOptions() {
     const campHtml = campaigns.map(x => `<option value="${x.id}">${escapeHtml(x.name)}</option>`).join('');
-    ['create_adgroup_campaign', 'copy_target_campaign_select'].forEach(id => {
+    ['create_adgroup_campaign', 'copy_adgroup_target_campaign_select', 'copy_entity_target_campaign_select'].forEach(id => {
         const el = document.getElementById(id);
-        if(el) { el.innerHTML = campHtml || '<option value="">캠페인 없음</option>'; el.value = currentCampaignId; }
+        if(el) {
+            const prev = el.value;
+            el.innerHTML = campHtml || '<option value="">캠페인 없음</option>';
+            el.value = (prev && campaigns.some(x => String(x.id) === String(prev))) ? prev : (currentCampaignId || '');
+        }
     });
     syncCreateAdgroupForm();
+    if(document.getElementById('copy_entity_target_campaign_select')) loadCopyEntityTargetAdgroups();
 
     const adgHtml = adgroups.map(x => `<option value="${x.id}">${escapeHtml(x.name)}</option>`).join('');
     ['create_keyword_adgroup', 'create_ad_adgroup', 'create_shopping_adgroup', 'create_ext_adgroup', 'create_negative_adgroup'].forEach(id => {
@@ -868,9 +1138,10 @@ function switchSubTab(tabId, btn, parentId) {
 function syncExtensionForm() {
     const type = document.getElementById('create_ext_type').value;
     document.getElementById('ext_position_wrap').style.display = type==='HEADLINE' ? '' : 'none';
-    document.getElementById('ext_headline_wrap').style.display = type==='SUB_LINKS' ? 'none' : '';
+    document.getElementById('ext_headline_wrap').style.display = (type==='SUB_LINKS' || type==='SHOPPING_PROMO_TEXT' || type==='SHOPPING_EXTRA') ? 'none' : '';
     document.getElementById('ext_sublinks_wrap').style.display = type==='SUB_LINKS' ? '' : 'none';
     document.getElementById('ext_promo_type_wrap').style.display = type==='DESCRIPTION_EXTRA' ? '' : 'none';
+    document.getElementById('ext_shopping_promo_wrap').style.display = type==='SHOPPING_PROMO_TEXT' ? '' : 'none';
 }
 
 function syncBulkDeleteTarget() {
@@ -888,6 +1159,77 @@ function syncAvgPositionLimit() {
 }
 
 // --- 5. Data View & Delete Single ---
+function isShoppingAdgroupId(adgroupId) {
+    const row = (adgroups || []).find(x => String(x?.id || '') === String(adgroupId || ''));
+    const t = String(row?.adgroupType || row?.raw?.adgroupType || '').toUpperCase();
+    return ['SHOPPING', 'CATALOG', 'SHOPPING_BRAND'].includes(t);
+}
+
+function getAdIdentifier(ad) {
+    return String(ad?.nccAdId || ad?.id || ad?.ownerId || '').trim();
+}
+
+function summarizeExtension(ext) {
+    const v = ext?.adExtension;
+    if (Array.isArray(v)) return v.map(x => x?.name).filter(Boolean).join(', ');
+    if (v && typeof v === 'object') {
+        if (v.headline) return v.headline;
+        if (v.description) return v.description;
+        const basic = String(v.basicText || '').trim();
+        const additional = String(v.additionalText || '').trim();
+        if (basic || additional) return [basic, additional].filter(Boolean).join(' / ');
+        if (v.name) return v.name;
+    }
+    return '';
+}
+
+function getHeadlinePinValue(ext) {
+    const obj = ext?.adExtension;
+    const candidates = [];
+    if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+        candidates.push(obj.pin, obj.Pin, obj.position, obj.priority, obj.displayOrder);
+    }
+    candidates.push(ext?.pin, ext?.Pin, ext?.position, ext?.priority, ext?.displayOrder);
+    for (const value of candidates) {
+        const n = Number(value);
+        if (n === 1 || n === 2) return n;
+    }
+    return null;
+}
+
+function getHeadlinePinLabel(ext) {
+    if (String(ext?.type || '').toUpperCase() !== 'HEADLINE') return '-';
+    const pin = getHeadlinePinValue(ext);
+    return pin === 1 ? '위치1' : pin === 2 ? '위치2' : '모든 위치';
+}
+
+function getFilteredExtensions(rows) {
+    const filter = document.getElementById('ext_pin_filter')?.value || 'ALL';
+    const list = Array.isArray(rows) ? rows : [];
+    if (filter === 'ALL') return list;
+    return list.filter(row => {
+        if (String(row?.type || '').toUpperCase() !== 'HEADLINE') return false;
+        const pin = getHeadlinePinValue(row);
+        if (filter === 'PIN1') return pin === 1;
+        if (filter === 'PIN2') return pin === 2;
+        if (filter === 'PIN0') return pin == null;
+        return true;
+    });
+}
+
+function renderExtensionTable() {
+    const filtered = getFilteredExtensions(detailState.exts);
+    const countEl = document.getElementById('ext_filter_result_count');
+    if (countEl) countEl.textContent = `${filtered.length}건`;
+    renderTable('table_exts', [
+        {k:'type', l:'유형'},
+        {k:'status', l:'상태', f:(v,r)=>getEntityStatusLabel(r)},
+        {k:'_scopeLabel', l:'적용대상'},
+        {k:'adExtension', l:'요약', f:(v,r)=>summarizeExtension(r)},
+        {k:'pin', l:'노출위치', f:(v,r)=>getHeadlinePinLabel(r)}
+    ], filtered, 'ad_extension', 'adExtensionId');
+}
+
 async function loadAdgroupDetails() {
     const c = ensureReady(true, true); if(!c) return;
     try {
@@ -900,17 +1242,42 @@ async function loadAdgroupDetails() {
         
         detailState.keywords = Array.isArray(kwRes) ? kwRes : [];
         detailState.ads = Array.isArray(adRes) ? adRes : [];
-        detailState.exts = Array.isArray(extRes) ? extRes : [];
         detailState.negatives = Array.isArray(negRes) ? negRes : [];
+
+        const mergedExts = [];
+        const seenExtIds = new Set();
+        const pushExtRows = (rows, scopeLabel='광고그룹') => {
+            (Array.isArray(rows) ? rows : []).forEach(row => {
+                const extId = String(row?.adExtensionId || row?.id || `${scopeLabel}-${Math.random()}`);
+                if (seenExtIds.has(extId)) return;
+                seenExtIds.add(extId);
+                mergedExts.push({ ...row, _scopeLabel: scopeLabel });
+            });
+        };
+        pushExtRows(extRes, '광고그룹');
+
+        if (isShoppingAdgroupId(currentAdgroupId) && detailState.ads.length) {
+            const shoppingAdIds = detailState.ads.map(getAdIdentifier).filter(Boolean);
+            if (shoppingAdIds.length) {
+                const adExtResponses = await Promise.all(shoppingAdIds.map(adId =>
+                    fetch('/get_ad_extensions', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({...c, owner_id: adId})})
+                        .then(r=>r.json())
+                        .catch(()=>[])
+                ));
+                adExtResponses.forEach((rows, idx) => pushExtRows(rows, `상품소재:${shoppingAdIds[idx]}`));
+            }
+        }
+
+        detailState.exts = mergedExts;
         
         document.getElementById('cnt_kw').textContent = detailState.keywords.length;
         document.getElementById('cnt_ad').textContent = detailState.ads.length;
         document.getElementById('cnt_ext').textContent = detailState.exts.length;
         document.getElementById('cnt_neg').textContent = detailState.negatives.length;
 
-        renderTable('table_keywords', [{k:'keyword', l:'키워드'}, {k:'bidAmt', l:'입찰가'}, {k:'useGroupBidAmt', l:'그룹입찰가 사용', f:v=>v?'O':'X'}], detailState.keywords, 'keyword', 'nccKeywordId');
-        renderTable('table_ads', [{k:'type', l:'유형', f:v=>(v==='TEXT_45'?'기본소재':v.includes('SHOPPING')?'쇼핑소재':v)}, {k:'ad', l:'요약', f:v=>v?.headline || v?.productName || JSON.stringify(v).slice(0,30)}], detailState.ads, 'ad', 'nccAdId');
-        renderTable('table_exts', [{k:'type', l:'유형'}, {k:'adExtension', l:'요약', f:v=>(v?.headline || v?.description || (Array.isArray(v)?v.map(x=>x.name).join(','):'')) }], detailState.exts, 'ad_extension', 'adExtensionId');
+        renderTable('table_keywords', [{k:'keyword', l:'키워드'}, {k:'status', l:'상태', f:(v,r)=>getEntityStatusLabel(r)}, {k:'bidAmt', l:'입찰가'}, {k:'useGroupBidAmt', l:'그룹입찰가 사용', f:v=>v?'O':'X'}], detailState.keywords, 'keyword', 'nccKeywordId');
+        renderTable('table_ads', [{k:'type', l:'유형', f:v=>(v==='TEXT_45'?'기본소재':String(v||'').includes('SHOPPING')?'쇼핑소재':v)}, {k:'status', l:'상태', f:(v,r)=>getEntityStatusLabel(r)}, {k:'ad', l:'요약', f:v=>v?.headline || v?.productName || JSON.stringify(v).slice(0,30)}], detailState.ads, 'ad', 'nccAdId');
+        renderExtensionTable();
         renderTable('table_negatives', [{k:'keyword', l:'제외키워드', f:(v,r)=>v||r.restrictedKeyword}, {k:'matchType', l:'유형', f:(v,r)=>v||r.type||r.restrictType}], detailState.negatives, 'restricted_keyword', 'keyword');
     } catch(err) { showToast(`상세 로딩 실패: ${err.message}`, 'error'); }
 }
@@ -973,20 +1340,27 @@ async function createAdgroup() {
     const mediaDetail = validateMediaDetail('new'); if(!mediaDetail) return;
     try {
         const campTp = campaigns.find(x=>x.id===targetCampId)?.campaignTp || 'WEB_SITE';
-        const isWeb = campTp === 'WEB_SITE';
+        const campTpUpper = String(campTp || '').toUpperCase();
+        const isWeb = !isShoppingLikeType(campTp);
+        let finalAdgroupType = document.getElementById('new_adgroup_type')?.value || (isWeb ? 'WEB_SITE' : 'SHOPPING');
+        if (!isWeb) {
+            if (campTpUpper === 'CATALOG') finalAdgroupType = 'CATALOG';
+            else if (campTpUpper === 'SHOPPING_BRAND') finalAdgroupType = 'SHOPPING';
+            else finalAdgroupType = 'SHOPPING';
+        }
         const unlimited = document.getElementById('new_adgroup_unlimited')?.checked;
         const data = await postJson('/create_adgroup_simple', {
             ...c,
             campaign_id: targetCampId,
             campaign_tp: campTp,
             name: document.getElementById('new_adgroup_name').value,
-            adgroup_type: document.getElementById('new_adgroup_type').value,
+            adgroup_type: finalAdgroupType,
             media_type: document.getElementById('new_adgroup_media_type').value,
             media_detail: mediaDetail,
             bid_amt: document.getElementById('new_adgroup_bid').value,
             daily_budget: unlimited ? 0 : document.getElementById('new_adgroup_budget').value,
             use_daily_budget: !unlimited,
-            biz_channel_id: document.getElementById('new_biz_channel').value,
+            biz_channel_id: isWeb ? document.getElementById('new_biz_channel').value : '',
             use_keyword_plus: isWeb ? (document.getElementById('new_adgroup_use_keyword_plus').value === 'true') : null,
             keyword_plus_weight: isWeb ? document.getElementById('new_adgroup_keyword_plus_weight').value : null,
             use_close_variant: isWeb ? (document.getElementById('new_adgroup_use_close_variant').value === 'true') : null,
@@ -997,7 +1371,10 @@ async function createAdgroup() {
         }
         document.getElementById('new_adgroup_name').value = '';
         if(currentCampaignId === targetCampId) await refreshAdgroups();
-    } catch(err) { showToast(err.message, 'error'); }
+    } catch(err) {
+        showToast(err.message, 'error');
+        if (err && err.details) console.error('createAdgroup failed details:', err.details, err.debug || err.payload || err);
+    }
 }
 
 async function createKeywords() {
@@ -1054,6 +1431,18 @@ function getTargetAdgroupIds(singleId, checkboxId) {
     return (useMulti && selected.length) ? selected : (singleId ? [singleId] : []);
 }
 
+function insertKeywordToken(targetId) {
+    const input = document.getElementById(targetId);
+    if (!input) return;
+    const token = '{키워드}';
+    const start = Number.isInteger(input.selectionStart) ? input.selectionStart : input.value.length;
+    const end = Number.isInteger(input.selectionEnd) ? input.selectionEnd : input.value.length;
+    input.value = `${input.value.slice(0, start)}${token}${input.value.slice(end)}`;
+    input.focus();
+    const nextPos = start + token.length;
+    try { input.setSelectionRange(nextPos, nextPos); } catch (e) {}
+}
+
 async function createTextAd() {
     const c = ensureReady(); if(!c) return;
     const baseId = document.getElementById('create_ad_adgroup').value;
@@ -1072,6 +1461,7 @@ async function createTextAd() {
         showToast(data.message, 'success');
         document.getElementById('create_ad_headline').value = '';
         document.getElementById('create_ad_desc').value = '';
+        document.getElementById('create_ad_replace_keyword').value = '';
         if(currentAdgroupId && adgroupIds.includes(currentAdgroupId)) await loadAdgroupDetails();
     } catch(err) { showToast(err.message, 'error'); }
 }
@@ -1095,17 +1485,90 @@ async function createShoppingAd() {
     } catch(err) { showToast(err.message, 'error'); }
 }
 
+
+async function collectExtensionAdgroupIdsByCampaigns(c, campaignIds) {
+    const ids = [];
+    for (const campaignId of (campaignIds || [])) {
+        const rows = await postJson('/get_adgroups', { ...c, campaign_id: campaignId });
+        (Array.isArray(rows) ? rows : []).forEach(r => { if(r && r.id) ids.push(String(r.id)); });
+    }
+    return Array.from(new Set(ids));
+}
+
+async function collectShoppingAdOwnerIdsFromAdgroups(c, adgroupIds) {
+    const ownerIds = [];
+    for (const adgroupId of (adgroupIds || [])) {
+        const ads = await postJson('/get_ads', { ...c, adgroup_id: adgroupId });
+        (Array.isArray(ads) ? ads : []).forEach(ad => {
+            const adId = getAdIdentifier(ad);
+            const t = String(ad?.type || ad?.adType || '').toUpperCase();
+            if (t === 'SHOPPING_PRODUCT_AD' && adId) ownerIds.push(adId);
+        });
+    }
+    return Array.from(new Set(ownerIds));
+}
+
+async function resolveExtensionOwnerIds(c, type, adgroupIds) {
+    const ids = Array.from(new Set((adgroupIds || []).map(x => String(x || '').trim()).filter(Boolean)));
+    if (!ids.length) return [];
+    if (type === 'SHOPPING_EXTRA') {
+        return await collectShoppingAdOwnerIdsFromAdgroups(c, ids);
+    }
+    return ids;
+}
+
 async function createExtensionEasy() {
     const c = ensureReady(); if(!c) return;
     const type = document.getElementById('create_ext_type').value;
     const baseId = document.getElementById('create_ext_adgroup').value;
-    const ownerIds = getTargetAdgroupIds(baseId, 'create_ext_multi');
-    if(!ownerIds.length) { showToast('대상 광고그룹이 없습니다.', 'error'); return; }
+    const useGroupMulti = !!document.getElementById('create_ext_multi')?.checked;
+    const useCampaignMulti = !!document.getElementById('create_ext_campaign_multi')?.checked;
+    if(useGroupMulti && useCampaignMulti) { showToast('그룹 전체 등록과 캠페인 전체 적용은 동시에 선택할 수 없습니다.', 'error'); return; }
 
-    const body = { ...c, owner_ids: ownerIds, type, position: document.getElementById('create_ext_position').value };
+    let ownerIds = [];
+    let refreshAdgroupIds = [];
+    let sourceCampaignIds = [];
+    if(useCampaignMulti) {
+        sourceCampaignIds = Array.from(checkedCampaignIds || []).filter(Boolean);
+        if(!sourceCampaignIds.length) { showToast('좌측 체크박스에서 캠페인을 선택해주세요.', 'error'); return; }
+        const adgroupIds = await collectExtensionAdgroupIdsByCampaigns(c, sourceCampaignIds);
+        refreshAdgroupIds = adgroupIds.slice();
+        ownerIds = await resolveExtensionOwnerIds(c, type, adgroupIds);
+    } else {
+        const adgroupIds = getTargetAdgroupIds(baseId, 'create_ext_multi');
+        if(!adgroupIds.length) { showToast('대상 광고그룹이 없습니다.', 'error'); return; }
+        refreshAdgroupIds = adgroupIds.slice();
+        ownerIds = await resolveExtensionOwnerIds(c, type, adgroupIds);
+    }
+
+    if(type !== 'SHOPPING_EXTRA' && !ownerIds.length) {
+        showToast('대상 광고그룹이 없습니다.', 'error');
+        return;
+    }
+    if(type === 'SHOPPING_EXTRA' && !ownerIds.length && !refreshAdgroupIds.length && !sourceCampaignIds.length) {
+        showToast('대상 광고그룹 또는 캠페인을 선택해주세요.', 'error');
+        return;
+    }
+
+    const body = {
+        ...c,
+        owner_ids: ownerIds,
+        adgroup_ids: refreshAdgroupIds,
+        campaign_ids: sourceCampaignIds,
+        type,
+        position: document.getElementById('create_ext_position').value
+    };
     
     if(type === 'SUB_LINKS') {
         body.links = [1,2,3,4].map(i => ({ name: document.getElementById(`ext_link_name_${i}`).value.trim(), final: document.getElementById(`ext_link_url_${i}`).value.trim() }));
+    } else if (type === 'SHOPPING_PROMO_TEXT') {
+        const basicText = document.getElementById('create_ext_basic_text').value.trim();
+        const additionalText = document.getElementById('create_ext_additional_text').value.trim();
+        if(!basicText) { showToast('문구 1을 입력해주세요.', 'error'); return; }
+        body.basic_text = basicText;
+        body.additional_text = additionalText;
+    } else if (type === 'SHOPPING_EXTRA') {
+        // 쇼핑상품부가정보는 쇼핑에 연동된 정보를 사용하는 타입이라 별도 입력값이 없습니다.
     } else {
         const textVal = document.getElementById('create_ext_text').value.trim();
         if(!textVal) { showToast('내용을 입력해주세요.', 'error'); return; }
@@ -1119,24 +1582,42 @@ async function createExtensionEasy() {
 
     try {
         const data = await postJson('/create_extension_simple', body, '확장소재 등록 중...');
-        showToast(data.message, 'success');
-        if(currentAdgroupId && ownerIds.includes(currentAdgroupId)) await loadAdgroupDetails();
+        const hasFail = Number(data?.fail || 0) > 0;
+        const hasExists = Array.isArray(data?.results) && data.results.some(x => x && x.exists);
+        let msg = data?.message || '확장소재 등록 완료';
+        if (hasExists && !hasFail) msg += ' · 일부/전체는 이미 등록된 문구였습니다.';
+        showToast(msg, hasFail ? 'info' : 'success');
+        if(currentAdgroupId && refreshAdgroupIds.includes(currentAdgroupId)) await loadAdgroupDetails();
     } catch(err) { showToast(err.message, 'error'); }
 }
 
 async function createNegatives() {
     const c = ensureReady(); if(!c) return;
-    const targetAdgId = document.getElementById('create_negative_adgroup').value;
-    if(!targetAdgId) { showToast('대상 광고그룹을 선택해주세요.', 'error'); return; }
+    const baseId = document.getElementById('create_negative_adgroup').value;
+    const useGroupMulti = !!document.getElementById('create_negative_multi')?.checked;
+    const useCampaignMulti = !!document.getElementById('create_negative_campaign_multi')?.checked;
+    if(useGroupMulti && useCampaignMulti) { showToast('그룹 전체 등록과 캠페인 전체 적용은 동시에 선택할 수 없습니다.', 'error'); return; }
+
+    let adgroupIds = [];
+    if(useCampaignMulti) {
+        const campaignIds = Array.from(checkedCampaignIds || []).filter(Boolean);
+        if(!campaignIds.length) { showToast('좌측 체크박스에서 캠페인을 선택해주세요.', 'error'); return; }
+        adgroupIds = await collectExtensionAdgroupIdsByCampaigns(c, campaignIds);
+    } else {
+        adgroupIds = getTargetAdgroupIds(baseId, 'create_negative_multi');
+    }
+    if(!adgroupIds.length) { showToast('대상 광고그룹이 없습니다.', 'error'); return; }
+
     try {
         const data = await postJson('/create_restricted_keywords_simple', {
-            ...c, adgroup_id: targetAdgId,
+            ...c,
+            adgroup_ids: adgroupIds,
             keywords: document.getElementById('create_negative_text').value,
             match_type: document.getElementById('create_negative_match_type').value
         }, '제외키워드 등록 중...');
         showToast(`성공 ${data.success}건 / 실패 ${data.fail}건`, data.fail > 0 ? 'info' : 'success');
         document.getElementById('create_negative_text').value = '';
-        if(currentAdgroupId === targetAdgId) await loadAdgroupDetails();
+        if(currentAdgroupId && adgroupIds.includes(currentAdgroupId)) await loadAdgroupDetails();
     } catch(err) { showToast(err.message, 'error'); }
 }
 
@@ -1257,9 +1738,36 @@ async function copySelectedCampaigns() {
     } catch(err) { showToast(err.message, 'error'); }
 }
 
-async function loadCopyTargetAdgroups() {
-    const targetCampId = document.getElementById('copy_target_campaign_select').value;
-    const el = document.getElementById('copy_target_adgroup_select');
+async function copySelectedAdgroups() {
+    const c = ensureReady(); if(!c) return;
+    const sourceIds = Array.from(checkedAdgroupIds);
+    const targetCampId = document.getElementById('copy_adgroup_target_campaign_select').value;
+    if(!sourceIds.length) { showToast('좌측에서 복사할 광고그룹을 체크해주세요.', 'error'); return; }
+    if(!targetCampId) { showToast('대상 캠페인을 선택해주세요.', 'error'); return; }
+
+    try {
+        const data = await postJson('/copy_adgroups_to_target', {
+            ...c,
+            source_ids: sourceIds,
+            target_campaign_id: targetCampId,
+            suffix: document.getElementById('adgroup_copy_suffix').value,
+            include_keywords: document.getElementById('copy_adgroup_include_keywords').checked,
+            include_ads: document.getElementById('copy_adgroup_include_ads').checked,
+            include_extensions: document.getElementById('copy_adgroup_include_extensions').checked,
+            include_negatives: document.getElementById('copy_adgroup_include_negatives').checked,
+            copy_media: document.getElementById('copy_adgroup_copy_media').checked,
+            copy_as_off: document.getElementById('copy_adgroup_copy_as_off').checked,
+        }, '광고그룹 복사 중...');
+        showToast(data.message, 'success');
+        if(String(currentCampaignId || '') === String(targetCampId || '')) await refreshAdgroups();
+        else await refreshCampaigns();
+    } catch(err) { showToast(err.message, 'error'); }
+}
+
+async function loadCopyEntityTargetAdgroups() {
+    const targetCampId = document.getElementById('copy_entity_target_campaign_select').value;
+    const el = document.getElementById('copy_entity_target_adgroup_select');
+    if(!el) return;
     if(!targetCampId) { el.innerHTML = ''; return; }
     const c = ensureReady(); if(!c) return;
     try {
@@ -1271,7 +1779,7 @@ async function loadCopyTargetAdgroups() {
 async function execCopyEntities() {
     const c = ensureReady(); if(!c) return;
     const sourceIds = Array.from(checkedAdgroupIds);
-    const targetAdgroupId = document.getElementById('copy_target_adgroup_select').value;
+    const targetAdgroupId = document.getElementById('copy_entity_target_adgroup_select').value;
     if(!sourceIds.length) { showToast('좌측에서 복사 원본(광고그룹)을 체크해주세요.', 'error'); return; }
     if(!targetAdgroupId) { showToast('대상 광고그룹을 선택해주세요.', 'error'); return; }
 
@@ -1311,6 +1819,109 @@ async function setCampaignState(enabled) {
     } catch(err) { showToast(err.message, 'error'); }
 }
 
+function downloadBulkTextAdTemplate() {
+    const header = ['그룹id','소재제목','설명','pc연결url','mo연결url'];
+    const rows = [
+        ['grp-a001-01-000000000000000','{병원} 상담예약','24시간 문의 가능합니다','https://www.example.com/pc','https://m.example.com/mo'],
+        ['grp-a001-01-000000000000001','{병원} 치료안내','야간진료 상담 가능','https://www.example.com/landing',''],
+    ];
+    const csv = '﻿' + [header.join(','), ...rows.map(row => row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n');
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'powerlink_text_ad_bulk_template.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+}
+
+async function bulkUploadTextAds() {
+    const c = ensureReady(); if(!c) return;
+    const input = document.getElementById('bulk_text_ad_file');
+    const file = input?.files?.[0];
+    const resultBox = document.getElementById('bulk_text_ad_result');
+    if(!file) { showToast('업로드할 파일을 선택해주세요.', 'error'); return; }
+
+    const formData = new FormData();
+    formData.append('api_key', c.api_key);
+    formData.append('secret_key', c.secret_key);
+    formData.append('customer_id', c.customer_id);
+    formData.append('file', file);
+
+    showLoader('소재 대량등록 중...');
+    try {
+        const res = await fetch('/bulk_upload_text_ads', { method: 'POST', body: formData });
+        const text = await res.text();
+        let data = {};
+        try { data = text ? JSON.parse(text) : {}; } catch(e) { data = { error: text || `${res.status}` }; }
+        if(!res.ok) throw new Error([data.error, data.details].filter(Boolean).join(' | ') || `${res.status}`);
+
+        const lines = (data.results || []).map(item => `${item.ok ? '✅' : '❌'} ${item.row_no}행 | ${item.name || '-'} | ${item.detail || ''}`);
+        if(resultBox) resultBox.value = [`총 ${data.total || 0}건`, `성공 ${data.success || 0}건 / 실패 ${data.fail || 0}건`, '', ...lines].join('\n');
+        showToast(data.message || `성공 ${data.success || 0}건 / 실패 ${data.fail || 0}건`, (data.fail || 0) > 0 ? 'info' : 'success');
+        if(currentAdgroupId) await loadAdgroupDetails();
+    } catch(err) {
+        if(resultBox) resultBox.value = `실패: ${err.message}`;
+        showToast(err.message, 'error');
+    } finally {
+        hideLoader();
+    }
+}
+
+function downloadBulkHeadlineTemplate() {
+    const header = ['그룹id','추가제목','pin'];
+    const rows = [
+        ['grp-a001-01-000000000000000','대표 추가제목', ''],
+        ['grp-a001-01-000000000000001','상담 예약 바로가기', '1'],
+        ['grp-a001-01-000000000000002','야간진료 안내', '2'],
+    ];
+    const csv = '﻿' + [header.join(','), ...rows.map(row => row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n');
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'powerlink_headline_bulk_template.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+}
+
+async function bulkUploadHeadlines() {
+    const c = ensureReady(); if(!c) return;
+    const input = document.getElementById('bulk_headline_file');
+    const file = input?.files?.[0];
+    const resultBox = document.getElementById('bulk_headline_result');
+    if(!file) { showToast('업로드할 파일을 선택해주세요.', 'error'); return; }
+
+    const formData = new FormData();
+    formData.append('api_key', c.api_key);
+    formData.append('secret_key', c.secret_key);
+    formData.append('customer_id', c.customer_id);
+    formData.append('file', file);
+
+    showLoader('추가제목 대량등록 중...');
+    try {
+        const res = await fetch('/bulk_upload_headlines', { method: 'POST', body: formData });
+        const text = await res.text();
+        let data = {};
+        try { data = text ? JSON.parse(text) : {}; } catch(e) { data = { error: text || `${res.status}` }; }
+        if(!res.ok) throw new Error([data.error, data.details].filter(Boolean).join(' | ') || `${res.status}`);
+
+        const lines = (data.results || []).map(item => `${item.ok ? '✅' : '❌'} ${item.row_no}행 | ${item.name || '-'} | ${item.detail || ''}`);
+        if(resultBox) resultBox.value = [`총 ${data.total || 0}건`, `성공 ${data.success || 0}건 / 실패 ${data.fail || 0}건`, '', ...lines].join('\n');
+        showToast(data.message || `성공 ${data.success || 0}건 / 실패 ${data.fail || 0}건`, (data.fail || 0) > 0 ? 'info' : 'success');
+        if(currentAdgroupId) await loadAdgroupDetails();
+    } catch(err) {
+        if(resultBox) resultBox.value = `실패: ${err.message}`;
+        showToast(err.message, 'error');
+    } finally {
+        hideLoader();
+    }
+}
+
 // ★ 일괄 삭제 실행 함수 ★
 async function executeBulkDelete() {
     const c = ensureReady(); if(!c) return;
@@ -1323,7 +1934,16 @@ async function executeBulkDelete() {
     if(!ids.length) { showToast(`좌측 체크박스에서 삭제 대상이 될 ${scope==='campaign'?'캠페인':'광고그룹'}을 1개 이상 선택해주세요.`, 'error'); return; }
 
     let targetName = target === 'keyword' ? '키워드' : target === 'ad' ? '소재' : '확장소재';
-    if(target === 'extension' && extType !== 'ALL') targetName += `(${extType})`;
+    const extTypeLabels = {
+        ALL: '모든 확장소재',
+        HEADLINE: '추가제목',
+        DESCRIPTION_EXTRA: '홍보문구',
+        DESCRIPTION: '추가설명',
+        SUB_LINKS: '서브링크',
+        SHOPPING_PROMO_TEXT: '쇼핑 추가홍보문구',
+        SHOPPING_EXTRA: '쇼핑상품부가정보'
+    };
+    if(target === 'extension' && extType !== 'ALL') targetName += `(${extTypeLabels[extType] || extType})`;
 
     if(!confirm(`정말 선택한 ${ids.length}개의 ${scope==='campaign'?'캠페인':'광고그룹'} 하위에 있는 모든 [${targetName}] 데이터를 영구 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
 
