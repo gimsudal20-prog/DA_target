@@ -1692,33 +1692,33 @@ def _copy_adgroup_children(api_key, secret_key, cid, old_adg_id, new_adg_id, biz
             if res.status_code not in [200, 201] and "4003" not in res.text:
                 errors.append(f"확장소재 에러: {res.text}")
 
-    rk_list = []
     if include_negatives:
-        r_rk = _do_req("GET", api_key, secret_key, cid, f"/ncc/adgroups/{old_adg_id}/restricted-keywords")
-    else:
-        r_rk = None
-    if r_rk is not None and r_rk.status_code == 200 and r_rk.json():
-        rk_list = r_rk.json()
-    elif include_negatives:
-        r_rk2 = _do_req("GET", api_key, secret_key, cid, "/ncc/restricted-keywords", params={"nccAdgroupId": old_adg_id})
-        if r_rk2.status_code == 200 and r_rk2.json():
-            rk_list = r_rk2.json()
-    if rk_list:
-        clean_kws = []
-        for rk in rk_list:
-            if isinstance(rk, dict):
-                kw = rk.get("keyword") or rk.get("restrictedKeyword")
-                if kw:
-                    clean_kws.append(kw)
-            elif isinstance(rk, str):
-                clean_kws.append(rk)
-        if clean_kws:
-            post_payload = [{"nccAdgroupId": str(new_adg_id), "customerId": int(cid), "keyword": k} for k in clean_kws]
-            r_rk_post = _do_req("POST", api_key, secret_key, cid, "/ncc/restricted-keywords", json_body=post_payload)
-            if r_rk_post.status_code not in [200, 201, 204]:
-                errors.append(f"제외검색어 에러: {r_rk_post.text}")
+        res_rk, rows_rk = _fetch_restricted_keywords(api_key, secret_key, cid, str(old_adg_id))
+        if res_rk.status_code == 200 and rows_rk:
+            post_rows = []
+            for rk in rows_rk:
+                if not isinstance(rk, dict):
+                    continue
+                kw = str(rk.get("keyword") or rk.get("restrictedKeyword") or "").strip()
+                if not kw:
+                    continue
+                post_rows.append({
+                    "nccAdgroupId": str(new_adg_id),
+                    "customerId": int(cid),
+                    "keyword": kw,
+                    "type": _normalize_negative_type(rk.get("type") or rk.get("matchType") or 1),
+                })
+            if post_rows:
+                _, neg_fail, neg_results = _bulk_create_restricted_keywords(api_key, secret_key, cid, post_rows)
+                if neg_fail > 0:
+                    fail_msgs = [str(x.get("message") or "") for x in (neg_results or []) if not x.get("success")]
+                    if fail_msgs:
+                        errors.extend([f"제외검색어 에러: {msg}" for msg in fail_msgs[:10]])
+                    else:
+                        errors.append("제외검색어 에러: 일부 제외검색어 복사 실패")
+        elif res_rk.status_code not in [200, 404]:
+            errors.append(f"제외검색어 조회 에러: {res_rk.text}")
     return list(set(errors))
-
 
 def _extract_adgroup(src, target_camp_id, cid, biz_channel_id):
     res = {
@@ -2874,6 +2874,7 @@ def copy_campaigns():
         r_get = _do_req("GET", api_key, secret_key, cid, f"/ncc/campaigns/{src_id}")
         if r_get.status_code != 200:
             results["fail"] += 1
+            all_errors.append(f"[원본 캠페인 {src_id}] 조회 실패: {r_get.text}")
             continue
         src = r_get.json()
         new_camp = {
@@ -2884,14 +2885,56 @@ def copy_campaigns():
             "dailyBudget": src.get("dailyBudget", 0),
         }
         r_post = _do_req("POST", api_key, secret_key, cid, "/ncc/campaigns", json_body=new_camp)
-        if r_post.status_code in [200, 201]:
-            results["success"] += 1
-        else:
+        if r_post.status_code not in [200, 201]:
             results["fail"] += 1
             all_errors.append(f"[{new_camp['name']}] 생성 실패: {r_post.text}")
+            continue
+
+        results["success"] += 1
+        new_campaign_id = str((r_post.json() or {}).get("nccCampaignId") or "").strip()
+        if not new_campaign_id:
+            all_errors.append(f"[{new_camp['name']}] 신규 캠페인 ID 확인 실패")
+            continue
+
+        r_adgs, src_adgroups = _fetch_adgroups(api_key, secret_key, cid, str(src_id))
+        if r_adgs.status_code != 200:
+            all_errors.append(f"[{new_camp['name']}] 원본 광고그룹 조회 실패: {r_adgs.text}")
+            continue
+
+        for row in (src_adgroups or []):
+            src_adg_id = str(row.get("id") or row.get("nccAdgroupId") or "").strip()
+            if not src_adg_id:
+                continue
+            r_adg = _do_req("GET", api_key, secret_key, cid, f"/ncc/adgroups/{src_adg_id}")
+            if r_adg.status_code != 200:
+                all_errors.append(f"[{new_camp['name']}] 원본 광고그룹 {src_adg_id} 조회 실패: {r_adg.text}")
+                continue
+            src_adg = r_adg.json() or {}
+            new_adg = _extract_adgroup(src_adg, new_campaign_id, cid, None)
+            r_new_adg = _do_req("POST", api_key, secret_key, cid, "/ncc/adgroups", json_body=new_adg)
+            if r_new_adg.status_code not in [200, 201]:
+                all_errors.append(f"[{new_camp['name']} > {src_adg.get('name')}] 광고그룹 생성 실패: {r_new_adg.text}")
+                continue
+
+            new_adg_id = str((r_new_adg.json() or {}).get("nccAdgroupId") or "").strip()
+            errs = _copy_adgroup_children(
+                api_key, secret_key, cid,
+                src_adg_id, new_adg_id, None,
+                include_keywords=True,
+                include_ads=True,
+                include_extensions=True,
+                include_negatives=True,
+            )
+            all_errors.extend([f"[{new_camp['name']} > {src_adg.get('name')}] {e}" for e in errs])
+
+            _, media_msgs = _copy_adgroup_media_settings(api_key, secret_key, cid, src_adg_id, new_adg_id)
+            if media_msgs:
+                for msg in media_msgs:
+                    if msg and (("실패" in msg) or ("없음" in msg) or ("비어" in msg) or ("조회" in msg)):
+                        all_errors.append(f"[{new_camp['name']} > {src_adg.get('name')}] 매체 설정: {msg}")
     msg = f"캠페인 복사 완료!\n(성공: {results['success']}개, 실패: {results['fail']}개)"
     if all_errors:
-        msg += "\n" + "\n".join(all_errors[:5])
+        msg += "\n" + "\n".join(all_errors[:10])
     return jsonify({"ok": True, "message": msg})
 
 
