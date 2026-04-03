@@ -1614,8 +1614,234 @@ def _bulk_create_restricted_keywords(api_key: str, secret_key: str, cid: str, ro
     return success, fail, sorted(results, key=lambda x: x["row_no"])
 
 
-def _copy_adgroup_children(api_key, secret_key, cid, old_adg_id, new_adg_id, biz_channel_id, include_keywords=True, include_ads=True, include_extensions=True, include_negatives=True):
-    errors = []
+def _fetch_entity_detail(api_key: str, secret_key: str, cid: str, entity_type: str, entity_id: str):
+    entity_id = str(entity_id or "").strip()
+    if not entity_id:
+        return _make_fake_response(400, "ID가 없습니다."), None
+    uri_map = {
+        "ad": f"/ncc/ads/{entity_id}",
+        "ad_extension": f"/ncc/ad-extensions/{entity_id}",
+    }
+    uri = uri_map.get(entity_type)
+    if not uri:
+        return _make_fake_response(400, f"지원하지 않는 조회 유형: {entity_type}"), None
+    res = _do_req("GET", api_key, secret_key, cid, uri)
+    if res.status_code == 200:
+        try:
+            obj = res.json()
+            if isinstance(obj, list):
+                for one in obj:
+                    if isinstance(one, dict):
+                        return res, one
+            if isinstance(obj, dict):
+                return res, obj
+        except Exception:
+            pass
+    return res, None
+
+
+def _build_copy_ad_payload(api_key: str, secret_key: str, cid: str, ad_item: Dict[str, Any], new_adg_id: str) -> Dict[str, Any]:
+    ad_item = ad_item if isinstance(ad_item, dict) else {}
+    ad_id = str(ad_item.get("nccAdId") or ad_item.get("id") or "").strip()
+    detail = None
+    if ad_id:
+        _, detail = _fetch_entity_detail(api_key, secret_key, cid, "ad", ad_id)
+    src = detail if isinstance(detail, dict) and detail else copy.deepcopy(ad_item)
+    payload = _prepare_payload_row(src, "ad", cid)
+    payload["nccAdgroupId"] = str(new_adg_id)
+    payload["customerId"] = int(cid)
+    ad_type = _normalize_ad_type(payload.get("type") or src.get("type"))
+    payload["type"] = ad_type
+
+    ref_data = src.get("referenceData") if isinstance(src.get("referenceData"), dict) else {}
+    if ad_type in SHOPPING_AD_TYPES:
+        payload["ad"] = payload.get("ad") if isinstance(payload.get("ad"), dict) else {}
+        ref_key = (
+            payload.get("referenceKey")
+            or src.get("referenceKey")
+            or ref_data.get("mallProductId")
+            or ref_data.get("id")
+        )
+        if ref_key:
+            payload["referenceKey"] = str(ref_key)
+    else:
+        payload.pop("referenceKey", None)
+
+    payload.pop("nccAdId", None)
+    payload.pop("id", None)
+    payload.pop("adId", None)
+    return _strip_empty(payload)
+
+
+def _build_copy_extension_payload(api_key: str, secret_key: str, cid: str, ext_item: Dict[str, Any], new_owner_id: str, biz_channel_id: str | None = None) -> Dict[str, Any]:
+    ext_item = ext_item if isinstance(ext_item, dict) else {}
+    ext_id = str(ext_item.get("adExtensionId") or ext_item.get("id") or "").strip()
+    detail = None
+    if ext_id:
+        _, detail = _fetch_entity_detail(api_key, secret_key, cid, "ad_extension", ext_id)
+    src = detail if isinstance(detail, dict) and detail else copy.deepcopy(ext_item)
+    payload = _prepare_payload_row(src, "ad_extension", cid)
+    payload["ownerId"] = str(new_owner_id)
+    payload["customerId"] = int(cid)
+    ext_type = _normalize_extension_type(payload.get("type") or src.get("type"))
+    payload["type"] = ext_type
+    if biz_channel_id and biz_channel_id not in ["keep", "undefined"] and ext_type in ["SUB_LINKS", "POWER_LINK_IMAGE", "WEBSITE_INFO", "IMAGE_SUB_LINKS"]:
+        payload["pcChannelId"] = str(biz_channel_id)
+        payload["mobileChannelId"] = str(biz_channel_id)
+    payload.pop("adExtensionId", None)
+    payload.pop("id", None)
+    if ext_type == "SHOPPING_EXTRA":
+        payload.pop("adExtension", None)
+    return _strip_empty(payload)
+
+
+def _extract_created_ad_id_from_response(res: Any) -> str:
+    if res is None:
+        return ""
+    try:
+        data = res.json()
+    except Exception:
+        return ""
+
+    def _walk(obj: Any) -> str:
+        if isinstance(obj, dict):
+            for key in ("nccAdId", "adId", "id"):
+                value = str(obj.get(key) or "").strip()
+                if value and (value.startswith("nad-") or value.startswith("ad-") or value.startswith("ncc") or len(value) >= 10):
+                    return value
+            for value in obj.values():
+                found = _walk(value)
+                if found:
+                    return found
+        elif isinstance(obj, list):
+            for item in obj:
+                found = _walk(item)
+                if found:
+                    return found
+        return ""
+
+    return _walk(data)
+
+
+def _extract_reference_key_from_ad(ad_item: Dict[str, Any] | None) -> str:
+    ad_item = ad_item if isinstance(ad_item, dict) else {}
+    ref_data = ad_item.get("referenceData") if isinstance(ad_item.get("referenceData"), dict) else {}
+    candidates = [
+        ad_item.get("referenceKey"),
+        ref_data.get("mallProductId"),
+        ref_data.get("id"),
+        ref_data.get("parentId"),
+        ref_data.get("productId"),
+        ref_data.get("mallProductNo"),
+        ref_data.get("channelProductNo"),
+        ref_data.get("productNo"),
+    ]
+    for value in candidates:
+        s = str(value or "").strip()
+        if s:
+            return s
+    return ""
+
+
+def _classify_copy_ad_strategy(ads: List[Dict[str, Any]] | None) -> str:
+    ads = [x for x in (ads or []) if isinstance(x, dict)]
+    if not ads:
+        return "none"
+    shopping = 0
+    standard = 0
+    for ad in ads:
+        if _normalize_ad_type(ad.get("type") or ad.get("adType")) in SHOPPING_AD_TYPES:
+            shopping += 1
+        else:
+            standard += 1
+    if shopping and standard:
+        return "mixed"
+    if shopping:
+        return "shopping"
+    return "standard"
+
+
+def _find_created_ad_id_by_reference(api_key: str, secret_key: str, cid: str, adgroup_id: str, reference_key: str, before_ids: set[str] | None = None) -> str:
+    reference_key = str(reference_key or "").strip()
+    res_ads, ads = _fetch_ads(api_key, secret_key, cid, str(adgroup_id))
+    if res_ads.status_code != 200:
+        return ""
+    before_ids = {str(x).strip() for x in (before_ids or set()) if str(x).strip()}
+    for ad in (ads or []):
+        if not isinstance(ad, dict):
+            continue
+        ad_id = _extract_ad_id(ad)
+        if before_ids and ad_id in before_ids:
+            continue
+        if _extract_reference_key_from_ad(ad) == reference_key:
+            return ad_id
+    return ""
+
+
+def _build_copy_summary(source_adgroup_id: str, target_adgroup_id: str) -> Dict[str, Any]:
+    return {
+        "source_adgroup_id": str(source_adgroup_id or "").strip(),
+        "target_adgroup_id": str(target_adgroup_id or "").strip(),
+        "strategy": "none",
+        "keywords": {"source": 0, "success": 0, "fail": 0},
+        "ads": {"source": 0, "success": 0, "fail": 0, "standard_source": 0, "shopping_source": 0},
+        "group_extensions": {"source": 0, "success": 0, "fail": 0},
+        "ad_extensions": {"source": 0, "success": 0, "fail": 0},
+        "negatives": {"source": 0, "success": 0, "fail": 0},
+        "notes": [],
+    }
+
+
+def _format_copy_summary(summary: Dict[str, Any]) -> str:
+    if not isinstance(summary, dict):
+        return "복사 요약 없음"
+    strategy = str(summary.get("strategy") or "none")
+    kw = summary.get("keywords") or {}
+    ads = summary.get("ads") or {}
+    gext = summary.get("group_extensions") or {}
+    aext = summary.get("ad_extensions") or {}
+    neg = summary.get("negatives") or {}
+    notes = [str(x).strip() for x in (summary.get("notes") or []) if str(x).strip()]
+    base = (
+        f"전략={strategy} | 키워드 {int(kw.get('success') or 0)}/{int(kw.get('source') or 0)}"
+        f" | 소재 {int(ads.get('success') or 0)}/{int(ads.get('source') or 0)}"
+        f" (일반 {int(ads.get('standard_source') or 0)}, 쇼핑 {int(ads.get('shopping_source') or 0)})"
+        f" | 그룹확장 {int(gext.get('success') or 0)}/{int(gext.get('source') or 0)}"
+        f" | 소재하위확장 {int(aext.get('success') or 0)}/{int(aext.get('source') or 0)}"
+        f" | 제외검색어 {int(neg.get('success') or 0)}/{int(neg.get('source') or 0)}"
+    )
+    if notes:
+        base += " | 참고: " + "; ".join(notes[:3])
+    return base
+
+def _copy_ad_owner_extensions(api_key: str, secret_key: str, cid: str, old_owner_id: str, new_owner_id: str, biz_channel_id: str | None = None) -> List[str]:
+    errors: List[str] = []
+    old_owner_id = str(old_owner_id or "").strip()
+    new_owner_id = str(new_owner_id or "").strip()
+    if not old_owner_id or not new_owner_id:
+        return errors
+
+    r_ext = _do_req("GET", api_key, secret_key, cid, "/ncc/ad-extensions", params={"ownerId": old_owner_id})
+    if r_ext.status_code != 200:
+        if r_ext.status_code not in [404]:
+            errors.append(f"소재 확장소재 조회 실패({old_owner_id}): {r_ext.text}")
+        return errors
+
+    for ext in (r_ext.json() or []):
+        if not isinstance(ext, dict):
+            continue
+        item = _build_copy_extension_payload(api_key, secret_key, cid, ext, new_owner_id, biz_channel_id)
+        res = _do_req("POST", api_key, secret_key, cid, "/ncc/ad-extensions", params={"ownerId": new_owner_id}, json_body=item)
+        if res.status_code not in [200, 201] and "4003" not in res.text:
+            ext_type = _normalize_extension_type(item.get("type"))
+            errors.append(f"소재 확장소재 에러({ext_type}): {res.text}")
+    return errors
+
+
+def _copy_adgroup_children(api_key, secret_key, cid, old_adg_id, new_adg_id, biz_channel_id, include_keywords=True, include_ads=True, include_extensions=True, include_negatives=True, return_summary=False):
+    errors: List[str] = []
+    summary = _build_copy_summary(str(old_adg_id), str(new_adg_id))
+
     if include_keywords:
         r_kw = _do_req("GET", api_key, secret_key, cid, "/ncc/keywords", params={"nccAdgroupId": old_adg_id})
     else:
@@ -1628,69 +1854,119 @@ def _copy_adgroup_children(api_key, secret_key, cid, old_adg_id, new_adg_id, biz
                 item.pop(k, None)
             item.update({"nccAdgroupId": str(new_adg_id), "customerId": int(cid)})
             new_kws.append(item)
+        summary["keywords"]["source"] = len(new_kws)
         if new_kws:
             for i in range(0, len(new_kws), 100):
                 batch = new_kws[i:i + 100]
                 res = _do_req("POST", api_key, secret_key, cid, "/ncc/keywords", params={"nccAdgroupId": new_adg_id}, json_body=batch)
-                if res.status_code not in [200, 201]:
+                if res.status_code in [200, 201]:
+                    summary["keywords"]["success"] += len(batch)
+                else:
                     for item in batch:
                         r_single = _do_req("POST", api_key, secret_key, cid, "/ncc/keywords", params={"nccAdgroupId": new_adg_id}, json_body=item)
-                        if r_single.status_code not in [200, 201]:
+                        if r_single.status_code in [200, 201]:
+                            summary["keywords"]["success"] += 1
+                        else:
+                            summary["keywords"]["fail"] += 1
                             errors.append(f"키워드 에러: {r_single.text}")
+    elif r_kw is not None and r_kw.status_code not in [200, 404]:
+        errors.append(f"키워드 조회 에러: {r_kw.text}")
+        summary["notes"].append("키워드 조회 실패")
 
     if include_ads:
         r_ad = _do_req("GET", api_key, secret_key, cid, "/ncc/ads", params={"nccAdgroupId": old_adg_id})
     else:
         r_ad = None
+    copied_ad_owner_pairs: List[Tuple[str, str]] = []
     if r_ad is not None and r_ad.status_code == 200:
-        ads = r_ad.json() or []
+        ads = [x for x in (r_ad.json() or []) if isinstance(x, dict)]
+        summary["strategy"] = _classify_copy_ad_strategy(ads)
+        summary["ads"]["source"] = len(ads)
+        summary["ads"]["shopping_source"] = sum(1 for ad in ads if _normalize_ad_type(ad.get("type") or ad.get("adType")) in SHOPPING_AD_TYPES)
+        summary["ads"]["standard_source"] = int(summary["ads"]["source"] or 0) - int(summary["ads"]["shopping_source"] or 0)
 
         def _post_ad(ad):
-            item = copy.deepcopy(ad)
-            ad_type = item.get("type", "")
-            ref_data = item.get("referenceData", {})
-            if ad_type in SHOPPING_AD_TYPES:
-                item["ad"] = {}
-                ref_key = item.get("referenceKey") or ref_data.get("mallProductId") or ref_data.get("id")
-                if ref_key:
-                    item["referenceKey"] = str(ref_key)
-            else:
-                item.pop('referenceKey', None)
-            for k in ['nccAdId', 'regTm', 'editTm', 'status', 'statusReason', 'inspectStatus', 'delFlag', 'referenceData', 'nccQi', 'enable']:
-                item.pop(k, None)
-            item.update({"nccAdgroupId": str(new_adg_id), "customerId": int(cid)})
+            src_ad = ad if isinstance(ad, dict) else {}
+            src_ad_id = _extract_ad_id(src_ad)
+            item = _build_copy_ad_payload(api_key, secret_key, cid, src_ad, str(new_adg_id))
+            ad_type = _normalize_ad_type(item.get("type"))
             item.setdefault("userLock", False)
+            before_ids: set[str] = set()
+            ref_key = _extract_reference_key_from_ad(src_ad) or str(item.get("referenceKey") or "").strip()
             if ad_type in SHOPPING_AD_TYPES:
+                res_before, before_ads = _fetch_ads(api_key, secret_key, cid, str(new_adg_id))
+                if res_before.status_code == 200:
+                    before_ids = {_extract_ad_id(x) for x in (before_ads or []) if isinstance(x, dict) and _extract_ad_id(x)}
                 res = _do_req("POST", api_key, secret_key, cid, "/ncc/ads", params={"nccAdgroupId": new_adg_id, "isList": "true"}, json_body=[item])
             else:
                 res = _do_req("POST", api_key, secret_key, cid, "/ncc/ads", params={"nccAdgroupId": new_adg_id}, json_body=item)
             if res.status_code not in [200, 201]:
-                return f"소재 에러: {res.text}"
-            return None
+                ad_name = str(((item.get("ad") or {}).get("headline") if isinstance(item.get("ad"), dict) else "") or item.get("type") or "")
+                return {"error": f"소재 에러({ad_name}): {res.text}", "source_ad_id": src_ad_id, "created_ad_id": ""}
+            created_ad_id = _extract_created_ad_id_from_response(res)
+            if not created_ad_id and ref_key:
+                created_ad_id = _find_created_ad_id_by_reference(api_key, secret_key, cid, str(new_adg_id), ref_key, before_ids)
+            if ad_type in SHOPPING_AD_TYPES and not created_ad_id:
+                ad_name = str(item.get("type") or "쇼핑소재")
+                return {"error": f"소재 에러({ad_name}): 생성 후 소재 ID 확인 실패", "source_ad_id": src_ad_id, "created_ad_id": ""}
+            return {"error": None, "source_ad_id": src_ad_id, "created_ad_id": created_ad_id}
 
         with ThreadPoolExecutor(max_workers=5) as executor:
             futures = [executor.submit(_post_ad, ad) for ad in ads]
             for f in as_completed(futures):
-                err_msg = f.result()
+                result = f.result() or {}
+                err_msg = result.get("error")
                 if err_msg:
+                    summary["ads"]["fail"] += 1
                     errors.append(err_msg)
+                    continue
+                summary["ads"]["success"] += 1
+                src_ad_id = str(result.get("source_ad_id") or "").strip()
+                created_ad_id = str(result.get("created_ad_id") or "").strip()
+                if src_ad_id and created_ad_id:
+                    copied_ad_owner_pairs.append((src_ad_id, created_ad_id))
+    elif r_ad is not None and r_ad.status_code not in [200, 404]:
+        errors.append(f"소재 조회 에러: {r_ad.text}")
+        summary["notes"].append("소재 조회 실패")
 
     if include_extensions:
         r_ext = _do_req("GET", api_key, secret_key, cid, "/ncc/ad-extensions", params={"ownerId": old_adg_id})
     else:
         r_ext = None
     if r_ext is not None and r_ext.status_code == 200:
-        for ext in r_ext.json() or []:
-            item = copy.deepcopy(ext)
-            for k in ['adExtensionId', 'regTm', 'editTm', 'status', 'statusReason', 'inspectStatus', 'delFlag', 'referenceKey']:
-                item.pop(k, None)
-            item.update({"ownerId": str(new_adg_id), "customerId": int(cid)})
-            ext_type = item.get("type")
-            if biz_channel_id and biz_channel_id not in ["keep", "undefined"] and ext_type in ["SUB_LINKS", "POWER_LINK_IMAGE", "WEBSITE_INFO", "IMAGE_SUB_LINKS"]:
-                item["pcChannelId"] = item["mobileChannelId"] = str(biz_channel_id)
+        group_exts = [x for x in (r_ext.json() or []) if isinstance(x, dict)]
+        summary["group_extensions"]["source"] = len(group_exts)
+        for ext in group_exts:
+            item = _build_copy_extension_payload(api_key, secret_key, cid, ext, str(new_adg_id), biz_channel_id)
             res = _do_req("POST", api_key, secret_key, cid, "/ncc/ad-extensions", params={"ownerId": new_adg_id}, json_body=item)
             if res.status_code not in [200, 201] and "4003" not in res.text:
-                errors.append(f"확장소재 에러: {res.text}")
+                summary["group_extensions"]["fail"] += 1
+                ext_type = _normalize_extension_type(item.get("type"))
+                errors.append(f"확장소재 에러({ext_type}): {res.text}")
+            else:
+                summary["group_extensions"]["success"] += 1
+    elif r_ext is not None and r_ext.status_code not in [200, 404]:
+        errors.append(f"광고그룹 확장소재 조회 에러: {r_ext.text}")
+        summary["notes"].append("광고그룹 확장소재 조회 실패")
+
+    if include_extensions and copied_ad_owner_pairs:
+        seen_owner_pairs = set()
+        for old_owner_id, new_owner_id in copied_ad_owner_pairs:
+            pair = (str(old_owner_id), str(new_owner_id))
+            if not pair[0] or not pair[1] or pair in seen_owner_pairs:
+                continue
+            seen_owner_pairs.add(pair)
+            old_res, old_items = _fetch_extensions(api_key, secret_key, cid, pair[0])
+            if old_res.status_code == 200:
+                summary["ad_extensions"]["source"] += len([x for x in (old_items or []) if isinstance(x, dict)])
+            child_errors = _copy_ad_owner_extensions(api_key, secret_key, cid, pair[0], pair[1], biz_channel_id)
+            if child_errors:
+                summary["ad_extensions"]["fail"] += len(child_errors)
+                errors.extend(child_errors)
+            elif old_res.status_code == 200:
+                summary["ad_extensions"]["success"] += len([x for x in (old_items or []) if isinstance(x, dict)])
+    if summary["ad_extensions"]["source"] < summary["ad_extensions"]["success"]:
+        summary["ad_extensions"]["source"] = summary["ad_extensions"]["success"]
 
     if include_negatives:
         res_rk, rows_rk = _fetch_restricted_keywords(api_key, secret_key, cid, str(old_adg_id))
@@ -1708,8 +1984,11 @@ def _copy_adgroup_children(api_key, secret_key, cid, old_adg_id, new_adg_id, biz
                     "keyword": kw,
                     "type": _normalize_negative_type(rk.get("type") or rk.get("matchType") or 1),
                 })
+            summary["negatives"]["source"] = len(post_rows)
             if post_rows:
-                _, neg_fail, neg_results = _bulk_create_restricted_keywords(api_key, secret_key, cid, post_rows)
+                neg_success, neg_fail, neg_results = _bulk_create_restricted_keywords(api_key, secret_key, cid, post_rows)
+                summary["negatives"]["success"] = int(neg_success or 0)
+                summary["negatives"]["fail"] = int(neg_fail or 0)
                 if neg_fail > 0:
                     fail_msgs = [str(x.get("message") or "") for x in (neg_results or []) if not x.get("success")]
                     if fail_msgs:
@@ -1718,7 +1997,12 @@ def _copy_adgroup_children(api_key, secret_key, cid, old_adg_id, new_adg_id, biz
                         errors.append("제외검색어 에러: 일부 제외검색어 복사 실패")
         elif res_rk.status_code not in [200, 404]:
             errors.append(f"제외검색어 조회 에러: {res_rk.text}")
-    return list(set(errors))
+            summary["notes"].append("제외검색어 조회 실패")
+
+    dedup_errors = list(dict.fromkeys([str(x) for x in errors if str(x).strip()]))
+    if return_summary:
+        return dedup_errors, summary
+    return dedup_errors
 
 def _extract_adgroup(src, target_camp_id, cid, biz_channel_id):
     res = {
@@ -2844,19 +3128,23 @@ def copy_entities_to_adgroups():
             if str(src_id) == str(target_id):
                 skipped_same += 1
                 continue
-            errs = _copy_adgroup_children(
+            errs, summary = _copy_adgroup_children(
                 api_key, secret_key, cid,
                 str(src_id), str(target_id), None,
                 include_keywords=include_keywords,
                 include_ads=include_ads,
                 include_extensions=include_extensions,
                 include_negatives=include_negatives,
+                return_summary=True,
             )
+            summary_line = _format_copy_summary(summary)
             if errs:
                 fail += 1
+                all_errors.append(f"[원본 {src_id} → 대상 {target_id}] {summary_line}")
                 all_errors.extend([f"[원본 {src_id} → 대상 {target_id}] {e}" for e in errs])
             else:
                 success += 1
+                all_errors.append(f"[원본 {src_id} → 대상 {target_id}] {summary_line}")
 
     msg = f"항목 복사 완료! (성공: {success}, 실패: {fail}, 동일 그룹 건너뜀: {skipped_same})"
     if all_errors:
@@ -2917,14 +3205,16 @@ def copy_campaigns():
                 continue
 
             new_adg_id = str((r_new_adg.json() or {}).get("nccAdgroupId") or "").strip()
-            errs = _copy_adgroup_children(
+            errs, summary = _copy_adgroup_children(
                 api_key, secret_key, cid,
                 src_adg_id, new_adg_id, None,
                 include_keywords=True,
                 include_ads=True,
                 include_extensions=True,
                 include_negatives=True,
+                return_summary=True,
             )
+            all_errors.append(f"[{new_camp['name']} > {src_adg.get('name')}] {_format_copy_summary(summary)}")
             all_errors.extend([f"[{new_camp['name']} > {src_adg.get('name')}] {e}" for e in errs])
 
             _, media_msgs = _copy_adgroup_media_settings(api_key, secret_key, cid, src_adg_id, new_adg_id)
@@ -2965,11 +3255,13 @@ def copy_adgroups_to_target():
         if r_post.status_code in [200, 201]:
             results["success"] += 1
             new_adg_id = str((r_post.json() or {}).get("nccAdgroupId") or "").strip()
-            errs = _copy_adgroup_children(
+            errs, summary = _copy_adgroup_children(
                 api_key, secret_key, cid, src_id, new_adg_id, biz_channel_id,
                 include_keywords=include_keywords, include_ads=include_ads,
-                include_extensions=include_extensions, include_negatives=include_negatives
+                include_extensions=include_extensions, include_negatives=include_negatives,
+                return_summary=True,
             )
+            all_errors.append(f"[{new_adg['name']}] {_format_copy_summary(summary)}")
             all_errors.extend([f"[{new_adg['name']}] {e}" for e in errs])
 
             if copy_media and new_adg_id:

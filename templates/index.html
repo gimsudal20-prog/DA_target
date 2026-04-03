@@ -798,7 +798,9 @@ function isShoppingLikeType(value) {
 }
 function getFilteredMasterItems(type) {
     const q = document.getElementById('master_search').value.toLowerCase();
-    const source = type === 'campaign' ? campaigns : (currentCampaignId ? adgroups : []);
+    const isCampaign = type === 'campaign';
+    const source = isCampaign ? campaigns : (currentCampaignId ? adgroups : []);
+    if(!isCampaign) return source;
     return source.filter(x => !q || String(x?.name || '').toLowerCase().includes(q));
 }
 function isTypeMatch(type, item, targetType) {
@@ -1011,7 +1013,7 @@ function renderMasterList() {
     
     // Campaigns
     const campList = document.getElementById('campaign_list'); campList.innerHTML = '';
-    const filteredCamps = campaigns.filter(x => !q || String(x?.name || '').toLowerCase().includes(q));
+    const filteredCamps = getFilteredMasterItems('campaign');
     document.getElementById('master_camp_count').textContent = filteredCamps.length;
     syncSelectAllCheckbox('campaign', filteredCamps);
     
@@ -1036,7 +1038,7 @@ function renderMasterList() {
         syncSelectAllCheckbox('adgroup', []);
         adgList.innerHTML = `<div style="padding:16px;text-align:center;color:#9ca3af;font-size:12px;">캠페인을 선택하세요.</div>`;
     } else {
-        const filteredAdg = adgroups.filter(x => !q || String(x?.name || '').toLowerCase().includes(q));
+        const filteredAdg = getFilteredMasterItems('adgroup');
         document.getElementById('master_adg_count').textContent = filteredAdg.length;
         syncSelectAllCheckbox('adgroup', filteredAdg);
         filteredAdg.forEach(a => {
@@ -1063,9 +1065,7 @@ function toggleListCheck(type, id) {
 
 function toggleSelectAll(type) {
     const isCamp = type === 'campaign';
-    const q = document.getElementById('master_search').value.toLowerCase();
-    const source = isCamp ? campaigns : adgroups;
-    const filtered = source.filter(x => !q || String(x?.name || '').toLowerCase().includes(q));
+    const filtered = getFilteredMasterItems(type);
     const set = isCamp ? checkedCampaignIds : checkedAdgroupIds;
     const box = document.getElementById(isCamp ? 'camp_select_all' : 'adg_select_all');
     
