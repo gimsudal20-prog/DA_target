@@ -28,7 +28,10 @@ OPENAPI_BASE_URL = "https://api.searchad.naver.com"
 app = Flask(__name__, template_folder=TEMPLATES_DIR)
 
 DAY_NUM_TO_CODE = {1: "MON", 2: "TUE", 3: "WED", 4: "THU", 5: "FRI", 6: "SAT", 7: "SUN"}
-SHOPPING_AD_TYPES = {"SHOPPING_PRODUCT_AD", "CATALOG_PRODUCT_AD", "SHOPPING_BRAND_AD"}
+SHOPPING_AD_TYPES = {"SHOPPING_PRODUCT_AD", "CATALOG_PRODUCT_AD", "CATALOG_AD", "SHOPPING_BRAND_AD"}
+SHOPPING_TARGETABLE_ADGROUP_TYPES = {"SHOPPING", "CATALOG", "SHOPPING_BRAND"}
+SHOPPING_ITEM_BID_AD_TYPES = {"SHOPPING_PRODUCT_AD", "CATALOG_PRODUCT_AD", "CATALOG_AD"}
+SHOPPING_ADGROUP_TYPES_WITH_AD_LEVEL_BID = {"SHOPPING", "CATALOG"}
 
 CAMPAIGN_TYPE_LABELS = {
     "WEB_SITE": "파워링크",
@@ -740,6 +743,133 @@ def _fetch_ads(api_key: str, secret_key: str, cid: str, adgroup_id: str):
     return res, res.json() or []
 
 
+def _resolve_adgroup_contexts(api_key: str, secret_key: str, cid: str, entity_type: str, entity_ids: List[str]):
+    contexts: List[Dict[str, Any]] = []
+    warnings: List[str] = []
+    seen: set[str] = set()
+    entity_type = str(entity_type or "adgroup").strip().lower()
+    entity_ids = _unique_keep_order(entity_ids or [])
+
+    def _append_context(adgroup_id: str, obj: Dict[str, Any] | None, fallback_name: str = ""):
+        adgroup_id = str(adgroup_id or "").strip()
+        if not adgroup_id or adgroup_id in seen:
+            return
+        obj = obj or {}
+        raw = obj.get("raw") if isinstance(obj, dict) and isinstance(obj.get("raw"), dict) else obj
+        contexts.append({
+            "adgroup_id": adgroup_id,
+            "adgroup_type": str((obj or {}).get("adgroupType") or (raw or {}).get("adgroupType") or "").upper(),
+            "adgroup_bid": (raw or {}).get("bidAmt"),
+            "name": str((obj or {}).get("name") or (raw or {}).get("name") or fallback_name or ""),
+        })
+        seen.add(adgroup_id)
+
+    if entity_type == "campaign":
+        for camp_id in entity_ids:
+            camp_id = str(camp_id or "").strip()
+            if not camp_id:
+                continue
+            res, rows = _fetch_adgroups(api_key, secret_key, cid, camp_id)
+            if res.status_code != 200:
+                warnings.append(f"캠페인 {camp_id} 하위 광고그룹 조회 실패: {res.text}")
+                continue
+            for row in rows:
+                _append_context(str(row.get("id") or row.get("nccAdgroupId") or ""), row, fallback_name=str(row.get("name") or ""))
+    else:
+        for adg_id in entity_ids:
+            adg_id = str(adg_id or "").strip()
+            if not adg_id:
+                continue
+            res, obj = _fetch_adgroup_detail(api_key, secret_key, cid, adg_id)
+            if res.status_code != 200 or not obj:
+                warnings.append(f"광고그룹 {adg_id} 조회 실패: {res.text}")
+                continue
+            _append_context(str(obj.get("nccAdgroupId") or adg_id), obj, fallback_name=str(obj.get("name") or adg_id))
+    return contexts, warnings
+
+
+def _adgroup_uses_ad_level_bid(adgroup_type: str) -> bool:
+    return str(adgroup_type or "").upper() in SHOPPING_ADGROUP_TYPES_WITH_AD_LEVEL_BID
+
+
+def _ad_item_has_bid_attr(ad_item: Dict[str, Any] | None) -> bool:
+    return str((ad_item or {}).get("type") or "").upper() in SHOPPING_ITEM_BID_AD_TYPES
+
+
+def _extract_ad_attr(ad_item: Dict[str, Any] | None) -> Dict[str, Any]:
+    ad_attr = (ad_item or {}).get("adAttr")
+    return copy.deepcopy(ad_attr) if isinstance(ad_attr, dict) else {}
+
+
+def _resolve_effective_bid(raw_bid: Any, use_group_bid: bool, adgroup_bid: Any) -> Optional[int]:
+    if bool(use_group_bid):
+        group_bid = _normalize_bid_amt(adgroup_bid)
+        if group_bid is not None:
+            return group_bid
+    return _normalize_bid_amt(raw_bid)
+
+
+def _put_single_ad_with_ad_attr(api_key: str, secret_key: str, cid: str, ad_item: Dict[str, Any]):
+    ad_id = _extract_ad_id(ad_item)
+    cleanup_keys = ['regTm', 'editTm', 'status', 'statusReason', 'inspectStatus', 'delFlag', 'referenceKey', 'referenceData', 'referenceKeyData']
+    item = copy.deepcopy(ad_item)
+    for k in cleanup_keys:
+        item.pop(k, None)
+    res = _do_req("PUT", api_key, secret_key, cid, f"/ncc/ads/{ad_id}", params={"fields": "adAttr"}, json_body=item)
+    if res.status_code in [200, 201]:
+        return res
+    fallback = _do_req("PUT", api_key, secret_key, cid, "/ncc/ads", params={"fields": "adAttr"}, json_body=[item])
+    if fallback.status_code in [200, 201]:
+        return fallback
+    return res
+
+
+def _apply_ad_bid_map(api_key: str, secret_key: str, cid: str, adgroup_contexts: List[Dict[str, Any]], bid_map: Dict[str, int], ad_meta: Optional[Dict[str, Dict[str, Any]]] = None):
+    success_cnt = fail_cnt = skipped_cnt = 0
+    err_details: List[str] = []
+    ad_meta = ad_meta or {}
+    for ctx in adgroup_contexts:
+        if not _adgroup_uses_ad_level_bid(ctx.get("adgroup_type")):
+            continue
+        adg_id = str(ctx.get("adgroup_id") or "").strip()
+        res_ads, ads = _fetch_ads(api_key, secret_key, cid, adg_id)
+        if res_ads.status_code != 200:
+            fail_cnt += 1
+            if len(err_details) < 5:
+                err_details.append(f"[광고그룹 {adg_id}] 소재 조회 실패: {res_ads.text}")
+            continue
+        for ad in (ads or []):
+            if not _ad_item_has_bid_attr(ad):
+                continue
+            ad_id = _extract_ad_id(ad)
+            if not ad_id:
+                continue
+            if ad_id not in bid_map:
+                skipped_cnt += 1
+                continue
+            meta = ad_meta.get(ad_id, {})
+            current_use_group = bool(meta.get("use_group_bid", _extract_ad_attr(ad).get("useGroupBidAmt")))
+            current_bid = _normalize_bid_amt(meta.get("current_bid"))
+            target_bid = int(bid_map[ad_id])
+            if current_bid == target_bid and (not current_use_group):
+                skipped_cnt += 1
+                continue
+            item = copy.deepcopy(ad)
+            ad_attr = _extract_ad_attr(item)
+            ad_attr["useGroupBidAmt"] = False
+            ad_attr["bidAmt"] = target_bid
+            item["adAttr"] = ad_attr
+            r_put = _put_single_ad_with_ad_attr(api_key, secret_key, cid, item)
+            if r_put.status_code in [200, 201]:
+                success_cnt += 1
+            else:
+                fail_cnt += 1
+                if len(err_details) < 5:
+                    name = str(meta.get("name") or ((ad.get("ad") or {}).get("productName") if isinstance(ad.get("ad"), dict) else "") or ad_id)
+                    err_details.append(f"[{name}] 변경 실패: {r_put.text}")
+    return success_cnt, fail_cnt, skipped_cnt, err_details
+
+
 def _resolve_shopping_extra_owner_ids(api_key: str, secret_key: str, cid: str, campaign_ids: List[str] | None = None, adgroup_ids: List[str] | None = None):
     campaign_ids = [str(x).strip() for x in (campaign_ids or []) if str(x).strip()]
     adgroup_ids = [str(x).strip() for x in (adgroup_ids or []) if str(x).strip()]
@@ -821,6 +951,10 @@ def _fetch_target_object(api_key: str, secret_key: str, cid: str, owner_id: str,
         if isinstance(item, dict) and str(item.get("targetTp") or "").upper() == str(target_type or "").upper():
             return res, item
     return res, None
+
+
+def _fetch_non_search_keyword_target(api_key: str, secret_key: str, cid: str, owner_id: str):
+    return _fetch_target_object(api_key, secret_key, cid, owner_id, "NON_SEARCH_KEYWORD_TARGET")
 
 
 def _get_pc_mobile_tuple(media_type: Any) -> Tuple[bool, bool]:
@@ -924,6 +1058,25 @@ def _update_media_target(api_key: str, secret_key: str, cid: str, owner_id: str,
         return False, res_put.text
     fallback_detail = res_target.text if res_target is not None else "MEDIA_TARGET 조회 실패"
     return False, f"MEDIA_TARGET 조회 실패: {fallback_detail}"
+
+
+def _update_non_search_keyword_target(api_key: str, secret_key: str, cid: str, owner_id: str, excluded: bool):
+    res_target, target_obj = _fetch_non_search_keyword_target(api_key, secret_key, cid, owner_id)
+    if res_target.status_code != 200:
+        return False, f"NON_SEARCH_KEYWORD_TARGET 조회 실패: {res_target.text}"
+    if not target_obj or not target_obj.get("nccTargetId"):
+        return False, "NON_SEARCH_KEYWORD_TARGET 정보를 찾지 못했습니다. 광고센터에서 해당 쇼핑 광고그룹의 제외키워드 탭을 한 번 저장한 뒤 다시 시도해주세요."
+    payload = {
+        "nccTargetId": target_obj.get("nccTargetId"),
+        "ownerId": owner_id,
+        "targetTp": "NON_SEARCH_KEYWORD_TARGET",
+        "target": {"excluded": bool(excluded)},
+        "delFlag": False,
+    }
+    res_put = _do_req("PUT", api_key, secret_key, cid, f"/ncc/targets/{target_obj.get('nccTargetId')}", json_body=payload)
+    if res_put.status_code in [200, 201]:
+        return True, "검색어 없는 경우 광고 노출 제외 설정 완료"
+    return False, res_put.text
 
 
 def _copy_target_payload_exact(api_key: str, secret_key: str, cid: str, source_owner_id: str, target_owner_id: str, target_type: str):
@@ -3232,7 +3385,9 @@ def copy_campaigns():
 def copy_adgroups_to_target():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
-    src_ids = _unique_keep_order(d.get("source_ids") or [])
+    source_ids = _unique_keep_order(d.get("source_ids") or [])
+    source_campaign_ids = _unique_keep_order(d.get("source_campaign_ids") or [])
+    src_ids, resolve_warnings = _resolve_copy_source_adgroup_ids(api_key, secret_key, cid, source_ids, source_campaign_ids)
     target_camp_id = d.get("target_campaign_id")
     suffix = d.get("suffix", "_복사본")
     biz_channel_id = d.get("biz_channel_id")
@@ -3242,14 +3397,17 @@ def copy_adgroups_to_target():
     include_negatives = _boolish(d.get("include_negatives"), True)
     copy_media = _boolish(d.get("copy_media"), True)
     copy_as_off = _boolish(d.get("copy_as_off"), False)
-    results, all_errors = {"success": 0, "fail": 0}, []
+    if not src_ids:
+        return jsonify({"error": "복사할 광고그룹 또는 캠페인을 선택해주세요."}), 400
+    results, all_errors = {"success": 0, "fail": 0}, list(resolve_warnings)
     for src_id in src_ids:
         r_get = _do_req("GET", api_key, secret_key, cid, f"/ncc/adgroups/{src_id}")
         if r_get.status_code != 200:
             results["fail"] += 1
             all_errors.append(f"[원본 {src_id}] 조회 실패: {r_get.text}")
             continue
-        new_adg = _extract_adgroup(r_get.json(), target_camp_id, cid, biz_channel_id)
+        src_obj = r_get.json() or {}
+        new_adg = _extract_adgroup(src_obj, target_camp_id, cid, biz_channel_id)
         new_adg["name"] = str(new_adg.get("name") or "") + suffix
         r_post = _do_req("POST", api_key, secret_key, cid, "/ncc/adgroups", json_body=new_adg)
         if r_post.status_code in [200, 201]:
@@ -3689,6 +3847,33 @@ def _unique_keep_order(values: List[str]) -> List[str]:
     return out
 
 
+def _resolve_adgroup_ids(api_key: str, secret_key: str, cid: str, entity_type: str, entity_ids: List[str]):
+    adgroup_ids: List[str] = []
+    warnings: List[str] = []
+    entity_type = str(entity_type or "adgroup").strip().lower()
+    entity_ids = _unique_keep_order(entity_ids or [])
+    if entity_type == "campaign":
+        for camp_id in entity_ids:
+            res, rows = _fetch_adgroups(api_key, secret_key, cid, str(camp_id).strip())
+            if res.status_code != 200:
+                warnings.append(f"캠페인 {camp_id} 하위 광고그룹 조회 실패: {res.text}")
+                continue
+            for row in rows:
+                adg_id = str(row.get("id") or row.get("nccAdgroupId") or "").strip()
+                if adg_id:
+                    adgroup_ids.append(adg_id)
+    else:
+        adgroup_ids.extend([str(x).strip() for x in (entity_ids or []) if str(x).strip()])
+    return _unique_keep_order(adgroup_ids), warnings
+
+
+def _resolve_copy_source_adgroup_ids(api_key: str, secret_key: str, cid: str, source_ids: List[str], source_campaign_ids: List[str]):
+    direct_ids = _unique_keep_order(source_ids or [])
+    campaign_adgroup_ids, warnings = _resolve_adgroup_ids(api_key, secret_key, cid, "campaign", source_campaign_ids or [])
+    resolved = _unique_keep_order(direct_ids + campaign_adgroup_ids)
+    return resolved, warnings
+
+
 def _resolve_web_site_adgroup_ids(api_key: str, secret_key: str, cid: str, entity_type: str, entity_ids: List[str]):
     adgroup_ids: List[str] = []
     skipped_non_web = 0
@@ -3717,6 +3902,38 @@ def _resolve_web_site_adgroup_ids(api_key: str, secret_key: str, cid: str, entit
     return _unique_keep_order(adgroup_ids), skipped_non_web, warnings
 
 
+def _resolve_shopping_adgroup_ids(api_key: str, secret_key: str, cid: str, entity_type: str, entity_ids: List[str]):
+    adgroup_ids: List[str] = []
+    skipped_non_shopping = 0
+    warnings: List[str] = []
+    entity_type = str(entity_type or "adgroup").strip().lower()
+    entity_ids = _unique_keep_order(entity_ids or [])
+    if entity_type == "campaign":
+        for camp_id in entity_ids:
+            res, rows = _fetch_adgroups(api_key, secret_key, cid, str(camp_id).strip())
+            if res.status_code != 200:
+                warnings.append(f"캠페인 {camp_id} 하위 광고그룹 조회 실패: {res.text}")
+                continue
+            for row in rows:
+                adgroup_type = str(row.get("adgroupType") or "").upper()
+                if adgroup_type in SHOPPING_TARGETABLE_ADGROUP_TYPES:
+                    adgroup_ids.append(str(row.get("id") or row.get("nccAdgroupId") or "").strip())
+                else:
+                    skipped_non_shopping += 1
+    else:
+        for adg_id in entity_ids:
+            res, obj = _fetch_adgroup_detail(api_key, secret_key, cid, str(adg_id).strip())
+            if res.status_code != 200 or not obj:
+                warnings.append(f"광고그룹 {adg_id} 조회 실패: {res.text}")
+                continue
+            adgroup_type = str(obj.get("adgroupType") or "").upper()
+            if adgroup_type in SHOPPING_TARGETABLE_ADGROUP_TYPES:
+                adgroup_ids.append(str(obj.get("nccAdgroupId") or adg_id).strip())
+            else:
+                skipped_non_shopping += 1
+    return _unique_keep_order(adgroup_ids), skipped_non_shopping, warnings
+
+
 def _normalize_bid_amt(value: Any, max_bid: Optional[int] = None) -> Optional[int]:
     try:
         bid = int(float(value))
@@ -3727,6 +3944,18 @@ def _normalize_bid_amt(value: Any, max_bid: Optional[int] = None) -> Optional[in
         bid = min(bid, int(max_bid))
     bid = max(70, min(100000, bid))
     return bid
+
+
+def _calc_bid_stats(values: List[int]):
+    if not values:
+        return {"min": None, "max": None, "median": None}
+    vals = sorted(values)
+    n = len(vals)
+    if n % 2:
+        median = vals[n // 2]
+    else:
+        median = int(round((vals[n // 2 - 1] + vals[n // 2]) / 2.0 / 10.0) * 10)
+    return {"min": vals[0], "max": vals[-1], "median": median}
 
 
 def _is_keyword_editable_for_avg_position(row: Dict[str, Any], include_paused: bool = False, include_pending: bool = False):
@@ -3833,6 +4062,57 @@ def _apply_keyword_bid_map(api_key: str, secret_key: str, cid: str, adgroup_ids:
     return success_cnt, fail_cnt, skipped_cnt, err_details
 
 
+@app.route("/update_non_search_keyword_exclusion", methods=["POST"])
+def update_non_search_keyword_exclusion():
+    d = request.get_json(force=True) or {}
+    api_key = str(d.get("api_key") or "").strip()
+    secret_key = str(d.get("secret_key") or "").strip()
+    cid = str(d.get("customer_id") or "").strip()
+    entity_type = str(d.get("entity_type") or "adgroup").strip().lower()
+    entity_ids = _unique_keep_order(d.get("entity_ids") or [])
+    if entity_type not in {"campaign", "adgroup"}:
+        return jsonify({"error": "entity_type은 campaign 또는 adgroup 이어야 합니다."}), 400
+    if not entity_ids:
+        return jsonify({"error": "대상이 없습니다."}), 400
+    if "excluded" not in d:
+        return jsonify({"error": "사용 여부(excluded)는 필수입니다."}), 400
+
+    excluded = _boolish(d.get("excluded"), False)
+    adgroup_ids, skipped_non_shopping, warnings = _resolve_shopping_adgroup_ids(api_key, secret_key, cid, entity_type, entity_ids)
+    if not adgroup_ids:
+        msg = "선택 범위에서 적용 가능한 쇼핑 광고그룹을 찾지 못했습니다."
+        if warnings:
+            msg += f" / {warnings[0]}"
+        return jsonify({"error": msg}), 400
+
+    success = 0
+    fail = 0
+    details: List[Dict[str, Any]] = []
+    for adg_id in adgroup_ids:
+        ok, msg = _update_non_search_keyword_target(api_key, secret_key, cid, adg_id, excluded)
+        details.append({"adgroup_id": adg_id, "success": bool(ok), "message": msg})
+        if ok:
+            success += 1
+        else:
+            fail += 1
+
+    message_bits = [f"검색어 없는 경우 광고 노출 제외 {'사용' if excluded else '사용 안함'} 적용 완료: 성공 {success}건 / 실패 {fail}건"]
+    if skipped_non_shopping > 0:
+        message_bits.append(f"비쇼핑 광고그룹 {skipped_non_shopping}건은 건너뜀")
+    if warnings:
+        message_bits.append(f"조회 경고 {len(warnings)}건")
+
+    return jsonify({
+        "ok": fail == 0,
+        "success": success,
+        "fail": fail,
+        "skipped_non_shopping": skipped_non_shopping,
+        "warnings": warnings,
+        "results": details,
+        "message": " / ".join(message_bits),
+    }), (200 if fail == 0 else 207)
+
+
 @app.route("/update_keyword_bids", methods=["POST"])
 def update_keyword_bids():
     d = request.json or {}
@@ -3841,52 +4121,303 @@ def update_keyword_bids():
     bid_amt = int(d.get("bid_amt", 70))
     if not entity_ids:
         return jsonify({"error": "대상이 없습니다."}), 400
-    adgroup_ids = []
-    if entity_type == "campaign":
-        for camp_id in entity_ids:
-            r_adgs = _do_req("GET", api_key, secret_key, cid, "/ncc/adgroups", params={"nccCampaignId": camp_id})
-            if r_adgs.status_code == 200:
-                adgroup_ids.extend([adg.get("nccAdgroupId") for adg in r_adgs.json() or []])
-    else:
-        adgroup_ids = entity_ids
+
+    adgroup_contexts, resolve_warnings = _resolve_adgroup_contexts(api_key, secret_key, cid, entity_type, entity_ids)
+    if not adgroup_contexts:
+        return jsonify({"error": "대상 광고그룹을 찾지 못했습니다."}), 400
+
     use_group_bid = bid_amt == 0
-    target_bid = bid_amt if bid_amt >= 70 else 70
-    success_cnt, fail_cnt = 0, 0
-    err_details = []
-    for adg_id in adgroup_ids:
-        r_kw = _do_req("GET", api_key, secret_key, cid, "/ncc/keywords", params={"nccAdgroupId": adg_id})
-        if r_kw.status_code == 200:
-            kws = r_kw.json() or []
-            if not kws:
+    target_bid = _normalize_bid_amt(bid_amt if bid_amt else 70) or 70
+    kw_success = kw_fail = kw_skipped = 0
+    ad_success = ad_fail = ad_skipped = 0
+    err_details: List[str] = list(resolve_warnings)
+    keyword_groups = 0
+    shopping_groups = 0
+
+    for ctx in adgroup_contexts:
+        adg_id = str(ctx.get("adgroup_id") or "").strip()
+        adgroup_type = str(ctx.get("adgroup_type") or "").upper()
+        adgroup_bid = ctx.get("adgroup_bid")
+
+        if _adgroup_uses_ad_level_bid(adgroup_type):
+            shopping_groups += 1
+            res_ads, ads = _fetch_ads(api_key, secret_key, cid, adg_id)
+            if res_ads.status_code != 200:
+                ad_fail += 1
+                if len(err_details) < 10:
+                    err_details.append(f"[광고그룹 {adg_id}] 소재 조회 실패: {res_ads.text}")
                 continue
-            update_payload = []
+            for ad in (ads or []):
+                if not _ad_item_has_bid_attr(ad):
+                    continue
+                ad_attr = _extract_ad_attr(ad)
+                current_use_group = bool(ad_attr.get("useGroupBidAmt"))
+                effective_current_bid = _resolve_effective_bid(ad_attr.get("bidAmt"), current_use_group, adgroup_bid)
+                raw_item_bid = _normalize_bid_amt(ad_attr.get("bidAmt")) or 70
+                should_skip = current_use_group if use_group_bid else ((effective_current_bid == target_bid) and (not current_use_group))
+                if should_skip:
+                    ad_skipped += 1
+                    continue
+                item = copy.deepcopy(ad)
+                new_attr = _extract_ad_attr(item)
+                new_attr["useGroupBidAmt"] = bool(use_group_bid)
+                new_attr["bidAmt"] = raw_item_bid if use_group_bid else target_bid
+                item["adAttr"] = new_attr
+                r_put = _put_single_ad_with_ad_attr(api_key, secret_key, cid, item)
+                if r_put.status_code in [200, 201]:
+                    ad_success += 1
+                else:
+                    ad_fail += 1
+                    if len(err_details) < 10:
+                        name = str(((ad.get("ad") or {}).get("productName") if isinstance(ad.get("ad"), dict) else "") or _extract_ad_id(ad) or adg_id)
+                        err_details.append(f"[{name}] 소재 입찰가 변경 실패: {r_put.text}")
+        else:
+            keyword_groups += 1
+            r_kw = _do_req("GET", api_key, secret_key, cid, "/ncc/keywords", params={"nccAdgroupId": adg_id})
+            if r_kw.status_code != 200:
+                kw_fail += 1
+                if len(err_details) < 10:
+                    err_details.append(f"[광고그룹 {adg_id}] 키워드 조회 실패: {r_kw.text}")
+                continue
+            kws = r_kw.json() or []
             for kw in kws:
                 item = copy.deepcopy(kw)
-                item["useGroupBidAmt"] = use_group_bid
-                item["bidAmt"] = target_bid
+                current_use_group = bool(kw.get("useGroupBidAmt"))
+                effective_current_bid = _resolve_effective_bid(kw.get("bidAmt"), current_use_group, adgroup_bid)
+                raw_keyword_bid = _normalize_bid_amt(kw.get("bidAmt")) or 70
+                should_skip = current_use_group if use_group_bid else ((effective_current_bid == target_bid) and (not current_use_group))
+                if should_skip:
+                    kw_skipped += 1
+                    continue
+                item["useGroupBidAmt"] = bool(use_group_bid)
+                item["bidAmt"] = raw_keyword_bid if use_group_bid else target_bid
                 for k in ['regTm', 'editTm', 'status', 'statusReason', 'inspectStatus', 'delFlag', 'managedKeyword', 'referenceKey']:
                     item.pop(k, None)
-                update_payload.append(item)
-            for i in range(0, len(update_payload), 100):
-                batch = update_payload[i:i + 100]
-                r_put = _do_req("PUT", api_key, secret_key, cid, "/ncc/keywords", params={"fields": "bidAmt,useGroupBidAmt"}, json_body=batch)
-                if r_put.status_code in [200, 201]:
-                    success_cnt += len(batch)
+                r_single = _do_req("PUT", api_key, secret_key, cid, f"/ncc/keywords/{item['nccKeywordId']}", params={"fields": "bidAmt,useGroupBidAmt"}, json_body=item)
+                if r_single.status_code in [200, 201]:
+                    kw_success += 1
                 else:
-                    for item in batch:
-                        r_single = _do_req("PUT", api_key, secret_key, cid, f"/ncc/keywords/{item['nccKeywordId']}", params={"fields": "bidAmt,useGroupBidAmt"}, json_body=item)
-                        if r_single.status_code in [200, 201]:
-                            success_cnt += 1
-                        else:
-                            fail_cnt += 1
-                            if len(err_details) < 5:
-                                err_details.append(f"[{item.get('keyword', '알수없음')}] 실패: {r_single.text}")
-    msg = f"키워드 입찰가 변경 완료!\n(성공: {success_cnt}개, 실패: {fail_cnt}개)"
+                    kw_fail += 1
+                    if len(err_details) < 10:
+                        err_details.append(f"[{item.get('keyword', '알수없음')}] 키워드 입찰가 변경 실패: {r_single.text}")
+
+    label = "그룹 입찰가 사용 전환" if use_group_bid else f"고정 입찰가 {target_bid:,}원 적용"
+    lines = [
+        f"입찰가 변경 완료! ({label})",
+        f"파워링크/키워드 처리 광고그룹: {keyword_groups}개 | 쇼핑/소재 처리 광고그룹: {shopping_groups}개",
+        f"키워드 변경 성공: {kw_success}개 / 실패: {kw_fail}개 / 유지: {kw_skipped}개",
+        f"쇼핑 소재 변경 성공: {ad_success}개 / 실패: {ad_fail}개 / 유지: {ad_skipped}개",
+    ]
     if err_details:
-        msg += "\n\n[상세 에러 내역]\n" + "\n".join(err_details)
-    return jsonify({"ok": True, "message": msg})
+        lines.append("\n[상세 내역]")
+        lines.extend(err_details[:10])
+    return jsonify({"ok": True, "message": "\n".join(lines)})
 
 
+
+
+@app.route("/adjust_keyword_bids_by_threshold", methods=["POST"])
+def adjust_keyword_bids_by_threshold():
+    d = request.json or {}
+    api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
+    entity_type = str(d.get("entity_type") or "adgroup").strip().lower()
+    entity_ids = _unique_keep_order(d.get("entity_ids") or [])
+    if not entity_ids:
+        return jsonify({"error": "대상이 없습니다."}), 400
+
+    def _parse_optional_bound(value: Any, label: str) -> Optional[int]:
+        if str(value or "").strip() == "":
+            return None
+        bid = _normalize_bid_amt(value)
+        if bid is None:
+            raise ValueError(f"{label} 값을 확인해주세요.")
+        return bid
+
+    def _parse_signed_step(value: Any, label: str) -> int:
+        s = str(value or "").strip().replace(",", "")
+        if not s:
+            raise ValueError(f"{label} 값을 입력해주세요.")
+        try:
+            return int(float(s))
+        except Exception as exc:
+            raise ValueError(f"{label} 값을 확인해주세요.") from exc
+
+    try:
+        upper_bid = _parse_optional_bound(d.get("upper_bid"), "상한가")
+        lower_bid = _parse_optional_bound(d.get("lower_bid"), "하한가")
+        upper_delta = _parse_signed_step(d.get("upper_delta"), "상한가 조정값") if upper_bid is not None else 0
+        lower_delta = _parse_signed_step(d.get("lower_delta"), "하한가 조정값") if lower_bid is not None else 0
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    if upper_bid is None and lower_bid is None:
+        return jsonify({"error": "상한가 또는 하한가 중 하나 이상 입력해주세요."}), 400
+    if upper_bid is not None and lower_bid is not None and lower_bid >= upper_bid:
+        return jsonify({"error": "하한가는 상한가보다 작아야 합니다."}), 400
+    if upper_bid is not None and upper_delta == 0:
+        return jsonify({"error": "상한가 조정값은 0이 될 수 없습니다."}), 400
+    if lower_bid is not None and lower_delta == 0:
+        return jsonify({"error": "하한가 조정값은 0이 될 수 없습니다."}), 400
+
+    adgroup_contexts, resolve_warnings = _resolve_adgroup_contexts(api_key, secret_key, cid, entity_type, entity_ids)
+    if not adgroup_contexts:
+        return jsonify({"error": "대상 광고그룹을 찾지 못했습니다."}), 400
+
+    keyword_meta: Dict[str, Dict[str, Any]] = {}
+    keyword_bid_map: Dict[str, int] = {}
+    ad_meta: Dict[str, Dict[str, Any]] = {}
+    ad_bid_map: Dict[str, int] = {}
+    warnings: List[str] = list(resolve_warnings)
+    keyword_count = 0
+    shopping_ad_count = 0
+    upper_hit = 0
+    lower_hit = 0
+    unchanged_preview = 0
+    keyword_groups = 0
+    shopping_groups = 0
+
+    for ctx in adgroup_contexts:
+        adg_id = str(ctx.get("adgroup_id") or "").strip()
+        adgroup_type = str(ctx.get("adgroup_type") or "").upper()
+        adgroup_bid = ctx.get("adgroup_bid")
+
+        if _adgroup_uses_ad_level_bid(adgroup_type):
+            shopping_groups += 1
+            res_ads, ads = _fetch_ads(api_key, secret_key, cid, adg_id)
+            if res_ads.status_code != 200:
+                warnings.append(f"[광고그룹 {adg_id}] 소재 조회 실패: {res_ads.text}")
+                continue
+            for ad in (ads or []):
+                if not _ad_item_has_bid_attr(ad):
+                    continue
+                shopping_ad_count += 1
+                ad_id = _extract_ad_id(ad)
+                if not ad_id:
+                    continue
+                ad_attr = _extract_ad_attr(ad)
+                current_use_group = bool(ad_attr.get("useGroupBidAmt"))
+                effective_current_bid = _resolve_effective_bid(ad_attr.get("bidAmt"), current_use_group, adgroup_bid)
+                if effective_current_bid is None:
+                    continue
+                ad_name = str(((ad.get("ad") or {}).get("productName") if isinstance(ad.get("ad"), dict) else "") or ad_id)
+                ad_meta[ad_id] = {
+                    "current_bid": effective_current_bid,
+                    "use_group_bid": current_use_group,
+                    "name": ad_name,
+                    "adgroup_id": adg_id,
+                }
+                target_bid = None
+                if upper_bid is not None and effective_current_bid >= upper_bid:
+                    upper_hit += 1
+                    target_bid = _normalize_bid_amt(upper_bid + upper_delta)
+                elif lower_bid is not None and effective_current_bid <= lower_bid:
+                    lower_hit += 1
+                    target_bid = _normalize_bid_amt(lower_bid + lower_delta)
+                if target_bid is None:
+                    continue
+                if target_bid == effective_current_bid and (not current_use_group):
+                    unchanged_preview += 1
+                    continue
+                ad_bid_map[ad_id] = target_bid
+        else:
+            keyword_groups += 1
+            r_kw = _do_req("GET", api_key, secret_key, cid, "/ncc/keywords", params={"nccAdgroupId": adg_id})
+            if r_kw.status_code != 200:
+                warnings.append(f"[광고그룹 {adg_id}] 키워드 조회 실패: {r_kw.text}")
+                continue
+            kws = r_kw.json() or []
+            keyword_count += len(kws)
+            for kw in kws:
+                kid = str(kw.get("nccKeywordId") or "").strip()
+                if not kid:
+                    continue
+                current_use_group = bool(kw.get("useGroupBidAmt"))
+                effective_current_bid = _resolve_effective_bid(kw.get("bidAmt"), current_use_group, adgroup_bid)
+                if effective_current_bid is None:
+                    continue
+                keyword_meta[kid] = {
+                    "current_bid": effective_current_bid,
+                    "use_group_bid": current_use_group,
+                    "keyword": kw.get("keyword"),
+                    "adgroup_id": adg_id,
+                }
+                target_bid = None
+                if upper_bid is not None and effective_current_bid >= upper_bid:
+                    upper_hit += 1
+                    target_bid = _normalize_bid_amt(upper_bid + upper_delta)
+                elif lower_bid is not None and effective_current_bid <= lower_bid:
+                    lower_hit += 1
+                    target_bid = _normalize_bid_amt(lower_bid + lower_delta)
+                if target_bid is None:
+                    continue
+                if target_bid == effective_current_bid and (not current_use_group):
+                    unchanged_preview += 1
+                    continue
+                keyword_bid_map[kid] = target_bid
+
+    if not keyword_bid_map and not ad_bid_map:
+        lines = [
+            "조건에 맞는 키워드/소재가 없습니다.",
+            f"파워링크 키워드 조회: {keyword_count}개 / 쇼핑 소재 조회: {shopping_ad_count}개 / 상한 조건 매칭: {upper_hit}개 / 하한 조건 매칭: {lower_hit}개",
+        ]
+        if warnings:
+            lines.append("\n[참고]")
+            lines.extend(warnings[:10])
+        return jsonify({"ok": True, "message": "\n".join(lines)})
+
+    kw_success = kw_fail = kw_skipped = 0
+    ad_success = ad_fail = ad_skipped = 0
+    err_details: List[str] = []
+    if keyword_bid_map:
+        kw_success, kw_fail, kw_skipped, kw_err_details = _apply_keyword_bid_map(
+            api_key, secret_key, cid, [str(x.get("adgroup_id") or "") for x in adgroup_contexts if not _adgroup_uses_ad_level_bid(x.get("adgroup_type"))], keyword_bid_map, keyword_meta=keyword_meta
+        )
+        err_details.extend(kw_err_details)
+    if ad_bid_map:
+        ad_success, ad_fail, ad_skipped, ad_err_details = _apply_ad_bid_map(
+            api_key, secret_key, cid, adgroup_contexts, ad_bid_map, ad_meta=ad_meta
+        )
+        err_details.extend(ad_err_details)
+
+    stats = _calc_bid_stats(list(keyword_bid_map.values()) + list(ad_bid_map.values()))
+    lines = [
+        "상/하한 기준 입찰가 조정 완료!",
+        f"파워링크/키워드 처리 광고그룹: {keyword_groups}개 | 쇼핑/소재 처리 광고그룹: {shopping_groups}개",
+        f"파워링크 키워드 조회: {keyword_count}개 / 쇼핑 소재 조회: {shopping_ad_count}개 / 실제 변경 대상: {len(keyword_bid_map) + len(ad_bid_map)}개 / 동일해서 유지 예상: {unchanged_preview}개",
+        f"상한 조건 매칭: {upper_hit}개 / 하한 조건 매칭: {lower_hit}개",
+        f"키워드 변경 성공: {kw_success}개 / 실패: {kw_fail}개 / 유지/생략: {kw_skipped}개",
+        f"쇼핑 소재 변경 성공: {ad_success}개 / 실패: {ad_fail}개 / 유지/생략: {ad_skipped}개",
+    ]
+    if stats.get("min") is not None:
+        lines.append(f"변경 후 입찰가 범위: 최소 {stats['min']:,}원 · 중앙 {stats['median']:,}원 · 최대 {stats['max']:,}원")
+    rule_bits = []
+    if upper_bid is not None:
+        upper_target = _normalize_bid_amt(upper_bid + upper_delta)
+        rule_bits.append(f"상한 {upper_bid:,}원 이상 → {upper_bid:,}원 기준 {upper_delta:+,}원 = {upper_target:,}원")
+    if lower_bid is not None:
+        lower_target = _normalize_bid_amt(lower_bid + lower_delta)
+        rule_bits.append(f"하한 {lower_bid:,}원 이하 → {lower_bid:,}원 기준 {lower_delta:+,}원 = {lower_target:,}원")
+    if rule_bits:
+        lines.append("적용 규칙: " + " / ".join(rule_bits))
+    detail_lines = warnings + err_details
+    if detail_lines:
+        lines.append("\n[상세 내역]")
+        lines.extend(detail_lines[:10])
+    return jsonify({
+        "ok": True,
+        "message": "\n".join(lines),
+        "stats": {
+            "keyword_count": keyword_count,
+            "shopping_ad_count": shopping_ad_count,
+            "upper_hit": upper_hit,
+            "lower_hit": lower_hit,
+            "targets": len(keyword_bid_map) + len(ad_bid_map),
+            "success": kw_success + ad_success,
+            "fail": kw_fail + ad_fail,
+            "unchanged_preview": unchanged_preview,
+            "skipped": kw_skipped + ad_skipped,
+        },
+    })
 
 
 @app.route("/update_keyword_bids_avg_position", methods=["POST"])

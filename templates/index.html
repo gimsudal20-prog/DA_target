@@ -441,12 +441,27 @@
                 <div class="grid-2">
                     <div class="card">
                         <div class="card-title">고정 입찰가 일괄 변경</div>
-                        <div class="form-group"><label>적용 범위</label><select id="bid_scope_type"><option value="campaign">선택한 캠페인 키워드 전체</option><option value="adgroup">선택한 광고그룹 키워드 전체</option></select></div>
+                        <div class="form-group"><label>적용 범위</label><select id="bid_scope_type_fixed"><option value="campaign">선택한 캠페인 하위 키워드/쇼핑소재 전체</option><option value="adgroup">선택한 광고그룹 키워드/쇼핑소재 전체</option></select></div>
                         <div class="form-group"><label>일괄 적용할 입찰가 (원)</label><input type="number" id="bid_scope_fixed_val" value="100"></div>
                         <button class="btn btn-primary" style="width:100%;" onclick="saveKeywordBidsByScope()">입찰가 변경 실행</button>
                     </div>
                     <div class="card">
+                        <div class="card-title">상/하한 기준 자동 증감</div>
+                        <div class="form-group"><label>적용 범위</label><select id="bid_scope_type_threshold"><option value="campaign">선택한 캠페인 하위 키워드/쇼핑소재 전체</option><option value="adgroup">선택한 광고그룹 키워드/쇼핑소재 전체</option></select></div>
+                        <div class="grid-2">
+                            <div class="form-group"><label>상한가 (이상)</label><input type="number" id="threshold_upper_bid" placeholder="예: 1000" value="1000"></div>
+                            <div class="form-group"><label>상한가 조정값</label><input type="number" id="threshold_upper_delta" placeholder="예: -100" value="-100"></div>
+                        </div>
+                        <div class="grid-2">
+                            <div class="form-group"><label>하한가 (이하)</label><input type="number" id="threshold_lower_bid" placeholder="예: 300" value="300"></div>
+                            <div class="form-group"><label>하한가 조정값</label><input type="number" id="threshold_lower_delta" placeholder="예: 100" value="100"></div>
+                        </div>
+                        <div style="font-size:12px; color:var(--muted); margin-bottom:16px;">예: 상한 1,000원 이상이면 1,000원 기준 -100원 → 900원, 하한 300원 이하면 300원 기준 +100원 → 400원으로 변경됩니다. 쇼핑검색은 키워드가 아니라 광고그룹 내 소재 입찰가를 기준으로 처리합니다.</div>
+                        <button class="btn btn-primary" style="width:100%;" onclick="adjustKeywordBidsByThreshold()">조건부 입찰가 조정 실행</button>
+                    </div>
+                    <div class="card" style="grid-column:1/-1;">
                         <div class="card-title">목표 평균순위 기준 입찰가 (자동 계산)</div>
+                        <div class="form-group"><label>적용 범위</label><select id="bid_scope_type_avg_position"><option value="campaign">선택한 캠페인 하위 키워드 전체</option><option value="adgroup">선택한 광고그룹 키워드 전체</option></select></div>
                         <div class="grid-2">
                             <div class="form-group"><label>디바이스</label><select id="avg_position_device" onchange="syncAvgPositionLimit()"><option value="PC">PC</option><option value="MOBILE">모바일</option></select></div>
                             <div class="form-group"><label>목표 순위</label><select id="avg_position_val"></select></div>
@@ -510,9 +525,10 @@
                             <div style="display:flex; gap:12px; font-size:12px; flex-wrap:wrap;">
                                 <label><input type="checkbox" id="copy_adgroup_copy_media" checked> 매체 설정 복사 (PC/모바일 + 세부 매체)</label>
                                 <label><input type="checkbox" id="copy_adgroup_copy_as_off"> OFF 상태로 복사</label>
+                                <label><input type="checkbox" id="copy_adgroup_include_checked_campaigns" checked> 체크한 캠페인 하위 광고그룹 전체도 복사</label>
                             </div>
                         </div>
-                        <button class="btn btn-purple" style="width:100%" onclick="copySelectedAdgroups()">선택 광고그룹 전체 복사</button>
+                        <button class="btn btn-purple" style="width:100%" onclick="copySelectedAdgroups()">선택 광고그룹/캠페인 기준 전체 복사</button>
                     </div>
                     <div class="card" style="grid-column:1/-1;">
                         <div class="card-title">광고그룹 내 항목 부분 복사</div>
@@ -629,7 +645,12 @@
                             <div class="form-group"><label>확장검색 가중치(%)</label><input type="number" id="adgroup_keyword_plus_weight" value="100" min="1" max="999999"></div>
                             <div class="form-group"><label>일치검색</label><select id="adgroup_use_close_variant" disabled><option value="true">API 미지원</option></select><div class="field-note">현재 네이버 API에서 수정 지원이 확인되지 않아 적용 제외됩니다.</div></div>
                         </div>
-                        <button class="btn btn-sub" style="width:100%;" onclick="updateAdgroupPowerlinkOptions()">선택 광고그룹 파워링크 옵션 변경</button>
+                        <button class="btn btn-sub" style="width:100%; margin-bottom:16px;" onclick="updateAdgroupPowerlinkOptions()">선택 광고그룹 파워링크 옵션 변경</button>
+                        <div style="padding-top:16px; border-top:1px dashed var(--line);">
+                            <div class="form-group"><label>검색어 없는 경우 광고 노출 제외 (쇼핑 전용)</label><select id="shopping_non_search_excluded"><option value="true">사용</option><option value="false">사용 안함</option></select><div class="field-note">선택한 광고그룹 또는 선택한 캠페인 하위 쇼핑 광고그룹에만 적용됩니다.</div></div>
+                            <div class="form-group"><label>적용 범위</label><select id="shopping_non_search_scope"><option value="adgroup">선택한 광고그룹</option><option value="campaign">선택한 캠페인 하위 광고그룹 전체</option></select></div>
+                            <button class="btn btn-sub" style="width:100%;" onclick="updateNonSearchKeywordExclusion()">쇼핑 노출 제외 설정 변경</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1425,6 +1446,26 @@ async function updateAdgroupPowerlinkOptions() {
     } catch(err) { showToast(err.message, 'error'); }
 }
 
+async function updateNonSearchKeywordExclusion() {
+    const c = ensureReady(); if(!c) return;
+    const scope = document.getElementById('shopping_non_search_scope').value;
+    const ids = scope === 'campaign' ? Array.from(checkedCampaignIds) : Array.from(checkedAdgroupIds);
+    if(!ids.length) {
+        showToast(scope === 'campaign' ? '좌측 체크박스에서 캠페인을 선택해주세요.' : '좌측 체크박스에서 광고그룹을 선택해주세요.', 'error');
+        return;
+    }
+    try {
+        const data = await postJson('/update_non_search_keyword_exclusion', {
+            ...c,
+            entity_type: scope,
+            entity_ids: ids,
+            excluded: document.getElementById('shopping_non_search_excluded').value === 'true'
+        }, '쇼핑 노출 제외 설정 변경 중...');
+        showToast(data.message, Number(data?.fail || 0) > 0 ? 'info' : 'success');
+        if(scope === 'adgroup' && currentAdgroupId && ids.includes(currentAdgroupId)) await loadAdgroupDetails();
+    } catch(err) { showToast(err.message, 'error'); }
+}
+
 function getTargetAdgroupIds(singleId, checkboxId) {
     const useMulti = document.getElementById(checkboxId)?.checked;
     const selected = Array.from(checkedAdgroupIds || []).filter(Boolean);
@@ -1624,7 +1665,7 @@ async function createNegatives() {
 // --- 7. Bulk Actions ---
 async function saveKeywordBidsByScope() {
     const c = ensureReady(); if(!c) return;
-    const scope = document.getElementById('bid_scope_type').value;
+    const scope = document.getElementById('bid_scope_type_fixed').value;
     const ids = scope==='campaign' ? Array.from(checkedCampaignIds) : Array.from(checkedAdgroupIds);
     if(!ids.length){ showToast(scope==='campaign'?'좌측 체크박스에서 캠페인을 선택하세요.':'좌측 체크박스에서 광고그룹을 선택하세요.', 'error'); return; }
     
@@ -1637,8 +1678,31 @@ async function saveKeywordBidsByScope() {
     } catch(err) { showToast(err.message, 'error'); }
 }
 
+async function adjustKeywordBidsByThreshold() {
+    const c = ensureReady(); if(!c) return;
+    const scope = document.getElementById('bid_scope_type_threshold').value;
+    const ids = scope==='campaign' ? Array.from(checkedCampaignIds) : Array.from(checkedAdgroupIds);
+    if(!ids.length){ showToast(scope==='campaign'?'좌측 체크박스에서 캠페인을 선택하세요.':'좌측 체크박스에서 광고그룹을 선택하세요.', 'error'); return; }
+
+    const payload = {
+        ...c,
+        entity_type: scope,
+        entity_ids: ids,
+        upper_bid: document.getElementById('threshold_upper_bid').value,
+        upper_delta: document.getElementById('threshold_upper_delta').value,
+        lower_bid: document.getElementById('threshold_lower_bid').value,
+        lower_delta: document.getElementById('threshold_lower_delta').value,
+    };
+
+    try {
+        const data = await postJson('/adjust_keyword_bids_by_threshold', payload, '상/하한 기준 입찰가 조정 중...');
+        showToast(data.message, 'success');
+        if(scope === 'adgroup' && ids.includes(currentAdgroupId)) await loadAdgroupDetails();
+    } catch(err) { showToast(err.message, 'error'); }
+}
+
 function getAvgPositionPayload(c, previewOnly=false) {
-    const scope = document.getElementById('bid_scope_type').value;
+    const scope = document.getElementById('bid_scope_type_avg_position').value;
     const ids = scope==='campaign' ? Array.from(checkedCampaignIds) : Array.from(checkedAdgroupIds);
     if(!ids.length){ showToast('좌측 체크박스에서 대상을 선택하세요.', 'error'); return null; }
     return {
@@ -1741,14 +1805,17 @@ async function copySelectedCampaigns() {
 async function copySelectedAdgroups() {
     const c = ensureReady(); if(!c) return;
     const sourceIds = Array.from(checkedAdgroupIds);
+    const includeCheckedCampaigns = document.getElementById('copy_adgroup_include_checked_campaigns').checked;
+    const sourceCampaignIds = includeCheckedCampaigns ? Array.from(checkedCampaignIds) : [];
     const targetCampId = document.getElementById('copy_adgroup_target_campaign_select').value;
-    if(!sourceIds.length) { showToast('좌측에서 복사할 광고그룹을 체크해주세요.', 'error'); return; }
+    if(!sourceIds.length && !sourceCampaignIds.length) { showToast('좌측에서 복사할 광고그룹 또는 캠페인을 체크해주세요.', 'error'); return; }
     if(!targetCampId) { showToast('대상 캠페인을 선택해주세요.', 'error'); return; }
 
     try {
         const data = await postJson('/copy_adgroups_to_target', {
             ...c,
             source_ids: sourceIds,
+            source_campaign_ids: sourceCampaignIds,
             target_campaign_id: targetCampId,
             suffix: document.getElementById('adgroup_copy_suffix').value,
             include_keywords: document.getElementById('copy_adgroup_include_keywords').checked,
