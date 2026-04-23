@@ -107,6 +107,16 @@
     .mini-chip, .day-chip { user-select: none; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; cursor: pointer; font-size: 12px; text-align: center; transition: 0.1s; }
     .mini-chip.active, .day-chip.active { background: #1f2937; color: #fff; border-color: #1f2937; }
     .schedule-grid.dragging .mini-chip, .schedule-grid.dragging .day-chip { cursor: grabbing; }
+    .schedule-blocks { display:flex; flex-direction:column; gap:10px; margin-top:8px; }
+    .schedule-block-row { display:grid; grid-template-columns: 1fr 1fr 1fr auto; gap:8px; align-items:end; padding:10px; border:1px solid var(--line); border-radius:10px; background:#fff; }
+    .schedule-block-row .form-group { margin-bottom:0; }
+    .schedule-block-row .btn { white-space:nowrap; }
+    .schedule-block-days { grid-column:1/-1; display:flex; flex-wrap:wrap; gap:6px; }
+    .schedule-block-toolbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+    .schedule-mini-chip { border:1px solid var(--line); background:#fff; color:var(--text); border-radius:999px; padding:4px 8px; font-size:12px; cursor:pointer; }
+    .schedule-mini-chip.active { background:#eff6ff; border-color:#93c5fd; color:#1d4ed8; font-weight:700; }
+    .schedule-mode-btn.active { box-shadow: inset 0 0 0 1px rgba(0,0,0,.04); }
+    @media (max-width: 768px) { .schedule-block-row { grid-template-columns: 1fr; } }
 
     /* Toast */
     #toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 10px; }
@@ -121,6 +131,26 @@
     .loading-overlay.active { display: flex; }
     .spinner { width: 40px; height: 40px; border: 4px solid var(--line); border-top-color: var(--blue); border-radius: 50%; animation: spin 1s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    .log-panel { margin-top: 16px; }
+    .log-toolbar { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+    .log-list { max-height: 260px; overflow-y: auto; display:flex; flex-direction:column; gap:10px; }
+    .log-empty { padding: 20px; text-align:center; color: var(--muted); border:1px dashed var(--line); border-radius: 10px; background:#fafafa; }
+    .log-item { border:1px solid var(--line); border-left:4px solid var(--line); border-radius: 10px; padding: 12px; background: #fff; }
+    .log-item.success { border-left-color: var(--green); }
+    .log-item.error { border-left-color: var(--red); background: #fff7f7; }
+    .log-top { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; }
+    .log-title { font-weight: 700; font-size: 13px; }
+    .log-meta, .log-msg, .log-summary { font-size: 12px; color: var(--muted); line-height: 1.5; }
+    .log-msg { color: var(--text); margin-top: 6px; white-space: pre-wrap; }
+    .keyword-select-row { display:flex; align-items:flex-start; gap:10px; min-width:0; flex:1; }
+    .lookup-check-label { display:flex; align-items:center; gap:6px; min-width:58px; flex-shrink:0; padding:2px 6px; border:1px solid var(--line); border-radius:10px; background:#fff; cursor:pointer; user-select:none; }
+    .lookup-check-label .check-text { font-size:12px; color:var(--muted); line-height:1; }
+    .mini-check-wrap { flex-shrink:0; padding-top:1px; }
+    .mini-check, .lookup-check-label input[type="checkbox"] { width:16px !important; height:16px !important; margin:0 !important; accent-color: var(--blue); cursor:pointer; appearance:auto !important; -webkit-appearance:checkbox !important; display:inline-block !important; visibility:visible !important; opacity:1 !important; position:static !important; pointer-events:auto !important; }
+    .keyword-card-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+    .keyword-card-main { min-width:0; flex:1; }
+
   </style>
 </head>
 <body>
@@ -147,6 +177,7 @@
         </label>
       </div>
       <div class="list-group-title" style="color: #9ca3af;">광고주 목록</div>
+      <div class="form-group" style="margin-bottom:10px;"><input id="account_search" type="text" placeholder="광고주명 / ID 검색" oninput="renderAccounts()" style="background: rgba(255,255,255,0.9); border:none;"></div>
       <div id="account_list"></div>
     </aside>
 
@@ -155,7 +186,7 @@
         <h2 id="master_header_title">대상을 선택하세요</h2>
         <div style="display: flex; gap: 8px;">
           <input type="text" id="master_search" placeholder="검색..." oninput="renderMasterList()" style="padding: 8px; font-size: 13px;">
-          <button class="btn btn-sub" style="padding: 8px;" onclick="refreshCampaigns()">↻</button>
+          <button class="btn btn-sub" style="padding: 8px;" onclick="refreshCampaigns(true)">↻</button>
         </div>
       </div>
       <div class="master-content">
@@ -204,6 +235,41 @@
         </div>
 
         <div id="tab_data" class="tab-content active">
+          <div class="card">
+            <div class="card-title">계정/캠페인 등록 소재 · 확장소재 조회</div>
+            <div class="grid-2">
+              <div class="form-group">
+                <label>조회 범위</label>
+                <div class="btn-row">
+                  <button type="button" class="btn btn-primary" id="asset_scope_account_btn" onclick="setAssetLookupScope('account')">계정 전체</button>
+                  <button type="button" class="btn btn-sub" id="asset_scope_campaign_btn" onclick="setAssetLookupScope('campaign')">선택 캠페인만</button>
+                </div>
+                <div class="field-help">선택 캠페인만은 좌측 캠페인 체크 기준입니다.</div>
+              </div>
+              <div class="form-group">
+                <label>안내</label>
+                <div class="field-help">화면에는 최대 200건만 미리보기로 표시하고, 전체 결과는 엑셀로 내려받을 수 있습니다.</div>
+              </div>
+            </div>
+            <div class="btn-row" style="flex-wrap:wrap;">
+              <button class="btn btn-sub" type="button" onclick="loadAccountKeywordsLookup()">계정 키워드 조회</button>
+              <button class="btn btn-sub" type="button" onclick="loadAccountAdsLookup()">계정 소재 조회</button>
+              <button class="btn btn-sub" type="button" onclick="loadAccountExtensionsLookup()">계정 확장소재 조회</button>
+              <button class="btn btn-green" type="button" onclick="downloadAccountKeywordsExcel()">키워드 엑셀 다운로드</button>
+              <button class="btn btn-green" type="button" onclick="downloadAccountAdsExcel()">소재 엑셀 다운로드</button>
+              <button class="btn btn-green" type="button" onclick="downloadAccountExtensionsExcel()">확장소재 엑셀 다운로드</button>
+            </div>
+            <div class="tabs sub-tabs" style="margin-top:12px; margin-bottom:0; border:none;">
+              <button class="tab-btn active account-asset-preview-tab" onclick="switchAccountAssetPreview('keywords', this)">키워드 미리보기 (<span id="cnt_account_keywords">0</span>)</button>
+              <button class="tab-btn account-asset-preview-tab" onclick="switchAccountAssetPreview('ads', this)">소재 미리보기 (<span id="cnt_account_ads">0</span>)</button>
+              <button class="tab-btn account-asset-preview-tab" onclick="switchAccountAssetPreview('exts', this)">확장소재 미리보기 (<span id="cnt_account_exts">0</span>)</button>
+            </div>
+            <div style="border:1px solid var(--line); border-radius:8px; max-height:420px; overflow-y:auto;">
+              <div id="sub_account_keywords" class="tab-content active"><div id="table_account_keywords" style="padding:20px; text-align:center; color: var(--muted);">아직 조회된 키워드가 없습니다.</div></div>
+              <div id="sub_account_ads" class="tab-content"><div id="table_account_ads" style="padding:20px; text-align:center; color: var(--muted);">아직 조회된 소재가 없습니다.</div></div>
+              <div id="sub_account_exts" class="tab-content"><div id="table_account_exts" style="padding:20px; text-align:center; color: var(--muted);">아직 조회된 확장소재가 없습니다.</div></div>
+            </div>
+          </div>
           <div class="card">
             <div class="card-title" style="display: flex; justify-content: space-between;">
               <span>선택된 광고그룹 상세 데이터</span>
@@ -299,16 +365,24 @@
             <div id="c_kw" class="tab-content">
                 <div class="card">
                     <div class="card-title">키워드 일괄 등록</div>
-                    <div class="form-group"><label>대상 광고그룹</label><select id="create_keyword_adgroup"></select></div>
                     <div class="grid-2">
                         <div class="form-group"><label>입찰가</label><input type="number" id="create_keyword_bid" value="120"></div>
                         <div class="form-group"><label>그룹 입찰가 사용</label><select id="create_keyword_use_group"><option value="false">개별 입찰가</option><option value="true">그룹 입찰가</option></select></div>
                     </div>
-                    <div class="form-group">
-                        <label>키워드 목록 (엔터로 구분)</label>
-                        <textarea id="create_keywords_text" rows="8" placeholder="사과&#10;바나나"></textarea>
+                    <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin-top:-2px; margin-bottom:10px; color:var(--muted);"><input type="checkbox" id="create_keyword_bulk_mode" onchange="toggleKeywordBatchMode()"> 대량 입력 (체크 시 슬롯 수 조절 가능)</label>
+                    <div id="keyword_slot_control_wrap" style="display:none; align-items:center; gap:10px; margin-top:-2px; margin-bottom:12px; width:100%;">
+                        <button type="button" class="btn btn-sub" style="width:34px; min-width:34px; height:34px; padding:0; font-size:18px; line-height:1;" onclick="changeKeywordSlotCount(-1)" aria-label="슬롯 수 줄이기">−</button>
+                        <input type="range" id="create_keyword_slot_range" min="1" max="20" step="1" value="10" oninput="handleKeywordSlotRangeInput()" style="flex:1; width:100%; min-width:0;">
+                        <button type="button" class="btn btn-sub" style="width:34px; min-width:34px; height:34px; padding:0; font-size:18px; line-height:1;" onclick="changeKeywordSlotCount(1)" aria-label="슬롯 수 늘리기">+</button>
+                        <div id="create_keyword_slot_count_badge" style="min-width:72px; text-align:center; font-size:12px; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:7px 10px; white-space:nowrap;">10개</div>
                     </div>
-                    <button class="btn btn-primary" style="width: 100%;" onclick="createKeywords()">등록하기</button>
+                    <div class="btn-row" style="margin-top:-2px; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+                        <button type="button" class="btn btn-sub" onclick="autoDistributeKeywordInputs()">입력칸 자동 분배 (칸당 1000개)</button>
+                        <button type="button" class="btn btn-sub" onclick="clearKeywordInputs()">입력칸 전체 비우기</button>
+                    </div>
+                    <div class="field-note" id="keyword_batch_mode_note" style="margin-bottom:12px;">기본은 슬롯 1개만 열립니다. 대량 입력을 체크하면 광고그룹 선택칸 10개와 키워드 입력칸 10개가 열리고, 자동 분배 버튼으로 1000개 단위 분배가 가능합니다.</div>
+                    <div id="keyword_batch_slots" style="display:flex; flex-direction:column; gap:12px;"></div>
+                    <button class="btn btn-primary" style="width: 100%; margin-top: 12px;" onclick="createKeywords()">등록하기</button>
                 </div>
             </div>
 
@@ -339,7 +413,10 @@
                             <div class="form-group"><label>모바일 연결 URL</label><input type="text" id="create_ad_mobile" placeholder="https://..."></div>
                         </div>
                         <label style="display:flex; gap:6px; font-size:12px; margin-bottom:12px; color:var(--muted);"><input type="checkbox" id="create_ad_multi"> 좌측에서 선택(체크)한 광고그룹 전체에 동일 소재 등록</label>
-                        <button class="btn btn-primary" style="width: 100%;" onclick="createTextAd()">소재 등록</button>
+                        <div class="btn-row">
+                            <button class="btn btn-primary" style="flex:1;" onclick="createTextAd(false)">소재 등록</button>
+                            <button class="btn btn-sub" style="flex:1;" onclick="createTextAd(true)">소재 등록 후 입력 유지</button>
+                        </div>
                     </div>
                     
                     <div class="card">
@@ -431,6 +508,7 @@
             <div class="tabs sub-tabs">
                 <button class="tab-btn active" onclick="switchSubTab('b_bid', this, '#tab_bulk')">입찰가 일괄 변경</button>
                 <button class="tab-btn" onclick="switchSubTab('b_time', this, '#tab_bulk')">시간대 설정</button>
+                <button class="tab-btn" onclick="switchSubTab('b_keyword_inspect', this, '#tab_bulk')">키워드 조회/진단</button>
                 <button class="tab-btn" onclick="switchSubTab('b_copy', this, '#tab_bulk')">복사 (캠페인/광고그룹/항목)</button>
                 <button class="tab-btn" onclick="switchSubTab('b_headline_bulk', this, '#tab_bulk')">소재 대량등록</button>
                 <button class="tab-btn" onclick="switchSubTab('b_status', this, '#tab_bulk')">상태/예산 변경</button>
@@ -444,6 +522,14 @@
                         <div class="form-group"><label>적용 범위</label><select id="bid_scope_type_fixed"><option value="campaign">선택한 캠페인 하위 키워드/쇼핑소재 전체</option><option value="adgroup">선택한 광고그룹 키워드/쇼핑소재 전체</option></select></div>
                         <div class="form-group"><label>일괄 적용할 입찰가 (원)</label><input type="number" id="bid_scope_fixed_val" value="100"></div>
                         <button class="btn btn-primary" style="width:100%;" onclick="saveKeywordBidsByScope()">입찰가 변경 실행</button>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">입찰가 설정 방식만 일괄 변경</div>
+                        <div class="field-note" style="margin-bottom:12px;">입찰가 숫자를 바꾸지 않고도 <strong>그룹 입찰가 사용 / 개별 입찰가 사용</strong> 설정만 캠페인·광고그룹 단위로 바꿉니다.</div>
+                        <div class="form-group"><label>적용 범위</label><select id="bid_mode_scope_type"><option value="campaign">선택한 캠페인 하위 키워드/쇼핑소재 전체</option><option value="adgroup">선택한 광고그룹 키워드/쇼핑소재 전체</option></select></div>
+                        <div class="form-group"><label>변경할 설정</label><select id="bid_mode_target"><option value="group">그룹 입찰가 설정</option><option value="individual">개별 입찰가 설정</option></select></div>
+                        <div class="field-note" style="margin-bottom:12px;">개별 입찰가 설정으로 바꿀 때는 현재 적용 중인 유효 입찰가를 각 키워드/소재의 개별 입찰가로 저장합니다.</div>
+                        <button class="btn btn-primary" style="width:100%;" onclick="changeBidModeByScope()">입찰가 설정만 변경 실행</button>
                     </div>
                     <div class="card">
                         <div class="card-title">상/하한 기준 자동 증감</div>
@@ -460,17 +546,49 @@
                         <button class="btn btn-primary" style="width:100%;" onclick="adjustKeywordBidsByThreshold()">조건부 입찰가 조정 실행</button>
                     </div>
                     <div class="card" style="grid-column:1/-1;">
+                        <div class="card-title">검색어 기준 파워링크 키워드 입찰가중치 변경</div>
+                        <div class="field-note" style="margin-bottom:8px;">현재 계정의 파워링크 키워드 전체에서 검색어와 교집합이 있는 키워드를 찾아 입찰가중치를 일괄 변경합니다.</div>
+                        <div class="field-note" style="margin-bottom:12px;">기본은 <strong>부분일치</strong>이며, 부분일치는 입력한 단어/토큰이 모두 포함된 키워드를 찾습니다. 필요할 때만 <strong>완전일치</strong>로 바꿔서 동일 키워드만 잡을 수 있습니다.</div>
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label>검색어</label>
+                                <input type="text" id="keyword_bid_weight_search_text" placeholder="예: 병원 마케팅">
+                            </div>
+                            <div class="form-group">
+                                <label>적용 입찰가중치 (%)</label>
+                                <input type="number" id="keyword_bid_weight_target" value="100" min="10" max="500">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>일치 방식</label>
+                            <input type="hidden" id="keyword_bid_weight_match_mode" value="partial">
+                            <input type="hidden" id="keyword_bid_weight_preview_token" value="">
+                            <div class="btn-row">
+                                <button type="button" class="btn btn-primary kw-bid-weight-match-btn" data-mode="partial" onclick="setKeywordBidWeightSearchMatchMode('partial')">부분일치</button>
+                                <button type="button" class="btn btn-sub kw-bid-weight-match-btn" data-mode="exact" onclick="setKeywordBidWeightSearchMatchMode('exact')">완전일치</button>
+                            </div>
+                        </div>
+                        <div class="btn-row" style="margin-bottom:12px;">
+                            <button class="btn btn-sub" onclick="previewPowerlinkKeywordBidWeightsBySearch()">먼저 조회하기</button>
+                            <button class="btn btn-primary" onclick="applyPowerlinkKeywordBidWeightsBySearch()">조회 결과 확인 후 변경 실행</button>
+                            <button class="btn btn-sub" onclick="clearKeywordBidWeightSearchResult()">결과 비우기</button>
+                        </div>
+                        <textarea id="keyword_bid_weight_result" rows="11" readonly placeholder="먼저 조회하기를 눌러 매칭 키워드를 확인한 뒤 변경 실행하세요."></textarea>
+                    </div>
+
+                    <div class="card" style="grid-column:1/-1;">
                         <div class="card-title">목표 평균순위 기준 입찰가 (자동 계산)</div>
-                        <div class="form-group"><label>적용 범위</label><select id="bid_scope_type_avg_position"><option value="campaign">선택한 캠페인 하위 키워드 전체</option><option value="adgroup">선택한 광고그룹 키워드 전체</option></select></div>
+                        <div class="form-group"><label>적용 범위</label><select id="bid_scope_type_avg_position"><option value="campaign">선택한 캠페인 하위 키워드/쇼핑소재 전체</option><option value="adgroup">선택한 광고그룹 키워드/쇼핑소재 전체</option></select></div>
                         <div class="grid-2">
                             <div class="form-group"><label>디바이스</label><select id="avg_position_device" onchange="syncAvgPositionLimit()"><option value="PC">PC</option><option value="MOBILE">모바일</option></select></div>
                             <div class="form-group"><label>목표 순위</label><select id="avg_position_val"></select></div>
                         </div>
                         <div class="form-group"><label>최대 상한선 설정 (원)</label><input type="number" id="avg_position_max_bid" placeholder="예: 3000"></div>
-                        <div style="display:flex; gap:16px; font-size:12px; margin-bottom:16px; color:var(--muted);">
-                            <label><input type="checkbox" id="avg_position_exclude_paused" checked> 중지 키워드 제외</label>
+                        <div style="display:flex; gap:16px; font-size:12px; margin-bottom:6px; color:var(--muted); flex-wrap:wrap;">
+                            <label><input type="checkbox" id="avg_position_exclude_paused" checked> 중지 키워드/소재 제외</label>
                             <label><input type="checkbox" id="avg_position_exclude_pending" checked> 비승인 제외</label>
                         </div>
+                        <div class="field-note" style="margin-bottom:12px;">파워링크는 키워드 기준, 쇼핑검색은 소재 기준으로 목표 평균순위 입찰가를 자동 계산합니다.</div>
                         <div class="btn-row">
                             <button class="btn btn-sub" style="flex:1;" onclick="previewAvgPositionBids()">예상금액 미리보기</button>
                             <button class="btn btn-primary" style="flex:1;" onclick="applyAvgPositionBids()">자동 변경 실행</button>
@@ -486,9 +604,29 @@
                         <label>적용 단위</label>
                         <select id="schedule_target_type"><option value="adgroup">선택한 광고그룹에 적용</option><option value="campaign">선택한 캠페인 하위 광고그룹 전체 자동 적용</option></select>
                     </div>
-                    <div class="form-group"><label>요일 선택</label><div class="schedule-grid" id="schedule_days"></div></div>
                     <div class="form-group">
-                        <label>시간 선택</label>
+                        <label>적용 방식</label>
+                        <input type="hidden" id="schedule_action_mode" value="overwrite">
+                        <div class="btn-row" style="flex-wrap:wrap; margin-bottom:8px;">
+                            <button type="button" class="btn btn-primary schedule-mode-btn active" data-mode="overwrite" onclick="setScheduleActionMode('overwrite')">덮어쓰기</button>
+                            <button type="button" class="btn btn-sub schedule-mode-btn" data-mode="add" onclick="setScheduleActionMode('add')">추가</button>
+                            <button type="button" class="btn btn-sub schedule-mode-btn" data-mode="delete" onclick="setScheduleActionMode('delete')">삭제</button>
+                        </div>
+                        <div class="field-note" id="schedule_action_mode_note">현재 선택한 시간대를 기준으로 기존 스케줄을 덮어씁니다.</div>
+                    </div>
+                    <div class="form-group"><label>공통 요일 선택</label><div class="schedule-grid" id="schedule_days"></div><div class="field-note" style="margin-top:6px;">구간별로 요일을 따로 지정하지 않으면 여기서 고른 요일을 공통으로 사용합니다.</div></div>
+                    <div class="form-group">
+                        <label>구간별 시간/가중치 설정 (여러 가중치 가능)</label>
+                        <div class="field-note" style="margin-bottom:8px;">예: 월~금 00~07시는 100%, 월~금 08~12시는 120%, 토요일만 별도 가중치처럼 요일별로 나눠서 적용할 수 있습니다. 종료 시각은 24시까지 선택할 수 있어요.</div>
+                        <div id="schedule_blocks_container" class="schedule-blocks"></div>
+                        <div class="schedule-block-toolbar">
+                            <button class="btn btn-sub" type="button" onclick="addScheduleBlock()">구간 추가</button>
+                            <button class="btn btn-sub" type="button" onclick="clearScheduleBlocks()">구간 초기화</button>
+                        </div>
+                        <div class="field-note" style="margin-top:8px;">구간에 요일을 따로 지정하면 그 구간은 지정한 요일에만 적용됩니다. 지정하지 않으면 위 공통 요일을 사용합니다.</div>
+                    </div>
+                    <div class="form-group">
+                        <label>단일 시간 선택 (기존 방식 유지)</label>
                         <div class="hours-grid schedule-grid" id="schedule_hours"></div>
                         <div class="btn-row" style="margin-top:8px;">
                             <button class="btn btn-sub" style="padding:4px 8px; font-size:12px;" onclick="selectAllScheduleHours(true)">시간 전체선택</button>
@@ -496,7 +634,117 @@
                         </div>
                     </div>
                     <div class="form-group" style="max-width:200px;"><label>입찰 가중치 (%)</label><input type="number" id="schedule_bid_weight" value="100" min="10" max="500"></div>
-                    <button class="btn btn-primary" onclick="saveScheduleBySelection()">선택한 시간대/가중치 일괄 적용</button>
+                    <button class="btn btn-primary" onclick="saveScheduleBySelection()">선택한 시간대/가중치 적용 실행</button>
+                </div>
+            </div>
+
+
+            <div id="b_keyword_inspect" class="tab-content">
+                <div class="grid-2">
+                    <div class="card" style="grid-column:1/-1;">
+                        <div class="card-title">검색어 기준 파워링크 키워드 조회 / 엑셀 다운로드</div>
+                        <div class="field-note" style="margin-bottom:8px;">현재 계정 전체 조회는 유지하면서, 필요하면 좌측에서 체크한 파워링크 캠페인 안에서만 검색할 수 있어요.</div>
+                        <div class="field-note" style="margin-bottom:12px;">쉼표(,), 줄바꿈, 세미콜론(;)으로 여러 검색어를 한 번에 넣을 수 있어요. 예: 종로, 용산, 마포, 강남, 서초, 송파</div>
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label>검색어</label>
+                                <textarea id="keyword_lookup_search_text" rows="4" placeholder="예: 종로, 용산, 마포&#10;강남&#10;서초&#10;송파"></textarea>
+                                <div style="height:10px;"></div>
+                                <label>제외어</label>
+                                <textarea id="keyword_lookup_exclude_text" rows="2" placeholder="예: 만수동&#10;종로3가"></textarea>
+                                <div class="field-note" style="margin-top:6px;">포함 검색어에 일치하더라도 제외어에 걸리면 결과에서 제외합니다.</div>
+                            </div>
+                            <div class="form-group">
+                                <label>조회 범위</label>
+                                <input type="hidden" id="keyword_lookup_scope_mode" value="account">
+                                <div class="btn-row" style="margin-bottom:8px; flex-wrap:wrap;">
+                                    <button type="button" class="btn btn-primary kw-lookup-scope-btn" data-scope="account" onclick="setKeywordLookupScopeMode('account')">계정 전체 기준</button>
+                                    <button type="button" class="btn btn-sub kw-lookup-scope-btn" data-scope="selected_campaigns" onclick="setKeywordLookupScopeMode('selected_campaigns')">선택 캠페인 기준</button>
+                                    <button type="button" class="btn btn-sub kw-lookup-scope-btn" data-scope="selected_adgroups" onclick="setKeywordLookupScopeMode('selected_adgroups')">선택 그룹 기준</button>
+                                </div>
+                                <div class="field-note" id="keyword_lookup_scope_note">기본은 현재 계정 전체 파워링크 키워드에서 조회합니다.</div>
+                            </div>
+                        </div>
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label>일치 방식</label>
+                                <input type="hidden" id="keyword_lookup_match_mode" value="partial">
+                                <input type="hidden" id="keyword_lookup_preview_token" value="">
+                                <div class="btn-row" style="margin-bottom:8px;">
+                                    <button type="button" class="btn btn-primary kw-lookup-match-btn" data-mode="partial" onclick="setKeywordLookupMatchMode('partial')">부분일치</button>
+                                    <button type="button" class="btn btn-sub kw-lookup-match-btn" data-mode="exact" onclick="setKeywordLookupMatchMode('exact')">완전일치</button>
+                                </div>
+                                <div class="field-note">부분일치: 각 검색어를 포함하는 키워드 조회 / 완전일치: 입력한 검색어와 정확히 같은 키워드만 조회</div>
+                            </div>
+                            <div class="form-group">
+                                <label>캠페인 선택 안내</label>
+                                <div class="field-note">선택 캠페인 기준은 좌측 캠페인 체크 후, 선택 그룹 기준은 좌측 광고그룹 체크 후 조회하면 됩니다.</div>
+                            </div>
+                        </div>
+                        <div class="btn-row" style="margin-bottom:12px; flex-wrap:wrap;">
+                            <button class="btn btn-primary" onclick="searchPowerlinkKeywordsForInspect('account')">계정 전체 조회</button>
+                            <button class="btn btn-sub" onclick="searchPowerlinkKeywordsForInspect('selected_campaigns')">선택 캠페인 조회</button>
+                            <button class="btn btn-sub" onclick="searchPowerlinkKeywordsForInspect('selected_adgroups')">선택 그룹 조회</button>
+                            <button class="btn btn-sub" onclick="downloadPowerlinkKeywordSearchExcel()">현재 범위 엑셀 다운로드</button>
+                            <button class="btn btn-sub" onclick="clearPowerlinkKeywordLookupResult()">결과 비우기</button>
+                        </div>
+                        <div id="powerlink_keyword_lookup_result" class="log-list">
+                            <div class="log-empty">아직 조회한 결과가 없습니다.</div>
+                        </div>
+                    </div>
+                    <div class="card" style="grid-column:1/-1;">
+                        <div class="card-title">검색어 기준 파워링크 키워드 입찰가 변경</div>
+                        <div class="field-note" style="margin-bottom:8px;">현재 계정의 파워링크 키워드 전체 또는 좌측에서 체크한 파워링크 캠페인 안에서 검색어와 교집합이 있는 키워드를 찾아 입찰가를 일괄 변경합니다.</div>
+                        <div class="field-note" style="margin-bottom:12px;">기본은 <strong>부분일치</strong>이며, 부분일치는 입력한 단어/토큰이 모두 포함된 키워드를 찾습니다. 필요할 때만 <strong>완전일치</strong>로 바꿔서 동일 키워드만 잡을 수 있습니다.</div>
+                        <div class="form-group">
+                            <label>검색어</label>
+                            <textarea id="keyword_bid_search_text" rows="3" placeholder="예: 종로, 용산, 마포&#10;강남&#10;서초&#10;송파"></textarea>
+                        </div>
+                        <div class="form-group" style="max-width:240px;">
+                            <label>적용 입찰가 (원)</label>
+                            <input type="number" id="keyword_bid_search_target_bid" value="100">
+                        </div>
+                        <div class="form-group">
+                            <label>일치 방식</label>
+                            <input type="hidden" id="keyword_bid_search_match_mode" value="partial">
+                            <input type="hidden" id="keyword_bid_search_preview_token" value="">
+                            <div class="btn-row">
+                                <button type="button" class="btn btn-primary kw-bid-match-btn" data-mode="partial" onclick="setKeywordBidSearchMatchMode('partial')">부분일치</button>
+                                <button type="button" class="btn btn-sub kw-bid-match-btn" data-mode="exact" onclick="setKeywordBidSearchMatchMode('exact')">완전일치</button>
+                            </div>
+                        </div>
+                        <div class="btn-row" style="margin-bottom:12px; flex-wrap:wrap;">
+                            <button class="btn btn-sub" onclick="previewPowerlinkKeywordBidsBySearch()">먼저 조회하기</button>
+                            <button class="btn btn-primary" onclick="applyPowerlinkKeywordBidsBySearch()">조회 결과 확인 후 변경 실행</button>
+                            <button class="btn btn-sub" onclick="clearKeywordBidSearchResult()">결과 비우기</button>
+                        </div>
+                        <textarea id="keyword_bid_search_result" rows="11" readonly placeholder="먼저 조회하기를 눌러 매칭 키워드를 확인한 뒤 변경 실행하세요."></textarea>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-title">파워링크 키워드 개수 조회</div>
+                        <div class="field-note" style="margin-bottom:8px;">현재 계정의 파워링크 총 등록 키워드 수와, 좌측에서 체크한 파워링크 캠페인의 키워드 수를 함께 조회합니다.</div>
+                        <div class="field-note" style="margin-bottom:12px;">캠페인을 체크하지 않아도 전체 계정 기준 총 개수는 조회됩니다.</div>
+                        <div class="btn-row" style="margin-bottom:12px;">
+                            <button class="btn btn-primary" onclick="fetchPowerlinkKeywordStats()">키워드 개수 조회</button>
+                            <button class="btn btn-sub" onclick="clearPowerlinkKeywordStatsResult()">결과 비우기</button>
+                        </div>
+                        <div id="powerlink_keyword_stats_result" class="log-list">
+                            <div class="log-empty">아직 조회한 결과가 없습니다.</div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">파워링크 캠페인 내부 중복키워드 조회</div>
+                        <div class="field-note" style="margin-bottom:8px;">체크한 캠페인 중 파워링크 캠페인만 대상으로, 서로 다른 광고그룹 2개 이상에 들어간 동일 키워드를 찾아줍니다.</div>
+                        
+                        <div class="btn-row" style="margin-bottom:12px;">
+                            <button class="btn btn-primary" onclick="findPowerlinkDuplicateKeywords()">중복키워드 조회</button>
+                            <button class="btn btn-sub" onclick="clearPowerlinkDuplicateKeywordResult()">결과 비우기</button>
+                        </div>
+                        <div id="duplicate_keyword_result" class="log-list">
+                            <div class="log-empty">아직 조회한 결과가 없습니다.</div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -504,13 +752,33 @@
                 <div class="grid-2">
                     <div class="card">
                         <div class="card-title">캠페인 전체 복사</div>
-                        <div class="form-group"><label>접미사</label><input type="text" id="camp_suffix" value="_복사본"></div>
+                        <div class="grid-2">
+                            <div class="form-group"><label>복사 개수</label><input type="number" id="camp_copy_count" value="1" step="1"></div>
+                            <div class="form-group"><label>접미사 (1개 복사 시만 사용)</label><input type="text" id="camp_suffix" value="_복사본"></div>
+                        </div>
+                        <div class="form-group">
+                            <label>직접 지정 캠페인명 (선택)</label>
+                            <textarea id="camp_custom_names" rows="4" placeholder="한 줄에 1개씩 입력&#10;입력 시 접미사 대신 이 이름으로 생성"></textarea>
+                        </div>
+                        <div class="field-note" style="margin-bottom:8px;">직접 지정 이름을 입력하면 접미사 대신 사용됩니다.</div>
+                        <div class="field-note" style="margin-bottom:12px;">입력 개수는 선택 캠페인 수 × 복사 개수와 같아야 합니다. (상한 없음)</div>
+                        <div class="field-note" style="margin-bottom:12px;">직접 지정 이름이 없으면 복사 개수가 2개 이상일 때 원본명 기준으로 자동 번호가 붙습니다. 예: 경쟁사, 경쟁사2, 경쟁사3</div>
                         <button class="btn btn-purple" style="width:100%" onclick="copySelectedCampaigns()">선택 캠페인 복사</button>
                     </div>
                     <div class="card">
                         <div class="card-title">광고그룹 전체 복사</div>
                         <div class="form-group"><label>대상 (도착지) 캠페인</label><select id="copy_adgroup_target_campaign_select"></select></div>
-                        <div class="form-group"><label>접미사</label><input type="text" id="adgroup_copy_suffix" value="_복사본"></div>
+                        <div class="grid-2">
+                            <div class="form-group"><label>복사 개수</label><input type="number" id="adgroup_copy_count" value="1" step="1"></div>
+                            <div class="form-group"><label>접미사 (1개 복사 시만 사용)</label><input type="text" id="adgroup_copy_suffix" value="_복사본"></div>
+                        </div>
+                        <div class="form-group">
+                            <label>직접 지정 광고그룹명 (선택)</label>
+                            <textarea id="adgroup_custom_names" rows="4" placeholder="한 줄에 1개씩 입력&#10;입력 시 접미사 대신 이 이름으로 생성"></textarea>
+                        </div>
+                        <div class="field-note" style="margin-bottom:8px;">직접 지정 이름을 입력하면 접미사 대신 사용됩니다.</div>
+                        <div class="field-note" style="margin-bottom:12px;">입력 개수는 선택 광고그룹 수 × 복사 개수와 같아야 합니다. 체크한 캠페인 하위 전체 복사도 같은 기준으로 포함됩니다. (상한 없음)</div>
+                        <div class="field-note" style="margin-bottom:12px;">직접 지정 이름이 없으면 복사 개수가 2개 이상일 때 원본명 기준으로 자동 번호가 붙습니다. 예: 광고그룹, 광고그룹2, 광고그룹3</div>
                         <div class="form-group">
                             <label>같이 복사할 항목</label>
                             <div style="display:flex; gap:12px; font-size:12px; flex-wrap:wrap;">
@@ -529,6 +797,16 @@
                             </div>
                         </div>
                         <button class="btn btn-purple" style="width:100%" onclick="copySelectedAdgroups()">선택 광고그룹/캠페인 기준 전체 복사</button>
+                    </div>
+                    <div class="card" style="grid-column:1/-1;">
+                        <div class="card-title">광고그룹명 일괄 변경</div>
+                        <div class="form-group">
+                            <label>변경할 광고그룹명</label>
+                            <textarea id="rename_adgroup_names" rows="6" placeholder="체크한 광고그룹 순서대로 한 줄에 1개씩 입력"></textarea>
+                        </div>
+                        <div class="field-note" style="margin-bottom:8px;">현재 좌측 광고그룹 목록 순서 기준으로 적용됩니다.</div>
+                        <div class="field-note" style="margin-bottom:12px;">선택한 광고그룹 수와 입력한 이름 수가 같아야 하며, 같은 캠페인 안에서 기존 이름과 겹치면 차단됩니다.</div>
+                        <button class="btn btn-primary" style="width:100%" onclick="renameSelectedAdgroups()">선택 광고그룹명 일괄 변경</button>
                     </div>
                     <div class="card" style="grid-column:1/-1;">
                         <div class="card-title">광고그룹 내 항목 부분 복사</div>
@@ -652,6 +930,19 @@
                             <button class="btn btn-sub" style="width:100%;" onclick="updateNonSearchKeywordExclusion()">쇼핑 노출 제외 설정 변경</button>
                         </div>
                     </div>
+                    <div class="card">
+                        <div class="card-title">타겟 설정 일괄 적용</div>
+                        <div class="field-note" style="margin-bottom:8px;">원본은 <strong>현재 선택된 광고그룹</strong>을 우선 사용하고, 현재 선택이 없으면 좌측에서 체크한 광고그룹 중 첫 번째를 사용합니다.</div>
+                        <div class="field-note" style="margin-bottom:12px;">연령대/성별/지역 등 추가 타겟과 요일/시간대를 선택 캠페인 또는 선택 광고그룹 전체에 복사 적용합니다.</div>
+                        <div class="form-group"><label>적용 범위</label><select id="bulk_target_scope"><option value="adgroup">선택 광고그룹</option><option value="campaign">선택 캠페인 하위 광고그룹 전체</option></select></div>
+                        <div class="form-group"><label>적용 항목</label>
+                            <div style="display:flex; gap:12px; font-size:12px; flex-wrap:wrap;">
+                                <label><input type="checkbox" id="bulk_target_include_extra" checked> 연령/성별/지역 등 타겟</label>
+                                <label><input type="checkbox" id="bulk_target_include_schedule" checked> 요일/시간대</label>
+                            </div>
+                        </div>
+                        <button class="btn btn-sub" style="width:100%;" onclick="applyBulkTargetSettings()">선택 대상에 타겟 일괄 적용</button>
+                    </div>
                 </div>
             </div>
 
@@ -686,7 +977,15 @@
                             <option value="DESCRIPTION_EXTRA">홍보문구만 삭제</option>
                             <option value="DESCRIPTION">추가설명만 삭제</option>
                             <option value="SUB_LINKS">서브링크만 삭제</option>
+                            <option value="PHONE">전화번호만 삭제</option>
+                            <option value="LOCATION">위치정보만 삭제</option>
+                            <option value="PROMOTION">프로모션만 삭제</option>
+                            <option value="PRICE_LINKS">가격링크만 삭제</option>
+                            <option value="POWER_LINK_IMAGE">파워링크 이미지만 삭제</option>
+                            <option value="WEBSITE_INFO">웹사이트 정보만 삭제</option>
+                            <option value="IMAGE_SUB_LINKS">이미지 서브링크만 삭제</option>
                             <option value="SHOPPING_PROMO_TEXT">쇼핑 추가홍보문구만 삭제</option>
+                            <option value="SHOPPING_EXTRA">쇼핑상품부가정보만 삭제</option>
                         </select>
                     </div>
                     <button class="btn btn-red" style="width:100%; font-size:15px; padding:14px;" onclick="executeBulkDelete()">⚠ 선택 범위 내 일괄 삭제 실행</button>
@@ -694,6 +993,23 @@
             </div>
 
         </div>
+        
+        <div class="card log-panel">
+          <div class="log-toolbar">
+            <div>
+              <div class="card-title" style="margin-bottom:4px;">작업 이력 로그</div>
+              <div style="font-size:12px; color:var(--muted);">성공/실패 작업을 최근 순서대로 저장합니다.</div>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button class="btn btn-sub" type="button" onclick="loadActionLogs(true)">새로고침</button>
+              <button class="btn btn-danger" type="button" onclick="clearActionLogs()">로그 비우기</button>
+            </div>
+          </div>
+          <div id="action_log_list" class="log-list">
+            <div class="log-empty">아직 저장된 로그가 없습니다.</div>
+          </div>
+        </div>
+
       </div>
     </main>
   </div>
@@ -709,13 +1025,103 @@ let checkedCampaignIds = new Set();
 let checkedAdgroupIds = new Set();
 let favoriteAccountIds = new Set();
 const ACCOUNT_FAVORITES_KEY = 'naver_account_favorites';
+const API_KEY_STORAGE_KEY = 'naver_api_key';
+const SECRET_KEY_STORAGE_KEY = 'naver_secret_key';
+const SAVE_KEYS_STORAGE_KEY = 'naver_save_keys';
+const CUSTOMER_ID_STORAGE_KEY = 'naver_customer_id';
+
+function safeStorageGet(storage, key) {
+    try { return storage.getItem(key); } catch(e) { return null; }
+}
+function safeStorageSet(storage, key, value) {
+    try { storage.setItem(key, value); } catch(e) {}
+}
+function safeStorageRemove(storage, key) {
+    try { storage.removeItem(key); } catch(e) {}
+}
+function getSavedAuthState() {
+    const localRemember = safeStorageGet(localStorage, SAVE_KEYS_STORAGE_KEY) === '1';
+    const localApi = safeStorageGet(localStorage, API_KEY_STORAGE_KEY) || '';
+    const localSecret = safeStorageGet(localStorage, SECRET_KEY_STORAGE_KEY) || '';
+    const sessionApi = safeStorageGet(sessionStorage, API_KEY_STORAGE_KEY) || '';
+    const sessionSecret = safeStorageGet(sessionStorage, SECRET_KEY_STORAGE_KEY) || '';
+    const sessionCustomer = safeStorageGet(sessionStorage, CUSTOMER_ID_STORAGE_KEY) || '';
+    const localCustomer = safeStorageGet(localStorage, CUSTOMER_ID_STORAGE_KEY) || '';
+    return {
+        remember: localRemember || (!!localApi && !!localSecret),
+        apiKey: localApi || sessionApi,
+        secretKey: localSecret || sessionSecret,
+        customerId: localCustomer || sessionCustomer,
+    };
+}
+function persistAuthState(forceLocal=false) {
+    const apiEl = document.getElementById('api_key');
+    const secretEl = document.getElementById('secret_key');
+    const rememberEl = document.getElementById('save_keys_chk');
+    if(!apiEl || !secretEl || !rememberEl) return;
+    const apiKey = apiEl.value || '';
+    const secretKey = secretEl.value || '';
+    const remember = !!rememberEl.checked;
+    safeStorageSet(sessionStorage, API_KEY_STORAGE_KEY, apiKey);
+    safeStorageSet(sessionStorage, SECRET_KEY_STORAGE_KEY, secretKey);
+    if(currentCustomerId) safeStorageSet(sessionStorage, CUSTOMER_ID_STORAGE_KEY, String(currentCustomerId));
+    else safeStorageRemove(sessionStorage, CUSTOMER_ID_STORAGE_KEY);
+    if(remember || forceLocal) {
+        safeStorageSet(localStorage, API_KEY_STORAGE_KEY, apiKey);
+        safeStorageSet(localStorage, SECRET_KEY_STORAGE_KEY, secretKey);
+        safeStorageSet(localStorage, SAVE_KEYS_STORAGE_KEY, '1');
+        if(currentCustomerId) safeStorageSet(localStorage, CUSTOMER_ID_STORAGE_KEY, String(currentCustomerId));
+        else safeStorageRemove(localStorage, CUSTOMER_ID_STORAGE_KEY);
+    } else {
+        safeStorageRemove(localStorage, API_KEY_STORAGE_KEY);
+        safeStorageRemove(localStorage, SECRET_KEY_STORAGE_KEY);
+        safeStorageRemove(localStorage, CUSTOMER_ID_STORAGE_KEY);
+        safeStorageRemove(localStorage, SAVE_KEYS_STORAGE_KEY);
+    }
+}
+function restoreAuthState() {
+    const saved = getSavedAuthState();
+    const apiEl = document.getElementById('api_key');
+    const secretEl = document.getElementById('secret_key');
+    const rememberEl = document.getElementById('save_keys_chk');
+    if(apiEl && saved.apiKey) apiEl.value = saved.apiKey;
+    if(secretEl && saved.secretKey) secretEl.value = saved.secretKey;
+    if(rememberEl) rememberEl.checked = !!saved.remember;
+    return saved;
+}
+function bindAuthPersistence() {
+    const apiEl = document.getElementById('api_key');
+    const secretEl = document.getElementById('secret_key');
+    const rememberEl = document.getElementById('save_keys_chk');
+    if(apiEl) {
+        ['input','change','blur','paste'].forEach(evt => apiEl.addEventListener(evt, () => window.setTimeout(() => persistAuthState(false), 0)));
+    }
+    if(secretEl) {
+        ['input','change','blur','paste'].forEach(evt => secretEl.addEventListener(evt, () => window.setTimeout(() => persistAuthState(false), 0)));
+    }
+    if(rememberEl) {
+        rememberEl.addEventListener('change', () => persistAuthState(false));
+    }
+    window.addEventListener('beforeunload', () => persistAuthState(false));
+    document.addEventListener('visibilitychange', () => {
+        if(document.visibilityState === 'hidden') persistAuthState(false);
+    });
+}
 
 let selectedScheduleDays = new Set([1,2,3,4,5,6,7]);
 let selectedScheduleHours = new Set();
+let scheduleBlocks = [];
 let scheduleDragState = { active:false, kind:'', mode:'add', touched:new Set() };
+let powerlinkKeywordLookupRows = [];
+let selectedPowerlinkKeywordLookupIds = new Set();
+let accountAssetLookupScope = 'account';
+let accountLookupAdsRows = [];
+let accountLookupExtRows = [];
+let accountLookupKeywordRows = [];
 
 // ★ 필수 Utility 함수 (escapeAttr 포함) ★
 function formatWon(v) { return Number(v||0) > 0 ? `${Number(v).toLocaleString()}원` : '설정안됨'; }
+function num(v) { return Number(v || 0).toLocaleString(); }
 function formatBudget(useDailyBudget, dailyBudget) { return useDailyBudget === false ? '제한없음' : formatWon(dailyBudget); }
 function getMediaLabel(raw) {
     const summary = String(raw?.targetSummary?.pcMobile || '').toLowerCase();
@@ -751,6 +1157,19 @@ function getMediaDetailPayload(prefix) {
         contents_naver: document.getElementById(`${prefix}_media_contents_naver`)?.checked ?? true,
         contents_partner: document.getElementById(`${prefix}_media_contents_partner`)?.checked ?? true,
     };
+}
+function parseMultilineNames(text) {
+    return String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').map(x => x.trim()).filter(Boolean);
+}
+function getCheckedCampaignIdsInViewOrder() {
+    const ordered = campaigns.filter(x => checkedCampaignIds.has(x.id)).map(x => String(x.id));
+    Array.from(checkedCampaignIds || []).forEach(id => { if(!ordered.includes(String(id))) ordered.push(String(id)); });
+    return ordered;
+}
+function getCheckedAdgroupIdsInViewOrder() {
+    const ordered = adgroups.filter(x => checkedAdgroupIds.has(x.id)).map(x => String(x.id));
+    Array.from(checkedAdgroupIds || []).forEach(id => { if(!ordered.includes(String(id))) ordered.push(String(id)); });
+    return ordered;
 }
 function validateMediaDetail(prefix) {
     const d = getMediaDetailPayload(prefix);
@@ -812,6 +1231,8 @@ function toggleFavoriteAccount(customerId, event) {
     else favoriteAccountIds.add(key);
     saveFavoriteAccountIds();
     renderAccounts();
+    setAssetLookupScope('account');
+    switchAccountAssetPreview('keywords', document.querySelector('#tab_data .account-asset-preview-tab.active'));
 }
 function isShoppingLikeType(value) {
     const s = String(value || '').toUpperCase();
@@ -908,30 +1329,82 @@ async function postJson(url, body, txt) {
         const res = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
         const text = await res.text();
         let data = {}; try{ data = text ? JSON.parse(text) : {}; } catch(e){ data = {error:text||`${res.status}`}; }
+        try { await loadActionLogs(false); } catch(e) {}
         if(!res.ok) throw new Error([data.error, data.details].filter(Boolean).join(' | ') || `${res.status}`);
         return data;
     } finally { hideLoader(); }
 }
 
+function formatActionLogTime(ts) {
+    const s = String(ts || '').trim();
+    return s || '-';
+}
+
+function escapeMaybe(value) {
+    return escapeHtml(value == null ? '' : String(value));
+}
+
+async function loadActionLogs(showNotice=false) {
+    try {
+        const res = await fetch('/get_action_logs?limit=120');
+        const rows = await res.json();
+        renderActionLogs(Array.isArray(rows) ? rows : []);
+        if(showNotice) showToast('작업 로그를 새로고침했습니다.', 'info');
+    } catch(err) {
+        if(showNotice) showToast(`로그 조회 실패: ${err.message}`, 'error');
+    }
+}
+
+function renderActionLogs(rows) {
+    const wrap = document.getElementById('action_log_list');
+    if(!wrap) return;
+    if(!rows || !rows.length) {
+        wrap.innerHTML = '<div class="log-empty">아직 저장된 로그가 없습니다.</div>';
+        return;
+    }
+    wrap.innerHTML = rows.map(row => {
+        const status = String(row.status || '').toLowerCase() === 'error' ? 'error' : 'success';
+        const badgeClass = status === 'error' ? 'red' : 'green';
+        const badgeText = status === 'error' ? '실패' : '성공';
+        const summary = row.summary ? `<div class="log-summary">${escapeMaybe(row.summary)}</div>` : '';
+        const msg = row.message ? `<div class="log-msg">${escapeMaybe(row.message)}</div>` : '';
+        const cid = row.customer_id ? `광고주 ID: ${escapeMaybe(row.customer_id)}` : '광고주 ID: -';
+        return `
+            <div class="log-item ${status}">
+              <div class="log-top">
+                <div class="log-title">${escapeMaybe(row.action || '작업')}</div>
+                <span class="badge ${badgeClass}">${badgeText}</span>
+              </div>
+              <div class="log-meta">${escapeMaybe(formatActionLogTime(row.ts))} · ${cid}</div>
+              ${summary}
+              ${msg}
+            </div>`;
+    }).join('');
+}
+
+async function clearActionLogs() {
+    if(!confirm('저장된 작업 로그를 비울까요?')) return;
+    try {
+        const data = await postJson('/clear_action_logs', {}, '로그 비우는 중...');
+        renderActionLogs([]);
+        showToast(data.message || '작업 로그를 비웠습니다.', 'success');
+    } catch(err) {
+        showToast(err.message, 'error');
+    }
+}
+
 // --- 2. Initialize ---
 window.onload = async function() {
     favoriteAccountIds = loadFavoriteAccountIds();
-    const savedApi = localStorage.getItem('naver_api_key');
-    const savedSecret = localStorage.getItem('naver_secret_key');
-    if (savedApi) { 
-        document.getElementById('api_key').value = savedApi; 
-        document.getElementById('secret_key').value = savedSecret || ''; 
-        document.getElementById('save_keys_chk').checked = true; 
-    }
-    document.getElementById('save_keys_chk').onchange = (e) => {
-        if(e.target.checked) {
-            localStorage.setItem('naver_api_key', document.getElementById('api_key').value);
-            localStorage.setItem('naver_secret_key', document.getElementById('secret_key').value);
-        } else {
-            localStorage.removeItem('naver_api_key'); localStorage.removeItem('naver_secret_key');
-        }
-    };
+    const restoredAuth = restoreAuthState();
+    bindAuthPersistence();
     renderAccounts();
+    if(restoredAuth.customerId) {
+        const matched = accountsData.find(acc => String(acc.customer_id || '') === String(restoredAuth.customerId || ''));
+        if(matched) {
+            await selectAccount(matched);
+        }
+    }
     syncExtensionForm();
     syncAvgPositionLimit();
     toggleBudgetInput('new_campaign_unlimited', 'new_campaign_budget');
@@ -942,17 +1415,29 @@ window.onload = async function() {
     initScheduleControls();
     document.addEventListener('pointerup', stopScheduleDrag);
     document.addEventListener('pointercancel', stopScheduleDrag);
+    loadActionLogs();
+    window.setInterval(() => { loadActionLogs(false); }, 15000);
 };
 
 // --- 3. Accounts & Master List ---
 function renderAccounts() {
     const wrap = document.getElementById('account_list'); wrap.innerHTML = '';
+    const q = String(document.getElementById('account_search')?.value || '').trim().toLowerCase();
     const sorted = [...accountsData].sort((a,b) => {
         const aFav = isFavoriteAccount(a.customer_id) ? 1 : 0;
         const bFav = isFavoriteAccount(b.customer_id) ? 1 : 0;
         if(aFav !== bFav) return bFav - aFav;
         return String(a.account_name||'').localeCompare(String(b.account_name||''), 'ko');
+    }).filter(acc => {
+        if(!q) return true;
+        const name = String(acc.account_name || '').toLowerCase();
+        const cid = String(acc.customer_id || '').toLowerCase();
+        return name.includes(q) || cid.includes(q);
     });
+    if(!sorted.length) {
+        wrap.innerHTML = '<div class="log-empty" style="padding:12px;">검색 결과가 없습니다.</div>';
+        return;
+    }
     sorted.forEach(acc => {
         const active = String(currentCustomerId || '') === String(acc.customer_id || '');
         const fav = isFavoriteAccount(acc.customer_id);
@@ -973,6 +1458,7 @@ function renderAccounts() {
 
 async function selectAccount(acc) {
     currentCustomerId = acc.customer_id; 
+    persistAuthState(false);
     document.getElementById('bc_account').textContent = acc.account_name;
     document.getElementById('master_header_title').textContent = `${acc.account_name} 캠페인`;
     
@@ -985,10 +1471,10 @@ async function selectAccount(acc) {
     await Promise.all([refreshCampaigns(), loadChannels()]);
 }
 
-async function refreshCampaigns() {
+async function refreshCampaigns(force=false) {
     const c = ensureReady(); if(!c) return;
     try {
-        campaigns = await postJson('/get_campaigns', c, '캠페인 목록 조회 중...');
+        campaigns = await postJson('/get_campaigns', { ...c, force }, '캠페인 목록 조회 중...');
         if(currentCampaignId && !campaigns.some(x => String(x.id) === String(currentCampaignId))) {
             currentCampaignId = null;
             currentAdgroupId = null;
@@ -1020,10 +1506,10 @@ async function refreshAdgroups() {
     }
 }
 
-async function loadChannels() {
+async function loadChannels(force=false) {
     const c = ensureReady(); if(!c) return;
     try {
-        channels = await postJson('/get_biz_channels', c, '비즈채널 로딩...');
+        channels = await postJson('/get_biz_channels', { ...c, force }, '비즈채널 로딩...');
         const html = ['<option value="">선택 안 함</option>'].concat(channels.map(x => `<option value="${x.id}">${escapeHtml(x.name)}</option>`)).join('');
         document.getElementById('new_biz_channel').innerHTML = html;
     } catch(e) {}
@@ -1124,6 +1610,201 @@ function updateBreadcrumb() {
     document.getElementById('bc_selection_count').textContent = `선택: 캠페인 ${checkedCampaignIds.size} / 그룹 ${checkedAdgroupIds.size}`;
 }
 
+const KEYWORD_BATCH_MAX_SLOTS = 20;
+
+function isKeywordBulkMode() {
+    return !!document.getElementById('create_keyword_bulk_mode')?.checked;
+}
+
+function clampKeywordSlotCount(value) {
+    const num = Number(value);
+    if(!Number.isFinite(num)) return 10;
+    return Math.max(1, Math.min(KEYWORD_BATCH_MAX_SLOTS, Math.round(num)));
+}
+
+function getKeywordSlotRangeEl() {
+    return document.getElementById('create_keyword_slot_range');
+}
+
+function getKeywordSlotCount() {
+    if(!isKeywordBulkMode()) return 1;
+    return clampKeywordSlotCount(getKeywordSlotRangeEl()?.value || 10);
+}
+
+function snapshotKeywordBatchSlotState() {
+    const state = {};
+    for(let i=1; i<=KEYWORD_BATCH_MAX_SLOTS; i++) {
+        state[i] = {
+            adgroup_id: document.getElementById(`create_keyword_adgroup_${i}`)?.value || '',
+            keywords: document.getElementById(`create_keywords_text_${i}`)?.value || ''
+        };
+    }
+    return state;
+}
+
+function syncKeywordSlotControlUi() {
+    const wrap = document.getElementById('keyword_slot_control_wrap');
+    const rangeEl = getKeywordSlotRangeEl();
+    const badge = document.getElementById('create_keyword_slot_count_badge');
+    const count = clampKeywordSlotCount(rangeEl?.value || 10);
+    if(rangeEl) rangeEl.value = String(count);
+    if(badge) badge.textContent = `${count}개`;
+    if(wrap) wrap.style.display = isKeywordBulkMode() ? 'flex' : 'none';
+}
+
+function updateKeywordBatchModeNote() {
+    const noteEl = document.getElementById('keyword_batch_mode_note');
+    if(!noteEl) return;
+    noteEl.textContent = isKeywordBulkMode()
+        ? `대량 입력이 켜져 있어 슬롯 ${getKeywordSlotCount()}개가 열려 있습니다. 좌우 +/- 버튼이나 막대바로 1~${KEYWORD_BATCH_MAX_SLOTS}개까지 조절할 수 있고, 자동 분배 버튼으로 칸당 1000개씩 나눌 수 있습니다.`
+        : `기본은 슬롯 1개만 열립니다. 대량 입력을 체크하면 슬롯 수를 1~${KEYWORD_BATCH_MAX_SLOTS}개까지 조절할 수 있습니다.`;
+}
+
+function buildKeywordBatchSlots() {
+    const root = document.getElementById('keyword_batch_slots');
+    if(!root) return;
+    const prevState = snapshotKeywordBatchSlotState();
+    const slots = [];
+    for(let i=1; i<=getKeywordSlotCount(); i++) {
+        slots.push(`
+            <div class="card" style="padding:12px; border:1px solid var(--line); box-shadow:none;">
+                <div style="font-size:12px; color:var(--muted); margin-bottom:8px;">슬롯 ${i}</div>
+                <div class="form-group"><label>대상 광고그룹 ${i}</label><select id="create_keyword_adgroup_${i}" class="create-keyword-adgroup-select"></select></div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>키워드 목록 ${i} <span id="create_keywords_count_${i}" style="font-size:11px; color:var(--muted); font-weight:400;">0개</span></label>
+                    <textarea id="create_keywords_text_${i}" class="create-keywords-textarea" data-slot-index="${i}" rows="5" placeholder="사과&#10;바나나" oninput="updateKeywordTextareaCount(${i})"></textarea>
+                </div>
+            </div>
+        `);
+    }
+    root.innerHTML = slots.join('');
+    for(let i=1; i<=getKeywordSlotCount(); i++) {
+        const textEl = document.getElementById(`create_keywords_text_${i}`);
+        if(textEl) textEl.value = prevState[i]?.keywords || '';
+    }
+    updateKeywordBatchModeNote();
+}
+
+function restoreKeywordBatchSlotState(prevState) {
+    for(let i=1; i<=getKeywordSlotCount(); i++) {
+        const adgroupEl = document.getElementById(`create_keyword_adgroup_${i}`);
+        const textEl = document.getElementById(`create_keywords_text_${i}`);
+        if(adgroupEl) adgroupEl.value = prevState[i]?.adgroup_id || currentAdgroupId || '';
+        if(textEl) textEl.value = prevState[i]?.keywords || '';
+    }
+}
+
+function toggleKeywordBatchMode() {
+    const prevState = snapshotKeywordBatchSlotState();
+    syncKeywordSlotControlUi();
+    buildKeywordBatchSlots();
+    updateSelectOptions();
+    restoreKeywordBatchSlotState(prevState);
+    refreshAllKeywordTextareaCounts();
+}
+
+function applyKeywordSlotCount(value) {
+    const prevState = snapshotKeywordBatchSlotState();
+    const rangeEl = getKeywordSlotRangeEl();
+    if(rangeEl) rangeEl.value = String(clampKeywordSlotCount(value));
+    syncKeywordSlotControlUi();
+    buildKeywordBatchSlots();
+    updateSelectOptions();
+    restoreKeywordBatchSlotState(prevState);
+    refreshAllKeywordTextareaCounts();
+}
+
+function changeKeywordSlotCount(delta) {
+    if(!isKeywordBulkMode()) {
+        const bulkEl = document.getElementById('create_keyword_bulk_mode');
+        if(bulkEl) bulkEl.checked = true;
+    }
+    applyKeywordSlotCount((getKeywordSlotRangeEl()?.value || 10) * 1 + delta);
+}
+
+function handleKeywordSlotRangeInput() {
+    if(!isKeywordBulkMode()) {
+        const bulkEl = document.getElementById('create_keyword_bulk_mode');
+        if(bulkEl) bulkEl.checked = true;
+    }
+    applyKeywordSlotCount(getKeywordSlotRangeEl()?.value || 10);
+}
+
+function getKeywordTextareaValue(slotIndex) {
+    const el = document.getElementById(`create_keywords_text_${slotIndex}`);
+    return el ? el.value : '';
+}
+
+function parseKeywordLines(textValue) {
+    return String(textValue || '').replace(/,/g, "\n").split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+}
+
+function updateKeywordTextareaCount(slotIndex) {
+    const countEl = document.getElementById(`create_keywords_count_${slotIndex}`);
+    if(!countEl) return;
+    const count = parseKeywordLines(getKeywordTextareaValue(slotIndex)).length;
+    countEl.textContent = `${count.toLocaleString()}개`;
+}
+
+function refreshAllKeywordTextareaCounts() {
+    for(let i=1; i<=getKeywordSlotCount(); i++) updateKeywordTextareaCount(i);
+}
+
+function autoDistributeKeywordInputs() {
+    const limitPerSlot = 1000;
+    const totalSlotCount = getKeywordSlotCount();
+    const merged = [];
+    for(let i=1; i<=KEYWORD_BATCH_MAX_SLOTS; i++) merged.push(...parseKeywordLines(getKeywordTextareaValue(i)));
+    if(!merged.length) { showToast('분배할 키워드가 없습니다.', 'error'); return; }
+    if(!isKeywordBulkMode()) {
+        showToast(`대량 입력을 체크하면 슬롯 수를 최대 ${KEYWORD_BATCH_MAX_SLOTS}개까지 열고 자동 분배할 수 있습니다.`, 'info');
+    }
+    for(let i=1; i<=totalSlotCount; i++) {
+        const start = (i - 1) * limitPerSlot;
+        const end = start + limitPerSlot;
+        const chunk = merged.slice(start, end);
+        const el = document.getElementById(`create_keywords_text_${i}`);
+        if(el) el.value = chunk.join("\n");
+    }
+    refreshAllKeywordTextareaCounts();
+    if(merged.length > limitPerSlot * totalSlotCount) {
+        showToast(`총 ${merged.length.toLocaleString()}개 중 ${(limitPerSlot * totalSlotCount).toLocaleString()}개까지만 입력칸에 배치했습니다. 나머지는 잘렸습니다.`, 'error');
+    } else {
+        showToast(`총 ${merged.length.toLocaleString()}개를 자동 분배했습니다.`, 'success');
+    }
+}
+
+function clearKeywordInputs() {
+    for(let i=1; i<=KEYWORD_BATCH_MAX_SLOTS; i++) {
+        const el = document.getElementById(`create_keywords_text_${i}`);
+        if(el) el.value = '';
+    }
+    refreshAllKeywordTextareaCounts();
+}
+
+function collectKeywordBatchPayloads() {
+    const batches = [];
+    for(let i=1; i<=getKeywordSlotCount(); i++) {
+        const adgroupEl = document.getElementById(`create_keyword_adgroup_${i}`);
+        const textEl = document.getElementById(`create_keywords_text_${i}`);
+        if(!adgroupEl || !textEl) continue;
+        const keywordCount = parseKeywordLines(textEl.value).length;
+        if(!keywordCount) continue;
+        batches.push({
+            slot_index: i,
+            adgroup_id: adgroupEl.value,
+            keywords: textEl.value,
+            keyword_count: keywordCount,
+        });
+    }
+    return batches;
+}
+
+syncKeywordSlotControlUi();
+buildKeywordBatchSlots();
+refreshAllKeywordTextareaCounts();
+updateKeywordBatchModeNote();
+
 function updateSelectOptions() {
     const campHtml = campaigns.map(x => `<option value="${x.id}">${escapeHtml(x.name)}</option>`).join('');
     ['create_adgroup_campaign', 'copy_adgroup_target_campaign_select', 'copy_entity_target_campaign_select'].forEach(id => {
@@ -1138,9 +1819,14 @@ function updateSelectOptions() {
     if(document.getElementById('copy_entity_target_campaign_select')) loadCopyEntityTargetAdgroups();
 
     const adgHtml = adgroups.map(x => `<option value="${x.id}">${escapeHtml(x.name)}</option>`).join('');
-    ['create_keyword_adgroup', 'create_ad_adgroup', 'create_shopping_adgroup', 'create_ext_adgroup', 'create_negative_adgroup'].forEach(id => {
+    ['create_ad_adgroup', 'create_shopping_adgroup', 'create_ext_adgroup', 'create_negative_adgroup'].forEach(id => {
         const el = document.getElementById(id);
         if(el) { el.innerHTML = adgHtml || '<option value="">광고그룹 없음</option>'; el.value = currentAdgroupId; }
+    });
+    document.querySelectorAll('.create-keyword-adgroup-select').forEach(el => {
+        const prev = el.value;
+        el.innerHTML = adgHtml || '<option value="">광고그룹 없음</option>';
+        el.value = (prev && adgroups.some(x => String(x.id) === String(prev))) ? prev : (currentAdgroupId || '');
     });
 }
 
@@ -1251,6 +1937,172 @@ function renderExtensionTable() {
     ], filtered, 'ad_extension', 'adExtensionId');
 }
 
+
+function switchAccountAssetPreview(kind, btn) {
+    document.querySelectorAll('#tab_data .account-asset-preview-tab').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('#sub_account_keywords, #sub_account_ads, #sub_account_exts').forEach(el => el.classList.remove('active'));
+    if(btn) btn.classList.add('active');
+    const targetId = kind === 'exts' ? 'sub_account_exts' : (kind === 'ads' ? 'sub_account_ads' : 'sub_account_keywords');
+    const target = document.getElementById(targetId);
+    if(target) target.classList.add('active');
+}
+
+function setAssetLookupScope(scope) {
+    accountAssetLookupScope = scope === 'campaign' ? 'campaign' : 'account';
+    const accountBtn = document.getElementById('asset_scope_account_btn');
+    const campBtn = document.getElementById('asset_scope_campaign_btn');
+    if (accountBtn) accountBtn.className = `btn ${accountAssetLookupScope === 'account' ? 'btn-primary' : 'btn-sub'}`;
+    if (campBtn) campBtn.className = `btn ${accountAssetLookupScope === 'campaign' ? 'btn-primary' : 'btn-sub'}`;
+}
+
+function getAssetLookupPayload() {
+    const c = ensureReady(); if(!c) return null;
+    const scope = accountAssetLookupScope === 'campaign' ? 'campaign' : 'account';
+    const campaignIds = scope === 'campaign' ? getCheckedCampaignIdsInViewOrder() : [];
+    if (scope === 'campaign' && !campaignIds.length) {
+        showToast('좌측 체크박스에서 캠페인을 1개 이상 선택해주세요.', 'error');
+        return null;
+    }
+    return { ...c, scope, campaign_ids: campaignIds };
+}
+
+function renderAccountLookupTable(targetId, cols, rows, emptyMsg) {
+    const el = document.getElementById(targetId);
+    const list = Array.isArray(rows) ? rows : [];
+    if(!el) return;
+    if(!list.length) {
+        el.innerHTML = `<div style="padding:20px;text-align:center;color:#9ca3af;">${escapeHtml(emptyMsg || '데이터가 없습니다.')}</div>`;
+        return;
+    }
+    const previewRows = list.slice(0, 200);
+    const note = list.length > previewRows.length ? `<div style="padding:10px 12px; font-size:12px; color:var(--muted); border-bottom:1px solid var(--line);">미리보기 ${num(previewRows.length)}건 / 전체 ${num(list.length)}건</div>` : '';
+    let thead = `<tr>${cols.map(c=>`<th>${escapeHtml(c.l)}</th>`).join('')}</tr>`;
+    let tbody = previewRows.map(r => `<tr>${cols.map(c => `<td>${escapeHtml(c.f ? c.f(r[c.k], r) : (r[c.k] ?? ''))}</td>`).join('')}</tr>`).join('');
+    el.innerHTML = `${note}<table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
+}
+
+function renderAccountKeywordsPreview() {
+    const rows = Array.isArray(accountLookupKeywordRows) ? accountLookupKeywordRows : [];
+    const cnt = document.getElementById('cnt_account_keywords');
+    if (cnt) cnt.textContent = String(rows.length || 0);
+    renderAccountLookupTable('table_account_keywords', [
+        {k:'campaignName', l:'캠페인명'},
+        {k:'adgroupName', l:'광고그룹명'},
+        {k:'keyword', l:'키워드'},
+        {k:'status', l:'상태'},
+        {k:'bidAmt', l:'입찰가', f:(v,r)=>r.useGroupBidAmt ? '그룹입찰가 사용' : num(v)},
+        {k:'keywordId', l:'키워드 ID'},
+    ], rows, '아직 조회된 키워드가 없습니다.');
+}
+
+function renderAccountAdsPreview() {
+    const rows = Array.isArray(accountLookupAdsRows) ? accountLookupAdsRows : [];
+    const cnt = document.getElementById('cnt_account_ads');
+    if (cnt) cnt.textContent = String(rows.length || 0);
+    renderAccountLookupTable('table_account_ads', [
+        {k:'campaignName', l:'캠페인명'},
+        {k:'adgroupName', l:'광고그룹명'},
+        {k:'type', l:'소재유형'},
+        {k:'status', l:'상태'},
+        {k:'summary', l:'요약'},
+        {k:'adId', l:'소재 ID'},
+    ], rows, '아직 조회된 소재가 없습니다.');
+}
+
+function renderAccountExtensionsPreview() {
+    const rows = Array.isArray(accountLookupExtRows) ? accountLookupExtRows : [];
+    const cnt = document.getElementById('cnt_account_exts');
+    if (cnt) cnt.textContent = String(rows.length || 0);
+    renderAccountLookupTable('table_account_exts', [
+        {k:'campaignName', l:'캠페인명'},
+        {k:'adgroupName', l:'광고그룹명'},
+        {k:'ownerScope', l:'적용대상'},
+        {k:'type', l:'확장유형'},
+        {k:'status', l:'상태'},
+        {k:'summary', l:'요약'},
+        {k:'adExtensionId', l:'확장소재 ID'},
+        {k:'ownerId', l:'owner ID'},
+    ], rows, '아직 조회된 확장소재가 없습니다.');
+}
+
+async function loadAccountKeywordsLookup() {
+    const payload = getAssetLookupPayload(); if(!payload) return;
+    try {
+        const data = await postJson('/query_account_keywords', payload, '계정 키워드 조회 중...');
+        accountLookupKeywordRows = Array.isArray(data?.rows) ? data.rows : [];
+        renderAccountKeywordsPreview();
+        switchAccountAssetPreview('keywords', document.querySelector('#tab_data .account-asset-preview-tab'));
+        if (Array.isArray(data?.warnings) && data.warnings.length) showToast(`조회 완료 (${data.warnings.length}건 경고 있음)`, 'info');
+        else showToast(data?.message || `등록 키워드 ${num(accountLookupKeywordRows.length)}건 조회 완료`, 'success');
+    } catch(err) { showToast(`계정 키워드 조회 실패: ${err.message}`, 'error'); }
+}
+
+async function loadAccountAdsLookup() {
+    const payload = getAssetLookupPayload(); if(!payload) return;
+    try {
+        const data = await postJson('/query_account_ads', payload, '계정 소재 조회 중...');
+        accountLookupAdsRows = Array.isArray(data?.rows) ? data.rows : [];
+        renderAccountAdsPreview();
+        if (Array.isArray(data?.warnings) && data.warnings.length) showToast(`조회 완료 (${data.warnings.length}건 경고 있음)`, 'info');
+        else showToast(data?.message || `소재 ${num(accountLookupAdsRows.length)}건 조회 완료`, 'success');
+    } catch(err) { showToast(`계정 소재 조회 실패: ${err.message}`, 'error'); }
+}
+
+async function loadAccountExtensionsLookup() {
+    const payload = getAssetLookupPayload(); if(!payload) return;
+    try {
+        const data = await postJson('/query_account_extensions', payload, '계정 확장소재 조회 중...');
+        accountLookupExtRows = Array.isArray(data?.rows) ? data.rows : [];
+        renderAccountExtensionsPreview();
+        if (Array.isArray(data?.warnings) && data.warnings.length) showToast(`조회 완료 (${data.warnings.length}건 경고 있음)`, 'info');
+        else showToast(data?.message || `확장소재 ${num(accountLookupExtRows.length)}건 조회 완료`, 'success');
+    } catch(err) { showToast(`계정 확장소재 조회 실패: ${err.message}`, 'error'); }
+}
+
+async function downloadPostFile(url, payload, loadingText, fallbackName) {
+    showLoader(loadingText || '다운로드 준비 중...');
+    try {
+        const res = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        if(!res.ok) {
+            const text = await res.text();
+            let data = {};
+            try { data = text ? JSON.parse(text) : {}; } catch(e) { data = { error: text || `${res.status}` }; }
+            throw new Error([data.error, data.details].filter(Boolean).join(' | ') || `${res.status}`);
+        }
+        const blob = await res.blob();
+        const cd = res.headers.get('Content-Disposition') || '';
+        const match = cd.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
+        const rawName = decodeURIComponent((match && (match[1] || match[2])) || fallbackName || 'download.xlsx');
+        const a = document.createElement('a');
+        const blobUrl = URL.createObjectURL(blob);
+        a.href = blobUrl;
+        a.download = rawName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(blobUrl);
+        showToast('엑셀 다운로드를 시작했습니다.', 'success');
+    } finally { hideLoader(); }
+}
+
+async function downloadAccountKeywordsExcel() {
+    const payload = getAssetLookupPayload(); if(!payload) return;
+    try { await downloadPostFile('/export_account_keywords_excel', payload, '키워드 엑셀 생성 중...', 'account_keywords.xlsx'); }
+    catch(err) { showToast(`키워드 엑셀 다운로드 실패: ${err.message}`, 'error'); }
+}
+
+async function downloadAccountAdsExcel() {
+    const payload = getAssetLookupPayload(); if(!payload) return;
+    try { await downloadPostFile('/export_account_ads_excel', payload, '소재 엑셀 생성 중...', 'account_ads.xlsx'); }
+    catch(err) { showToast(`소재 엑셀 다운로드 실패: ${err.message}`, 'error'); }
+}
+
+async function downloadAccountExtensionsExcel() {
+    const payload = getAssetLookupPayload(); if(!payload) return;
+    try { await downloadPostFile('/export_account_extensions_excel', payload, '확장소재 엑셀 생성 중...', 'account_extensions.xlsx'); }
+    catch(err) { showToast(`확장소재 엑셀 다운로드 실패: ${err.message}`, 'error'); }
+}
+
 async function loadAdgroupDetails() {
     const c = ensureReady(true, true); if(!c) return;
     try {
@@ -1350,7 +2202,7 @@ async function createCampaign() {
         }, '캠페인 생성 중...');
         showToast(data.message, 'success');
         document.getElementById('new_campaign_name').value = '';
-        await refreshCampaigns();
+        await refreshCampaigns(true);
     } catch(err) { showToast(err.message, 'error'); }
 }
 
@@ -1400,18 +2252,27 @@ async function createAdgroup() {
 
 async function createKeywords() {
     const c = ensureReady(); if(!c) return;
-    const targetAdgId = document.getElementById('create_keyword_adgroup').value;
-    if(!targetAdgId) { showToast('대상 광고그룹을 선택해주세요.', 'error'); return; }
+    const batches = collectKeywordBatchPayloads();
+    if(!batches.length) { showToast('등록할 키워드를 입력해주세요.', 'error'); return; }
+    const invalid = batches.filter(x => !x.adgroup_id);
+    if(invalid.length) {
+        showToast(`광고그룹을 선택하지 않은 슬롯이 있습니다: ${invalid.map(x => x.slot_index).join(', ')}`, 'error');
+        return;
+    }
+    const touchedCurrentAdgroup = batches.some(x => String(x.adgroup_id) === String(currentAdgroupId));
     try {
         const data = await postJson('/create_keywords_simple', {
-            ...c, adgroup_id: targetAdgId,
-            keywords: document.getElementById('create_keywords_text').value,
+            ...c,
+            keyword_batches: batches,
             bid_amt: document.getElementById('create_keyword_bid').value,
             use_group_bid_amt: document.getElementById('create_keyword_use_group').value === 'true'
         }, '키워드 등록 중...');
-        showToast(`성공 ${data.success}건 / 실패 ${data.fail}건`, data.fail > 0 ? 'info' : 'success');
-        document.getElementById('create_keywords_text').value = '';
-        if(currentAdgroupId === targetAdgId) await loadAdgroupDetails();
+        const slotSummary = Array.isArray(data.batch_summary) && data.batch_summary.length
+            ? ` | 슬롯 ${data.batch_summary.map(x => `${x.slot_index}:${x.keyword_count}`).join(', ')}`
+            : '';
+        showToast(`성공 ${data.success}건 / 실패 ${data.fail}건${slotSummary}`, data.fail > 0 ? 'info' : 'success');
+        clearKeywordInputs();
+        if(touchedCurrentAdgroup) await loadAdgroupDetails();
     } catch(err) { showToast(err.message, 'error'); }
 }
 
@@ -1466,6 +2327,33 @@ async function updateNonSearchKeywordExclusion() {
     } catch(err) { showToast(err.message, 'error'); }
 }
 
+async function applyBulkTargetSettings() {
+    const c = ensureReady(); if(!c) return;
+    const sourceAdgroupId = currentAdgroupId || getCheckedAdgroupIdsInViewOrder()[0];
+    if(!sourceAdgroupId) { showToast('원본으로 사용할 광고그룹을 현재 선택하거나 좌측에서 하나 이상 체크해주세요.', 'error'); return; }
+    const targetScope = document.getElementById('bulk_target_scope').value;
+    const includeExtra = !!document.getElementById('bulk_target_include_extra')?.checked;
+    const includeSchedule = !!document.getElementById('bulk_target_include_schedule')?.checked;
+    if(!includeExtra && !includeSchedule) { showToast('적용할 항목을 1개 이상 선택해주세요.', 'error'); return; }
+    const campaignIds = targetScope === 'campaign' ? getCheckedCampaignIdsInViewOrder() : [];
+    const adgroupIds = targetScope === 'adgroup' ? getCheckedAdgroupIdsInViewOrder() : [];
+    if(targetScope === 'campaign' && !campaignIds.length) { showToast('좌측 체크박스에서 캠페인을 선택해주세요.', 'error'); return; }
+    if(targetScope === 'adgroup' && !adgroupIds.length) { showToast('좌측 체크박스에서 광고그룹을 선택해주세요.', 'error'); return; }
+    try {
+        const data = await postJson('/apply_target_settings_bulk', {
+            ...c,
+            source_adgroup_id: sourceAdgroupId,
+            target_scope: targetScope,
+            campaign_ids: campaignIds,
+            adgroup_ids: adgroupIds,
+            include_extra_targets: includeExtra,
+            include_schedule: includeSchedule,
+        }, '타겟 설정 일괄 적용 중...');
+        showToast(data.message, Number(data?.fail || 0) > 0 ? 'info' : 'success');
+        if(targetScope === 'adgroup' && currentAdgroupId && adgroupIds.includes(currentAdgroupId)) await loadAdgroupDetails();
+    } catch(err) { showToast(err.message, 'error'); }
+}
+
 function getTargetAdgroupIds(singleId, checkboxId) {
     const useMulti = document.getElementById(checkboxId)?.checked;
     const selected = Array.from(checkedAdgroupIds || []).filter(Boolean);
@@ -1484,7 +2372,7 @@ function insertKeywordToken(targetId) {
     try { input.setSelectionRange(nextPos, nextPos); } catch (e) {}
 }
 
-async function createTextAd() {
+async function createTextAd(keepInputs = false) {
     const c = ensureReady(); if(!c) return;
     const baseId = document.getElementById('create_ad_adgroup').value;
     const adgroupIds = getTargetAdgroupIds(baseId, 'create_ad_multi');
@@ -1500,9 +2388,11 @@ async function createTextAd() {
             mobile_url: document.getElementById('create_ad_mobile').value
         }, '기본 소재 등록 중...');
         showToast(data.message, 'success');
-        document.getElementById('create_ad_headline').value = '';
-        document.getElementById('create_ad_desc').value = '';
-        document.getElementById('create_ad_replace_keyword').value = '';
+        if(!keepInputs) {
+            document.getElementById('create_ad_headline').value = '';
+            document.getElementById('create_ad_desc').value = '';
+            document.getElementById('create_ad_replace_keyword').value = '';
+        }
         if(currentAdgroupId && adgroupIds.includes(currentAdgroupId)) await loadAdgroupDetails();
     } catch(err) { showToast(err.message, 'error'); }
 }
@@ -1678,6 +2568,22 @@ async function saveKeywordBidsByScope() {
     } catch(err) { showToast(err.message, 'error'); }
 }
 
+async function changeBidModeByScope() {
+    const c = ensureReady(); if(!c) return;
+    const scope = document.getElementById('bid_mode_scope_type').value;
+    const bidMode = document.getElementById('bid_mode_target').value;
+    const ids = scope==='campaign' ? Array.from(checkedCampaignIds) : Array.from(checkedAdgroupIds);
+    if(!ids.length){ showToast(scope==='campaign'?'좌측 체크박스에서 캠페인을 선택하세요.':'좌측 체크박스에서 광고그룹을 선택하세요.', 'error'); return; }
+    const modeLabel = bidMode === 'group' ? '그룹 입찰가 설정' : '개별 입찰가 설정';
+    try {
+        const data = await postJson('/update_bid_mode_by_scope', {
+            ...c, entity_type: scope, entity_ids: ids, bid_mode: bidMode
+        }, `${modeLabel} 적용 중...`);
+        showToast(data.message, 'success');
+        if(scope === 'adgroup' && ids.includes(currentAdgroupId)) await loadAdgroupDetails();
+    } catch(err) { showToast(err.message, 'error'); }
+}
+
 async function adjustKeywordBidsByThreshold() {
     const c = ensureReady(); if(!c) return;
     const scope = document.getElementById('bid_scope_type_threshold').value;
@@ -1732,12 +2638,124 @@ async function applyAvgPositionBids() {
 }
 
 // Schedule Drag Logic
+function buildScheduleHourOptions({ include24=false, min=0 } = {}) {
+    const max = include24 ? 24 : 23;
+    const out = [];
+    for(let i=min; i<=max; i+=1) {
+        const label = i === 24 ? '24시' : `${String(i).padStart(2,'0')}시`;
+        out.push(`<option value="${i}">${label}</option>`);
+    }
+    return out.join('');
+}
 function initScheduleControls() {
     const dayWrap = document.getElementById('schedule_days'); const hourWrap = document.getElementById('schedule_hours');
     if(!dayWrap || !hourWrap) return;
     const dayNames = {1:'월',2:'화',3:'수',4:'목',5:'금',6:'토',7:'일'};
     dayWrap.innerHTML = Object.entries(dayNames).map(([k,v])=>`<button type="button" class="day-chip ${selectedScheduleDays.has(Number(k)) ? 'active' : ''}" data-kind="day" data-value="${k}" onpointerdown="startScheduleDrag('day', ${k}, event)" onpointerenter="moveScheduleDrag('day', ${k}, event)" onclick="finishScheduleDrag(event)">${v}</button>`).join('');
     hourWrap.innerHTML = Array.from({length:24}, (_,i)=>`<button type="button" class="mini-chip ${selectedScheduleHours.has(i) ? 'active' : ''}" data-kind="hour" data-value="${i}" onpointerdown="startScheduleDrag('hour', ${i}, event)" onpointerenter="moveScheduleDrag('hour', ${i}, event)" onclick="finishScheduleDrag(event)">${String(i).padStart(2,'0')}시</button>`).join('');
+    renderScheduleBlocks();
+}
+function renderScheduleBlocks() {
+    const wrap = document.getElementById('schedule_blocks_container');
+    if(!wrap) return;
+    const dayEntries = Object.entries({1:'월',2:'화',3:'수',4:'목',5:'금',6:'토',7:'일'});
+    if(!scheduleBlocks.length) {
+        wrap.innerHTML = '<div class="field-note">아직 추가한 구간이 없습니다. 구간별 가중치를 쓰려면 "구간 추가"를 눌러주세요.</div>';
+        return;
+    }
+    wrap.innerHTML = scheduleBlocks.map((block, idx) => {
+        const selectedDays = Array.isArray(block.days) ? block.days.map(Number) : [];
+        return `
+        <div class="schedule-block-row">
+            <div class="form-group">
+                <label>시작 시각</label>
+                <select onchange="updateScheduleBlockField(${idx}, 'startHour', this.value)">${Array.from({length:24}, (_,i)=>`<option value="${i}" ${Number(block.startHour)===i?'selected':''}>${String(i).padStart(2,'0')}시</option>`).join('')}</select>
+            </div>
+            <div class="form-group">
+                <label>종료 시각</label>
+                <select onchange="updateScheduleBlockField(${idx}, 'endHour', this.value)">${Array.from({length:24}, (_,i)=>i+1).map(v=>`<option value="${v}" ${Number(block.endHour)===v?'selected':''}>${v===24?'24시':`${String(v).padStart(2,'0')}시`}</option>`).join('')}</select>
+            </div>
+            <div class="form-group">
+                <label>입찰 가중치 (%)</label>
+                <input type="number" min="10" max="500" value="${Number(block.bidWeight || 100)}" oninput="updateScheduleBlockField(${idx}, 'bidWeight', this.value)">
+            </div>
+            <button class="btn btn-sub" type="button" onclick="removeScheduleBlock(${idx})">삭제</button>
+            <div class="schedule-block-days">
+                <div style="width:100%; font-size:12px; color:var(--muted); margin-bottom:2px;">이 구간에만 적용할 요일 (선택 안 하면 공통 요일 사용)</div>
+                ${dayEntries.map(([k,v])=>`<button type="button" class="schedule-mini-chip ${selectedDays.includes(Number(k)) ? 'active' : ''}" onclick="toggleScheduleBlockDay(${idx}, ${k})">${v}</button>`).join('')}
+                <button type="button" class="schedule-mini-chip" onclick="setScheduleBlockDays(${idx}, 'all')">전체</button>
+                <button type="button" class="schedule-mini-chip" onclick="setScheduleBlockDays(${idx}, 'clear')">해제</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+function addScheduleBlock() {
+    scheduleBlocks.push({ startHour: 0, endHour: 24, bidWeight: 100, days: [] });
+    renderScheduleBlocks();
+}
+function clearScheduleBlocks() {
+    scheduleBlocks = [];
+    renderScheduleBlocks();
+}
+function removeScheduleBlock(index) {
+    scheduleBlocks.splice(index, 1);
+    renderScheduleBlocks();
+}
+function toggleScheduleBlockDay(index, dayNum) {
+    if(!scheduleBlocks[index]) return;
+    const days = Array.isArray(scheduleBlocks[index].days) ? scheduleBlocks[index].days.map(Number) : [];
+    const has = days.includes(Number(dayNum));
+    scheduleBlocks[index].days = has ? days.filter(v => v !== Number(dayNum)) : [...days, Number(dayNum)].sort((a,b)=>a-b);
+    renderScheduleBlocks();
+}
+function setScheduleBlockDays(index, mode) {
+    if(!scheduleBlocks[index]) return;
+    scheduleBlocks[index].days = mode === 'all' ? [1,2,3,4,5,6,7] : [];
+    renderScheduleBlocks();
+}
+function updateScheduleBlockField(index, field, value) {
+    if(!scheduleBlocks[index]) return;
+    const next = Number(value);
+    if(field === 'startHour') {
+        scheduleBlocks[index].startHour = Math.max(0, Math.min(23, next));
+        if(Number(scheduleBlocks[index].endHour) <= Number(scheduleBlocks[index].startHour)) {
+            scheduleBlocks[index].endHour = Math.min(24, Number(scheduleBlocks[index].startHour) + 1);
+        }
+    } else if(field === 'endHour') {
+        scheduleBlocks[index].endHour = Math.max(1, Math.min(24, next));
+        if(Number(scheduleBlocks[index].endHour) <= Number(scheduleBlocks[index].startHour)) {
+            scheduleBlocks[index].startHour = Math.max(0, Number(scheduleBlocks[index].endHour) - 1);
+        }
+    } else if(field === 'bidWeight') {
+        scheduleBlocks[index].bidWeight = Math.max(10, Math.min(500, next || 100));
+    }
+    renderScheduleBlocks();
+}
+function getValidScheduleBlocks() {
+    return (scheduleBlocks || []).map(block => ({
+        startHour: Number(block.startHour),
+        endHour: Number(block.endHour),
+        bidWeight: Number(block.bidWeight || 100),
+        days: Array.isArray(block.days) ? block.days.map(Number).filter(v => Number.isInteger(v) && v >= 1 && v <= 7) : [],
+    })).filter(block => Number.isInteger(block.startHour) && Number.isInteger(block.endHour) && Number.isInteger(block.bidWeight) && block.startHour >= 0 && block.startHour <= 23 && block.endHour >= 1 && block.endHour <= 24 && block.endHour > block.startHour && block.bidWeight >= 10 && block.bidWeight <= 500);
+}
+function setScheduleActionMode(mode) {
+    const hidden = document.getElementById('schedule_action_mode');
+    if(hidden) hidden.value = mode;
+    const note = document.getElementById('schedule_action_mode_note');
+    document.querySelectorAll('.schedule-mode-btn').forEach(btn => {
+        const active = btn.dataset.mode === mode;
+        btn.classList.toggle('btn-primary', active);
+        btn.classList.toggle('btn-sub', !active);
+        btn.classList.toggle('active', active);
+    });
+    if(note) {
+        note.textContent = mode === 'add'
+            ? '현재 선택한 시간대를 기존 스케줄에 추가합니다. 같은 시간대가 겹치면 새 가중치로 덮어씁니다.'
+            : mode === 'delete'
+                ? '현재 선택한 시간대만 기존 스케줄에서 삭제합니다. 다른 요일/시간대는 유지합니다.'
+                : '현재 선택한 시간대를 기준으로 기존 스케줄을 덮어씁니다.';
+    }
 }
 function getScheduleSet(kind) { return kind === 'day' ? selectedScheduleDays : selectedScheduleHours; }
 function applyScheduleSelection(kind, value, shouldSelect) {
@@ -1772,13 +2790,18 @@ function finishScheduleDrag(ev) {
     return true;
 }
 function selectAllScheduleHours(flag) { selectedScheduleHours = flag ? new Set(Array.from({length:24}, (_,i)=>i)) : new Set(); initScheduleControls(); }
+setScheduleActionMode('overwrite');
 
 async function saveScheduleBySelection() {
     const c = ensureReady(); if(!c) return;
     const targetType = document.getElementById('schedule_target_type').value;
+    const actionMode = document.getElementById('schedule_action_mode')?.value || 'overwrite';
     const days = Array.from(selectedScheduleDays);
     const hours = Array.from(selectedScheduleHours).sort((a,b)=>a-b);
-    if(!days.length || !hours.length) { showToast('요일과 시간을 1개 이상 선택해주세요.', 'error'); return; }
+    const scheduleBlocksPayload = getValidScheduleBlocks();
+    const hasBlockDays = scheduleBlocksPayload.some(block => Array.isArray(block.days) && block.days.length);
+    if(!days.length && !hasBlockDays) { showToast('공통 요일이나 구간별 요일을 1개 이상 선택해주세요.', 'error'); return; }
+    if(!scheduleBlocksPayload.length && !hours.length) { showToast('시간을 1개 이상 선택하거나 구간을 추가해주세요.', 'error'); return; }
 
     const ids = targetType === 'campaign' ? Array.from(checkedCampaignIds) : Array.from(checkedAdgroupIds);
     if(!ids.length) { showToast(`좌측 체크박스에서 ${targetType==='campaign'?'캠페인':'광고그룹'}을 선택해주세요.`, 'error'); return; }
@@ -1787,29 +2810,40 @@ async function saveScheduleBySelection() {
     const bodyKey = targetType === 'campaign' ? 'campaign_ids' : 'adgroup_ids';
 
     try {
-        const data = await postJson(url, { ...c, [bodyKey]: ids, days, hours, bidWeight: Number(document.getElementById('schedule_bid_weight').value) }, '시간대 설정 중...');
+        const data = await postJson(url, { ...c, [bodyKey]: ids, days, hours, bidWeight: Number(document.getElementById('schedule_bid_weight').value), scheduleBlocks: scheduleBlocksPayload, actionMode }, '시간대 설정 중...');
         showToast(data.message, 'success');
     } catch(err) { showToast(err.message, 'error'); }
 }
 
 async function copySelectedCampaigns() {
     const c = ensureReady(); if(!c) return;
-    const ids = Array.from(checkedCampaignIds); 
+    const ids = getCheckedCampaignIdsInViewOrder(); 
     if(!ids.length) { showToast('좌측에서 복사할 캠페인을 체크해주세요.', 'error'); return; }
+    const copyCount = Number(document.getElementById('camp_copy_count')?.value || 1);
+    if(!Number.isInteger(copyCount) || copyCount <= 0) { showToast('복사 개수는 1 이상의 숫자여야 합니다.', 'error'); return; }
+    const customNamesText = document.getElementById('camp_custom_names')?.value || '';
+    const customNames = parseMultilineNames(customNamesText);
+    if(customNames.length && customNames.length !== ids.length * copyCount) {
+        showToast(`직접 지정 캠페인명은 총 ${ids.length * copyCount}개가 필요합니다.`, 'error');
+        return;
+    }
     try { 
-        const data = await postJson('/copy_campaigns', { ...c, source_ids: ids, suffix: document.getElementById('camp_suffix').value }, '캠페인 복사 중...'); 
-        showToast(data.message, 'success'); await refreshCampaigns(); 
+        const data = await postJson('/copy_campaigns', { ...c, source_ids: ids, suffix: document.getElementById('camp_suffix').value, copy_count: copyCount, custom_names_text: customNamesText }, '캠페인 복사 중...'); 
+        showToast(data.message, 'success'); await refreshCampaigns(true); 
     } catch(err) { showToast(err.message, 'error'); }
 }
 
 async function copySelectedAdgroups() {
     const c = ensureReady(); if(!c) return;
-    const sourceIds = Array.from(checkedAdgroupIds);
+    const sourceIds = getCheckedAdgroupIdsInViewOrder();
     const includeCheckedCampaigns = document.getElementById('copy_adgroup_include_checked_campaigns').checked;
-    const sourceCampaignIds = includeCheckedCampaigns ? Array.from(checkedCampaignIds) : [];
+    const sourceCampaignIds = includeCheckedCampaigns ? getCheckedCampaignIdsInViewOrder() : [];
     const targetCampId = document.getElementById('copy_adgroup_target_campaign_select').value;
     if(!sourceIds.length && !sourceCampaignIds.length) { showToast('좌측에서 복사할 광고그룹 또는 캠페인을 체크해주세요.', 'error'); return; }
     if(!targetCampId) { showToast('대상 캠페인을 선택해주세요.', 'error'); return; }
+    const customNamesText = document.getElementById('adgroup_custom_names')?.value || '';
+    const copyCount = Number(document.getElementById('adgroup_copy_count')?.value || 1);
+    if(!Number.isInteger(copyCount) || copyCount <= 0) { showToast('복사 개수는 1 이상의 숫자여야 합니다.', 'error'); return; }
 
     try {
         const data = await postJson('/copy_adgroups_to_target', {
@@ -1818,6 +2852,8 @@ async function copySelectedAdgroups() {
             source_campaign_ids: sourceCampaignIds,
             target_campaign_id: targetCampId,
             suffix: document.getElementById('adgroup_copy_suffix').value,
+            copy_count: Number(document.getElementById('adgroup_copy_count')?.value || 1),
+            custom_names_text: customNamesText,
             include_keywords: document.getElementById('copy_adgroup_include_keywords').checked,
             include_ads: document.getElementById('copy_adgroup_include_ads').checked,
             include_extensions: document.getElementById('copy_adgroup_include_extensions').checked,
@@ -1827,7 +2863,22 @@ async function copySelectedAdgroups() {
         }, '광고그룹 복사 중...');
         showToast(data.message, 'success');
         if(String(currentCampaignId || '') === String(targetCampId || '')) await refreshAdgroups();
-        else await refreshCampaigns();
+        else await refreshCampaigns(true);
+    } catch(err) { showToast(err.message, 'error'); }
+}
+
+async function renameSelectedAdgroups() {
+    const c = ensureReady(true); if(!c) return;
+    const ids = getCheckedAdgroupIdsInViewOrder();
+    if(!ids.length) { showToast('좌측에서 이름을 바꿀 광고그룹을 체크해주세요.', 'error'); return; }
+    const namesText = document.getElementById('rename_adgroup_names')?.value || '';
+    const names = parseMultilineNames(namesText);
+    if(!names.length) { showToast('변경할 광고그룹명을 한 줄에 1개씩 입력해주세요.', 'error'); return; }
+    if(names.length !== ids.length) { showToast(`선택한 광고그룹 ${ids.length}개와 입력한 이름 ${names.length}개 수가 다릅니다.`, 'error'); return; }
+    try {
+        const data = await postJson('/rename_adgroups_bulk', { ...c, entity_ids: ids, target_names_text: namesText }, '광고그룹명 변경 중...');
+        showToast(data.message, 'success');
+        await refreshAdgroups();
     } catch(err) { showToast(err.message, 'error'); }
 }
 
@@ -1841,6 +2892,594 @@ async function loadCopyEntityTargetAdgroups() {
         const adgs = await postJson('/get_adgroups', {...c, campaign_id: targetCampId}, '목록 로딩...');
         el.innerHTML = adgs.map(x=>`<option value="${x.id}">${escapeHtml(x.name)}</option>`).join('') || '<option value="">없음</option>';
     } catch(err) { showToast(err.message, 'error'); }
+}
+
+function setKeywordBidSearchMatchMode(mode) {
+    const hidden = document.getElementById('keyword_bid_search_match_mode');
+    if(hidden) hidden.value = mode === 'exact' ? 'exact' : 'partial';
+    document.querySelectorAll('.kw-bid-match-btn').forEach(btn => {
+        const active = String(btn.dataset.mode || '') === (mode === 'exact' ? 'exact' : 'partial');
+        btn.classList.toggle('btn-primary', active);
+        btn.classList.toggle('btn-sub', !active);
+    });
+}
+
+function clearKeywordBidSearchResult() {
+    const el = document.getElementById('keyword_bid_search_result');
+    const previewEl = document.getElementById('keyword_bid_search_preview_token');
+    if(el) el.value = '';
+    if(previewEl) previewEl.value = '';
+}
+
+function buildKeywordBidSearchPreviewKey() {
+    const searchText = document.getElementById('keyword_bid_search_text')?.value?.trim() || '';
+    const bidAmt = String(document.getElementById('keyword_bid_search_target_bid')?.value || '').trim();
+    const mode = document.getElementById('keyword_bid_search_match_mode')?.value === 'exact' ? 'exact' : 'partial';
+    return `${mode}::${searchText}::${bidAmt}`;
+}
+
+async function previewPowerlinkKeywordBidsBySearch() {
+    const c = ensureReady(); if(!c) return;
+    const searchText = document.getElementById('keyword_bid_search_text')?.value?.trim() || '';
+    const mode = document.getElementById('keyword_bid_search_match_mode')?.value === 'exact' ? 'exact' : 'partial';
+    const resultEl = document.getElementById('keyword_bid_search_result');
+    const previewEl = document.getElementById('keyword_bid_search_preview_token');
+    if(!searchText) { showToast('검색어를 입력해주세요.', 'error'); return; }
+    try {
+        const data = await postJson('/preview_keyword_bids_by_search', {
+            ...c,
+            search_text: searchText,
+            exact_match: mode === 'exact'
+        }, '검색어 기준 파워링크 키워드 조회 중...');
+        if(resultEl) resultEl.value = String(data?.message || '조회 완료');
+        if(previewEl) previewEl.value = `${buildKeywordBidSearchPreviewKey()}::${String(data?.preview_token || '')}`;
+        const matched = Number(data?.matched_count || 0);
+        showToast(matched > 0 ? `조회 완료: ${matched.toLocaleString()}개 일치` : '조회 완료: 일치 키워드 없음', matched > 0 ? 'success' : 'info');
+    } catch(err) {
+        if(resultEl) resultEl.value = `실패: ${err.message}`;
+        if(previewEl) previewEl.value = '';
+        showToast(`검색어 기준 키워드 조회 실패: ${err.message}`, 'error');
+    }
+}
+
+async function applyPowerlinkKeywordBidsBySearch() {
+    const c = ensureReady(); if(!c) return;
+    const searchText = document.getElementById('keyword_bid_search_text')?.value?.trim() || '';
+    const bidAmt = document.getElementById('keyword_bid_search_target_bid')?.value;
+    const mode = document.getElementById('keyword_bid_search_match_mode')?.value === 'exact' ? 'exact' : 'partial';
+    const resultEl = document.getElementById('keyword_bid_search_result');
+    const previewEl = document.getElementById('keyword_bid_search_preview_token');
+    if(!searchText) { showToast('검색어를 입력해주세요.', 'error'); return; }
+    if(!String(bidAmt || '').trim()) { showToast('적용 입찰가를 입력해주세요.', 'error'); return; }
+    const previewKey = `${buildKeywordBidSearchPreviewKey()}::`;
+    if(!String(previewEl?.value || '').startsWith(previewKey)) {
+        showToast('먼저 조회하기로 현재 조건을 확인한 뒤 변경 실행해주세요.', 'error');
+        return;
+    }
+    try {
+        const data = await postJson('/update_keyword_bids_by_search', {
+            ...c,
+            search_text: searchText,
+            exact_match: mode === 'exact',
+            bid_amt: bidAmt
+        }, '검색어 기준 파워링크 키워드 입찰가 변경 중...');
+        if(resultEl) resultEl.value = String(data?.message || '완료');
+        const tone = Number(data?.fail_count || 0) > 0 ? 'info' : (Number(data?.updated_count || 0) > 0 ? 'success' : 'info');
+        showToast(data?.message || '검색어 기준 파워링크 키워드 입찰가 변경 완료', tone);
+        if(currentAdgroupId && Array.isArray(data?.updated_adgroup_ids) && data.updated_adgroup_ids.includes(currentAdgroupId)) await loadAdgroupDetails();
+    } catch(err) {
+        if(resultEl) resultEl.value = `실패: ${err.message}`;
+        showToast(`검색어 기준 입찰가 변경 실패: ${err.message}`, 'error');
+    }
+}
+
+
+function setKeywordBidWeightSearchMatchMode(mode) {
+    const hidden = document.getElementById('keyword_bid_weight_match_mode');
+    if(hidden) hidden.value = mode === 'exact' ? 'exact' : 'partial';
+    document.querySelectorAll('.kw-bid-weight-match-btn').forEach(btn => {
+        const active = String(btn.dataset.mode || '') === (mode === 'exact' ? 'exact' : 'partial');
+        btn.classList.toggle('btn-primary', active);
+        btn.classList.toggle('btn-sub', !active);
+    });
+}
+
+function clearKeywordBidWeightSearchResult() {
+    const el = document.getElementById('keyword_bid_weight_result');
+    const previewEl = document.getElementById('keyword_bid_weight_preview_token');
+    if(el) el.value = '';
+    if(previewEl) previewEl.value = '';
+}
+
+function buildKeywordBidWeightSearchPreviewKey() {
+    const searchText = document.getElementById('keyword_bid_weight_search_text')?.value?.trim() || '';
+    const bidWeight = String(document.getElementById('keyword_bid_weight_target')?.value || '').trim();
+    const mode = document.getElementById('keyword_bid_weight_match_mode')?.value === 'exact' ? 'exact' : 'partial';
+    return `${mode}::${searchText}::${bidWeight}`;
+}
+
+async function previewPowerlinkKeywordBidWeightsBySearch() {
+    const c = ensureReady(); if(!c) return;
+    const searchText = document.getElementById('keyword_bid_weight_search_text')?.value?.trim() || '';
+    const mode = document.getElementById('keyword_bid_weight_match_mode')?.value === 'exact' ? 'exact' : 'partial';
+    const resultEl = document.getElementById('keyword_bid_weight_result');
+    const previewEl = document.getElementById('keyword_bid_weight_preview_token');
+    if(!searchText) { showToast('검색어를 입력해주세요.', 'error'); return; }
+    try {
+        const data = await postJson('/preview_keyword_bid_weights_by_search', {
+            ...c,
+            search_text: searchText,
+            exact_match: mode === 'exact'
+        }, '검색어 기준 파워링크 키워드 입찰가중치 조회 중...');
+        if(resultEl) resultEl.value = String(data?.message || '조회 완료');
+        if(previewEl) previewEl.value = `${buildKeywordBidWeightSearchPreviewKey()}::${String(data?.preview_token || '')}`;
+        const matched = Number(data?.matched_count || 0);
+        showToast(matched > 0 ? `조회 완료: ${matched.toLocaleString()}개 일치` : '조회 완료: 일치 키워드 없음', matched > 0 ? 'success' : 'info');
+    } catch(err) {
+        if(resultEl) resultEl.value = `실패: ${err.message}`;
+        if(previewEl) previewEl.value = '';
+        showToast(`검색어 기준 입찰가중치 조회 실패: ${err.message}`, 'error');
+    }
+}
+
+async function applyPowerlinkKeywordBidWeightsBySearch() {
+    const c = ensureReady(); if(!c) return;
+    const searchText = document.getElementById('keyword_bid_weight_search_text')?.value?.trim() || '';
+    const bidWeight = document.getElementById('keyword_bid_weight_target')?.value;
+    const mode = document.getElementById('keyword_bid_weight_match_mode')?.value === 'exact' ? 'exact' : 'partial';
+    const resultEl = document.getElementById('keyword_bid_weight_result');
+    const previewEl = document.getElementById('keyword_bid_weight_preview_token');
+    if(!searchText) { showToast('검색어를 입력해주세요.', 'error'); return; }
+    if(!String(bidWeight || '').trim()) { showToast('적용 입찰가중치를 입력해주세요.', 'error'); return; }
+    const previewKey = `${buildKeywordBidWeightSearchPreviewKey()}::`;
+    if(!String(previewEl?.value || '').startsWith(previewKey)) {
+        showToast('먼저 조회하기로 현재 조건을 확인한 뒤 변경 실행해주세요.', 'error');
+        return;
+    }
+    try {
+        const data = await postJson('/update_keyword_bid_weights_by_search', {
+            ...c,
+            search_text: searchText,
+            exact_match: mode === 'exact',
+            bid_weight: bidWeight
+        }, '검색어 기준 파워링크 키워드 입찰가중치 변경 중...');
+        if(resultEl) resultEl.value = String(data?.message || '완료');
+        const tone = Number(data?.fail_count || 0) > 0 ? 'info' : (Number(data?.updated_count || 0) > 0 ? 'success' : 'info');
+        showToast(data?.message || '검색어 기준 파워링크 키워드 입찰가중치 변경 완료', tone);
+        if(currentAdgroupId && Array.isArray(data?.updated_adgroup_ids) && data.updated_adgroup_ids.includes(currentAdgroupId)) await loadAdgroupDetails();
+    } catch(err) {
+        if(resultEl) resultEl.value = `실패: ${err.message}`;
+        showToast(`검색어 기준 입찰가중치 변경 실패: ${err.message}`, 'error');
+    }
+}
+
+function setKeywordLookupMatchMode(mode) {
+    const hidden = document.getElementById('keyword_lookup_match_mode');
+    if(hidden) hidden.value = mode === 'exact' ? 'exact' : 'partial';
+    document.querySelectorAll('.kw-lookup-match-btn').forEach(btn => {
+        const active = String(btn.dataset.mode || '') === (mode === 'exact' ? 'exact' : 'partial');
+        btn.classList.toggle('btn-primary', active);
+        btn.classList.toggle('btn-sub', !active);
+    });
+    const previewEl = document.getElementById('keyword_lookup_preview_token');
+    if(previewEl) previewEl.value = '';
+}
+
+function setKeywordLookupScopeMode(scope) {
+    const normalized = scope === 'selected_campaigns'
+        ? 'selected_campaigns'
+        : (scope === 'selected_adgroups' ? 'selected_adgroups' : 'account');
+    const hidden = document.getElementById('keyword_lookup_scope_mode');
+    const note = document.getElementById('keyword_lookup_scope_note');
+    if(hidden) hidden.value = normalized;
+    document.querySelectorAll('.kw-lookup-scope-btn').forEach(btn => {
+        const active = String(btn.dataset.scope || '') === normalized;
+        btn.classList.toggle('btn-primary', active);
+        btn.classList.toggle('btn-sub', !active);
+    });
+    if(note) {
+        note.textContent = normalized === 'selected_campaigns'
+            ? '좌측에서 체크한 파워링크 캠페인 안에서만 키워드를 조회합니다.'
+            : (normalized === 'selected_adgroups'
+                ? '좌측에서 체크한 광고그룹 안에서만 키워드를 조회합니다.'
+                : '현재 계정 전체 파워링크 키워드에서 조회합니다.');
+    }
+    const previewEl = document.getElementById('keyword_lookup_preview_token');
+    if(previewEl) previewEl.value = '';
+}
+
+function getKeywordLookupScopePayload(scopeOverride = null) {
+    const hiddenScope = document.getElementById('keyword_lookup_scope_mode')?.value;
+    const normalizedScope = scopeOverride === 'selected_campaigns'
+        ? 'selected_campaigns'
+        : (scopeOverride === 'selected_adgroups'
+            ? 'selected_adgroups'
+            : (scopeOverride === 'account'
+                ? 'account'
+                : (hiddenScope === 'selected_campaigns' ? 'selected_campaigns' : (hiddenScope === 'selected_adgroups' ? 'selected_adgroups' : 'account'))));
+    const campaignIds = normalizedScope === 'selected_campaigns' ? Array.from(checkedCampaignIds || []).filter(Boolean) : [];
+    const adgroupIds = normalizedScope === 'selected_adgroups' ? Array.from(checkedAdgroupIds || []).filter(Boolean) : [];
+    return { search_scope: normalizedScope, campaign_ids: campaignIds, adgroup_ids: adgroupIds };
+}
+
+function updatePowerlinkKeywordLookupSelectionSummary() {
+    const info = document.getElementById('powerlink_keyword_lookup_selection_info');
+    if(info) info.textContent = `선택 ${selectedPowerlinkKeywordLookupIds.size.toLocaleString()}개`;
+}
+
+function toggleAllPowerlinkKeywordLookupSelection(checked) {
+    const rows = Array.isArray(powerlinkKeywordLookupRows) ? powerlinkKeywordLookupRows : [];
+    if(checked) {
+        selectedPowerlinkKeywordLookupIds = new Set(rows.map(row => String(row.ncc_keyword_id || '').trim()).filter(Boolean));
+    } else {
+        selectedPowerlinkKeywordLookupIds = new Set();
+    }
+    document.querySelectorAll('.powerlink-keyword-lookup-check').forEach(el => { el.checked = !!checked; });
+    updatePowerlinkKeywordLookupSelectionSummary();
+}
+
+function setPowerlinkKeywordLookupChecked(keywordId, checked) {
+    const key = String(keywordId || '').trim();
+    if(!key) return;
+    if(checked) selectedPowerlinkKeywordLookupIds.add(key);
+    else selectedPowerlinkKeywordLookupIds.delete(key);
+    updatePowerlinkKeywordLookupSelectionSummary();
+}
+
+async function deleteSelectedPowerlinkKeywordLookupRows() {
+    const c = ensureReady(); if(!c) return;
+    const ids = Array.from(selectedPowerlinkKeywordLookupIds).filter(Boolean);
+    if(!ids.length) { showToast('먼저 조회 결과에서 삭제할 키워드를 선택해주세요.', 'error'); return; }
+    const confirmed = window.confirm(`선택한 키워드 ${ids.length.toLocaleString()}개를 삭제할까요?`);
+    if(!confirmed) return;
+    const deletedIdSet = new Set(ids);
+    const shouldRefreshCurrentAdgroup = !!currentAdgroupId && Array.isArray(powerlinkKeywordLookupRows) && powerlinkKeywordLookupRows.some(row => {
+        const kid = String(row.ncc_keyword_id || '').trim();
+        return deletedIdSet.has(kid) && String(row.adgroup_id || '').trim() === String(currentAdgroupId || '').trim();
+    });
+    try {
+        const data = await postJson('/delete_selected', { ...c, entity_type: 'keyword', ids }, '선택 키워드 삭제 중...');
+        if(Array.isArray(powerlinkKeywordLookupRows) && powerlinkKeywordLookupRows.length) {
+            powerlinkKeywordLookupRows = powerlinkKeywordLookupRows.filter(row => !deletedIdSet.has(String(row.ncc_keyword_id || '').trim()));
+            selectedPowerlinkKeywordLookupIds = new Set();
+            renderPowerlinkKeywordLookupResult({
+                rows: powerlinkKeywordLookupRows,
+                matched_count: powerlinkKeywordLookupRows.length,
+                scanned_keyword_count: Number(document.getElementById('powerlink_keyword_lookup_result')?.dataset.scannedKeywordCount || 0),
+                search_groups: JSON.parse(document.getElementById('powerlink_keyword_lookup_result')?.dataset.searchGroupsJson || '[]'),
+                warnings: JSON.parse(document.getElementById('powerlink_keyword_lookup_result')?.dataset.warningsJson || '[]'),
+                message: document.getElementById('powerlink_keyword_lookup_result')?.dataset.messageText || ''
+            });
+        }
+        const fail = Number(data?.fail || 0);
+        const success = Number(data?.success || 0);
+        let msg = `선택 키워드 삭제 완료: 성공 ${success.toLocaleString()}개`;
+        if(fail > 0) msg += ` / 실패 ${fail.toLocaleString()}개`;
+        showToast(msg, fail > 0 ? 'info' : 'success');
+        if(shouldRefreshCurrentAdgroup) await loadAdgroupDetails();
+    } catch(err) {
+        showToast(`선택 키워드 삭제 실패: ${err.message}`, 'error');
+    }
+}
+
+async function setSelectedPowerlinkKeywordLookupState(enabled) {
+    const c = ensureReady(); if(!c) return;
+    const ids = Array.from(selectedPowerlinkKeywordLookupIds).filter(Boolean);
+    if(!ids.length) { showToast('먼저 조회 결과에서 키워드를 선택해주세요.', 'error'); return; }
+    const label = enabled ? 'ON' : 'OFF';
+    try {
+        const data = await postJson('/set_searched_powerlink_keyword_state', { ...c, ids, enabled }, `선택 키워드 ${label} 변경 중...`);
+        showToast(data?.message || `선택 키워드 ${label} 완료`, Number(data?.fail || 0) > 0 ? 'info' : 'success');
+        if(Array.isArray(powerlinkKeywordLookupRows) && powerlinkKeywordLookupRows.length) {
+            const idSet = new Set(ids);
+            powerlinkKeywordLookupRows = powerlinkKeywordLookupRows.map(row => idSet.has(String(row.ncc_keyword_id || '').trim()) ? ({ ...row, current_state: label, enabled }) : row);
+            renderPowerlinkKeywordLookupResult({
+                rows: powerlinkKeywordLookupRows,
+                matched_count: powerlinkKeywordLookupRows.length,
+                scanned_keyword_count: Number(document.getElementById('powerlink_keyword_lookup_result')?.dataset.scannedKeywordCount || 0),
+                search_groups: JSON.parse(document.getElementById('powerlink_keyword_lookup_result')?.dataset.searchGroupsJson || '[]'),
+                warnings: JSON.parse(document.getElementById('powerlink_keyword_lookup_result')?.dataset.warningsJson || '[]'),
+                message: document.getElementById('powerlink_keyword_lookup_result')?.dataset.messageText || ''
+            });
+            ids.forEach(id => selectedPowerlinkKeywordLookupIds.add(id));
+            updatePowerlinkKeywordLookupSelectionSummary();
+        }
+    } catch(err) {
+        showToast(`선택 키워드 ${label} 변경 실패: ${err.message}`, 'error');
+    }
+}
+
+function clearPowerlinkKeywordLookupResult() {
+    const wrap = document.getElementById('powerlink_keyword_lookup_result');
+    const previewEl = document.getElementById('keyword_lookup_preview_token');
+    powerlinkKeywordLookupRows = [];
+    selectedPowerlinkKeywordLookupIds = new Set();
+    if(wrap) wrap.innerHTML = '<div class="log-empty">아직 조회한 결과가 없습니다.</div>';
+    if(previewEl) previewEl.value = '';
+}
+
+function buildPowerlinkKeywordLookupPreviewKey(scopeOverride = null) {
+    const searchText = document.getElementById('keyword_lookup_search_text')?.value?.trim() || '';
+    const excludeText = document.getElementById('keyword_lookup_exclude_text')?.value?.trim() || '';
+    const mode = document.getElementById('keyword_lookup_match_mode')?.value === 'exact' ? 'exact' : 'partial';
+    const scopePayload = getKeywordLookupScopePayload(scopeOverride);
+    const scope = scopePayload.search_scope || 'account';
+    const campaignIds = Array.isArray(scopePayload.campaign_ids) ? scopePayload.campaign_ids : [];
+    const adgroupIds = Array.isArray(scopePayload.adgroup_ids) ? scopePayload.adgroup_ids : [];
+    return `${scope}::${campaignIds.join(',')}::${adgroupIds.join(',')}::${mode}::${searchText}::${excludeText}`;
+}
+
+function renderPowerlinkKeywordLookupResult(data) {
+    const wrap = document.getElementById('powerlink_keyword_lookup_result');
+    if(!wrap) return;
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    const warnings = Array.isArray(data?.warnings) ? data.warnings : [];
+    const searchGroups = Array.isArray(data?.search_groups) ? data.search_groups : [];
+    powerlinkKeywordLookupRows = rows.slice();
+    const validIds = new Set(rows.map(row => String(row.ncc_keyword_id || '').trim()).filter(Boolean));
+    selectedPowerlinkKeywordLookupIds = new Set(Array.from(selectedPowerlinkKeywordLookupIds).filter(id => validIds.has(id)));
+    wrap.dataset.messageText = String(data?.message || '');
+    wrap.dataset.warningsJson = JSON.stringify(warnings);
+    wrap.dataset.searchGroupsJson = JSON.stringify(searchGroups);
+    wrap.dataset.scannedKeywordCount = String(data?.scanned_keyword_count || 0);
+    const header = data?.message ? `<div class="field-note" style="margin-bottom:8px; white-space:pre-line;">${escapeMaybe(data.message)}</div>` : '';
+    const summary = `
+        <div class="grid-2" style="margin-bottom:12px;">
+            <div class="card" style="margin:0; box-shadow:none; border:1px solid var(--line);">
+                <div class="field-note" style="margin-bottom:6px;">일치 키워드 수</div>
+                <div style="font-size:24px; font-weight:800; color:var(--blue);">${num(data?.matched_count || 0)}</div>
+            </div>
+            <div class="card" style="margin:0; box-shadow:none; border:1px solid var(--line);">
+                <div class="field-note" style="margin-bottom:6px;">검색 그룹 / 스캔 키워드</div>
+                <div style="font-size:20px; font-weight:800;">${num(searchGroups.length)}개 / ${num(data?.scanned_keyword_count || 0)}개</div>
+            </div>
+        </div>
+    `;
+    const warningHtml = warnings.length ? `<div class="field-note" style="margin-bottom:8px; color:#b91c1c;">오류: ${escapeMaybe(warnings.join(' / '))}</div>` : '';
+    if(!rows.length) {
+        wrap.innerHTML = `${header}${summary}${warningHtml}<div class="log-empty">일치하는 키워드가 없습니다.</div>`;
+        updatePowerlinkKeywordLookupSelectionSummary();
+        return;
+    }
+    const toolbar = `
+        <div class="btn-row" style="margin-bottom:10px; flex-wrap:wrap;">
+            <button class="btn btn-sub" onclick="toggleAllPowerlinkKeywordLookupSelection(true)">전체선택</button>
+            <button class="btn btn-sub" onclick="toggleAllPowerlinkKeywordLookupSelection(false)">선택해제</button>
+            <button class="btn btn-primary" onclick="setSelectedPowerlinkKeywordLookupState(true)">선택 키워드 ON</button>
+            <button class="btn btn-sub" onclick="setSelectedPowerlinkKeywordLookupState(false)">선택 키워드 OFF</button>
+            <button class="btn btn-danger" onclick="deleteSelectedPowerlinkKeywordLookupRows()">선택 키워드 삭제</button>
+            <span id="powerlink_keyword_lookup_selection_info" class="field-note" style="margin-left:auto;">선택 0개</span>
+        </div>
+    `;
+    const items = rows.map((row, idx) => {
+        const bidLabel = `${num(row.current_bid || 0)}원${row.current_use_group ? ' · 그룹입찰가 사용' : ''}`;
+        const weightLabel = `${num(row.current_bid_weight || 100)}%`;
+        const matchedTerms = escapeMaybe(row.matched_terms_text || '-');
+        const kid = String(row.ncc_keyword_id || '').trim();
+        const checked = kid && selectedPowerlinkKeywordLookupIds.has(kid) ? 'checked' : '';
+        const state = String(row.current_state || '-');
+        const stateBadge = state === 'ON' ? 'green' : (state === 'OFF' ? 'red' : 'gray');
+        return `
+        <div class="log-item success" style="padding:10px 12px;">
+          <div style="display:grid; grid-template-columns:72px minmax(0, 1fr) auto; gap:10px; align-items:start;">
+            <label title="키워드 선택" style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); white-space:nowrap; cursor:pointer; border:1px solid var(--line); border-radius:10px; padding:6px 8px; background:#fff;">
+              <input type="checkbox" class="powerlink-keyword-lookup-check" style="appearance:auto !important; -webkit-appearance:checkbox !important; width:16px !important; height:16px !important; margin:0 !important; display:inline-block !important; visibility:visible !important; opacity:1 !important; accent-color:var(--blue);" ${checked} onchange="setPowerlinkKeywordLookupChecked('${escapeAttr(kid)}', this.checked)">
+              <span>선택</span>
+            </label>
+            <div style="min-width:0;">
+              <div class="log-title">${idx + 1}. ${escapeMaybe(row.keyword || '-')}</div>
+              <div class="log-summary">${escapeMaybe(row.campaign_name || '-')} > ${escapeMaybe(row.adgroup_name || '-')}</div>
+              <div class="log-meta" style="margin-top:6px;">매칭 검색어: ${matchedTerms} · 입찰가중치 ${escapeMaybe(weightLabel)} · 키워드 ID ${escapeMaybe(kid || '-')}</div>
+            </div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;">
+              <span class="badge ${stateBadge}">상태 ${escapeMaybe(state)}</span>
+              <span class="badge blue">입찰가 ${escapeMaybe(bidLabel)}</span>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+    wrap.innerHTML = `${header}${summary}${warningHtml}${toolbar}<div class="log-list" style="max-height:520px;">${items}</div>`;
+    updatePowerlinkKeywordLookupSelectionSummary();
+}
+
+async function searchPowerlinkKeywordsForInspect(scopeOverride = null) {
+    const c = ensureReady(); if(!c) return;
+    const searchText = document.getElementById('keyword_lookup_search_text')?.value?.trim() || '';
+    const excludeText = document.getElementById('keyword_lookup_exclude_text')?.value?.trim() || '';
+    const mode = document.getElementById('keyword_lookup_match_mode')?.value === 'exact' ? 'exact' : 'partial';
+    const previewEl = document.getElementById('keyword_lookup_preview_token');
+    if(scopeOverride === 'selected_campaigns' || scopeOverride === 'selected_adgroups' || scopeOverride === 'account') {
+        setKeywordLookupScopeMode(scopeOverride);
+    }
+    const scopePayload = getKeywordLookupScopePayload(scopeOverride);
+    if(!searchText) { showToast('검색어를 입력해주세요.', 'error'); return; }
+    if(scopePayload.search_scope === 'selected_campaigns' && !(scopePayload.campaign_ids || []).length) { showToast('좌측에서 캠페인을 체크한 뒤 조회해주세요.', 'error'); return; }
+    if(scopePayload.search_scope === 'selected_adgroups' && !(scopePayload.adgroup_ids || []).length) { showToast('좌측에서 광고그룹을 체크한 뒤 조회해주세요.', 'error'); return; }
+    try {
+        const loadingText = scopePayload.search_scope === 'selected_campaigns'
+            ? '선택 캠페인 기준 키워드 조회 중...'
+            : (scopePayload.search_scope === 'selected_adgroups' ? '선택 그룹 기준 키워드 조회 중...' : '계정 전체 기준 키워드 조회 중...');
+        const data = await postJson('/search_powerlink_keywords', {
+            ...c,
+            ...scopePayload,
+            search_text: searchText,
+            exclude_text: excludeText,
+            exact_match: mode === 'exact'
+        }, loadingText);
+        renderPowerlinkKeywordLookupResult(data);
+        if(previewEl) previewEl.value = `${buildPowerlinkKeywordLookupPreviewKey(scopePayload.search_scope)}::${String(data?.preview_token || '')}`;
+        const matched = Number(data?.matched_count || 0);
+        const scopeLabel = scopePayload.search_scope === 'selected_campaigns'
+            ? '선택 캠페인'
+            : (scopePayload.search_scope === 'selected_adgroups' ? '선택 그룹' : '계정 전체');
+        showToast(matched > 0 ? `${scopeLabel} 조회 완료: ${matched.toLocaleString()}개 일치` : `${scopeLabel} 조회 완료: 일치 키워드 없음`, matched > 0 ? 'success' : 'info');
+    } catch(err) {
+        if(previewEl) previewEl.value = '';
+        const wrap = document.getElementById('powerlink_keyword_lookup_result');
+        if(wrap) wrap.innerHTML = `<div class="field-note" style="color:#b91c1c;">실패: ${escapeMaybe(err.message)}</div>`;
+        showToast(`키워드 조회 실패: ${err.message}`, 'error');
+    }
+}
+
+async function downloadPowerlinkKeywordSearchExcel() {
+    const c = ensureReady(); if(!c) return;
+    const searchText = document.getElementById('keyword_lookup_search_text')?.value?.trim() || '';
+    const excludeText = document.getElementById('keyword_lookup_exclude_text')?.value?.trim() || '';
+    const mode = document.getElementById('keyword_lookup_match_mode')?.value === 'exact' ? 'exact' : 'partial';
+    const previewEl = document.getElementById('keyword_lookup_preview_token');
+    const scopePayload = getKeywordLookupScopePayload();
+    const previewKey = `${buildPowerlinkKeywordLookupPreviewKey()}::`;
+    if(!searchText) { showToast('검색어를 입력해주세요.', 'error'); return; }
+    if(scopePayload.search_scope === 'selected_campaigns' && !(scopePayload.campaign_ids || []).length) { showToast('좌측에서 캠페인을 체크한 뒤 조회해주세요.', 'error'); return; }
+    if(scopePayload.search_scope === 'selected_adgroups' && !(scopePayload.adgroup_ids || []).length) { showToast('좌측에서 광고그룹을 체크한 뒤 조회해주세요.', 'error'); return; }
+    if(!String(previewEl?.value || '').startsWith(previewKey)) {
+        showToast('먼저 현재 조건으로 키워드 조회를 실행한 뒤 엑셀 다운로드해주세요.', 'error');
+        return;
+    }
+    try {
+        showToast('엑셀 파일 생성 중...', 'info');
+        const resp = await fetch('/export_powerlink_keywords_excel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...c, ...scopePayload, search_text: searchText, exclude_text: excludeText, exact_match: mode === 'exact' })
+        });
+        if(!resp.ok) {
+            let msg = '엑셀 다운로드 실패';
+            try {
+                const err = await resp.json();
+                msg = err?.error || err?.details || msg;
+            } catch(_) {}
+            throw new Error(msg);
+        }
+        const blob = await resp.blob();
+        const disposition = resp.headers.get('Content-Disposition') || '';
+        const match = disposition.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
+        const rawName = decodeURIComponent((match && (match[1] || match[2])) || 'powerlink_keyword_search.xlsx');
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = rawName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        showToast('엑셀 다운로드 완료', 'success');
+    } catch(err) {
+        showToast(`엑셀 다운로드 실패: ${err.message}`, 'error');
+    }
+}
+
+function clearPowerlinkKeywordStatsResult() {
+    const wrap = document.getElementById('powerlink_keyword_stats_result');
+    if(!wrap) return;
+    wrap.innerHTML = '<div class="log-empty">아직 조회한 결과가 없습니다.</div>';
+}
+
+function renderPowerlinkKeywordStatsResult(data) {
+    const wrap = document.getElementById('powerlink_keyword_stats_result');
+    if(!wrap) return;
+    const rows = Array.isArray(data?.campaign_stats) ? data.campaign_stats : [];
+    const skipped = Array.isArray(data?.skipped) ? data.skipped : [];
+    const errors = Array.isArray(data?.errors) ? data.errors : [];
+    const header = data?.message ? `<div class="field-note" style="margin-bottom:8px;">${escapeMaybe(data.message)}</div>` : '';
+    const skippedHtml = skipped.length ? `<div class="field-note" style="margin-bottom:8px;">제외: ${escapeMaybe(skipped.join(' / '))}</div>` : '';
+    const errorsHtml = errors.length ? `<div class="field-note" style="margin-bottom:8px; color:#b91c1c;">오류: ${escapeMaybe(errors.join(' / '))}</div>` : '';
+    const summary = `
+        <div class="grid-2" style="margin-bottom:12px;">
+            <div class="card" style="margin:0; box-shadow:none; border:1px solid var(--line);">
+                <div class="field-note" style="margin-bottom:6px;">현재 계정 파워링크 총 키워드</div>
+                <div style="font-size:24px; font-weight:800; color:var(--blue);">${num(data?.total_keyword_count || 0)}</div>
+            </div>
+            <div class="card" style="margin:0; box-shadow:none; border:1px solid var(--line);">
+                <div class="field-note" style="margin-bottom:6px;">현재 계정 파워링크 캠페인 / 광고그룹</div>
+                <div style="font-size:20px; font-weight:800;">${num(data?.total_powerlink_campaign_count || 0)}개 / ${num(data?.total_powerlink_adgroup_count || 0)}개</div>
+            </div>
+        </div>
+    `;
+    if(!rows.length) {
+        wrap.innerHTML = `${header}${skippedHtml}${errorsHtml}${summary}<div class="log-empty">체크한 파워링크 캠페인이 없거나, 캠페인별로 표시할 결과가 없습니다.</div>`;
+        return;
+    }
+    const items = rows.map(row => `
+        <div class="log-item success">
+          <div class="log-top">
+            <div class="log-title">${escapeMaybe(row.campaign_name || '-')}</div>
+            <span class="badge blue">키워드 ${escapeMaybe(num(row.keyword_count || 0))}개</span>
+          </div>
+          <div class="log-summary">광고그룹 ${escapeMaybe(num(row.adgroup_count || 0))}개</div>
+        </div>
+    `).join('');
+    wrap.innerHTML = `${header}${skippedHtml}${errorsHtml}${summary}<div class="log-list" style="max-height:none;">${items}</div>`;
+}
+
+async function fetchPowerlinkKeywordStats() {
+    const c = ensureReady(); if(!c) return;
+    const ids = getCheckedCampaignIdsInViewOrder();
+    try {
+        const data = await postJson('/get_powerlink_keyword_stats', { ...c, campaign_ids: ids }, '파워링크 키워드 개수 조회 중...');
+        renderPowerlinkKeywordStatsResult(data);
+        showToast(data?.message || '파워링크 키워드 개수 조회 완료', 'success');
+    } catch(err) {
+        showToast(`파워링크 키워드 개수 조회 실패: ${err.message}`, 'error');
+    }
+}
+
+function clearPowerlinkDuplicateKeywordResult() {
+    const wrap = document.getElementById('duplicate_keyword_result');
+    if(!wrap) return;
+    wrap.innerHTML = '<div class="log-empty">아직 조회한 결과가 없습니다.</div>';
+}
+
+function renderPowerlinkDuplicateKeywordResult(data) {
+    const wrap = document.getElementById('duplicate_keyword_result');
+    if(!wrap) return;
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    const skipped = Array.isArray(data?.skipped) ? data.skipped : [];
+    const errors = Array.isArray(data?.errors) ? data.errors : [];
+    const header = data?.message ? `<div class="field-note" style="margin-bottom:8px;">${escapeMaybe(data.message)}</div>` : '';
+    const skippedHtml = skipped.length ? `<div class="field-note" style="margin-bottom:8px;">제외: ${escapeMaybe(skipped.join(' / '))}</div>` : '';
+    const errorsHtml = errors.length ? `<div class="field-note" style="margin-bottom:8px; color:#b91c1c;">오류: ${escapeMaybe(errors.join(' / '))}</div>` : '';
+    if(!rows.length) {
+        wrap.innerHTML = `${header}${skippedHtml}${errorsHtml}<div class="log-empty">중복 키워드가 없습니다.</div>`;
+        return;
+    }
+    const grouped = {};
+    rows.forEach(row => {
+        const key = String(row.campaign_id || row.campaign_name || '');
+        if(!grouped[key]) grouped[key] = { campaign_name: row.campaign_name || '-', items: [] };
+        grouped[key].items.push(row);
+    });
+    const blocks = Object.values(grouped).map(group => {
+        const items = group.items.map(row => `
+            <div class="log-item success">
+              <div class="log-top">
+                <div class="log-title">${escapeMaybe(row.keyword || '-')}</div>
+                <span class="badge blue">${escapeMaybe(String(row.adgroup_count || 0))}개 그룹</span>
+              </div>
+              <div class="log-summary">${escapeMaybe((row.adgroup_names || []).join(', '))}</div>
+            </div>
+        `).join('');
+        return `
+            <div class="card" style="margin:0; box-shadow:none; border:1px solid var(--line);">
+              <div class="card-title" style="margin-bottom:10px;">${escapeMaybe(group.campaign_name)}</div>
+              <div class="log-list" style="max-height:none;">${items}</div>
+            </div>
+        `;
+    }).join('');
+    wrap.innerHTML = `${header}${skippedHtml}${errorsHtml}${blocks}`;
+}
+
+async function findPowerlinkDuplicateKeywords() {
+    const c = ensureReady(); if(!c) return;
+    const ids = getCheckedCampaignIdsInViewOrder();
+    if(!ids.length) { showToast('캠페인을 1개 이상 체크해주세요.', 'error'); return; }
+    try {
+        const data = await postJson('/find_powerlink_duplicate_keywords', { ...c, campaign_ids: ids }, '중복 키워드 조회 중...');
+        renderPowerlinkDuplicateKeywordResult(data);
+        showToast(data?.message || '중복 키워드 조회 완료', (Array.isArray(data?.rows) && data.rows.length) ? 'success' : 'info');
+    } catch(err) {
+        showToast(`중복 키워드 조회 실패: ${err.message}`, 'error');
+    }
 }
 
 async function execCopyEntities() {
@@ -1871,7 +3510,7 @@ async function saveBudgetBulk(type) {
         const unlimited = document.getElementById(`${type}_budget_unlimited`)?.checked;
         const data = await postJson('/update_budget', {...c, entity_type: type, entity_ids: ids, budget: unlimited ? 0 : document.getElementById(`${type}_budget_val`).value, use_daily_budget: !unlimited}, '예산 변경 중...');
         showToast(data.message, 'success');
-        if(type === 'campaign') await refreshCampaigns(); else await refreshAdgroups();
+        if(type === 'campaign') await refreshCampaigns(true); else await refreshAdgroups();
     } catch(err) { showToast(err.message, 'error'); }
 }
 
@@ -1882,7 +3521,7 @@ async function setCampaignState(enabled) {
     try {
         const data = await postJson('/set_campaign_state', {...c, ids, enabled}, '상태 변경 중...');
         showToast(data.message, 'success');
-        await refreshCampaigns();
+        await refreshCampaigns(true);
     } catch(err) { showToast(err.message, 'error'); }
 }
 
@@ -1920,6 +3559,7 @@ async function bulkUploadTextAds() {
     showLoader('소재 대량등록 중...');
     try {
         const res = await fetch('/bulk_upload_text_ads', { method: 'POST', body: formData });
+        try { await loadActionLogs(false); } catch(e) {}
         const text = await res.text();
         let data = {};
         try { data = text ? JSON.parse(text) : {}; } catch(e) { data = { error: text || `${res.status}` }; }
@@ -1972,6 +3612,7 @@ async function bulkUploadHeadlines() {
     showLoader('추가제목 대량등록 중...');
     try {
         const res = await fetch('/bulk_upload_headlines', { method: 'POST', body: formData });
+        try { await loadActionLogs(false); } catch(e) {}
         const text = await res.text();
         let data = {};
         try { data = text ? JSON.parse(text) : {}; } catch(e) { data = { error: text || `${res.status}` }; }
@@ -2007,6 +3648,13 @@ async function executeBulkDelete() {
         DESCRIPTION_EXTRA: '홍보문구',
         DESCRIPTION: '추가설명',
         SUB_LINKS: '서브링크',
+        PHONE: '전화번호',
+        LOCATION: '위치정보',
+        PROMOTION: '프로모션',
+        PRICE_LINKS: '가격링크',
+        POWER_LINK_IMAGE: '파워링크 이미지',
+        WEBSITE_INFO: '웹사이트 정보',
+        IMAGE_SUB_LINKS: '이미지 서브링크',
         SHOPPING_PROMO_TEXT: '쇼핑 추가홍보문구',
         SHOPPING_EXTRA: '쇼핑상품부가정보'
     };
