@@ -26,6 +26,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 SAMPLES_DIR = os.path.join(BASE_DIR, "samples")
 OPENAPI_BASE_URL = "https://api.searchad.naver.com"
+PATCH_VERSION = "search-options-campaign-scope-v6-20260428"
 app = Flask(__name__, template_folder=TEMPLATES_DIR)
 HTTP_SESSION = requests.Session()
 HTTP_ADAPTER = requests.adapters.HTTPAdapter(pool_connections=32, pool_maxsize=64, max_retries=0)
@@ -86,6 +87,7 @@ LOG_ACTION_LABELS = {
     "/rename_adgroups_bulk": "광고그룹명 일괄 변경",
     "/update_media": "매체 설정 변경",
     "/update_adgroup_options": "광고그룹 옵션 변경",
+    "/update_adgroup_search_options": "파워링크 검색옵션 변경",
     "/update_budget": "예산 변경",
     "/update_schedule": "시간대 설정 변경",
     "/update_schedule_campaign_bulk": "캠페인 시간대 일괄 변경",
@@ -94,6 +96,7 @@ LOG_ACTION_LABELS = {
     "/update_bid_mode_by_scope": "입찰가 방식 변경",
     "/search_powerlink_keywords": "검색어 기준 키워드 조회",
     "/export_powerlink_keywords_excel": "검색어 기준 키워드 엑셀 다운로드",
+    "/export_powerlink_duplicate_keywords_excel": "중복 키워드 엑셀 다운로드",
     "/query_account_keywords": "계정 키워드 조회",
     "/export_account_keywords_excel": "계정 키워드 엑셀 다운로드",
     "/query_account_ads": "계정 소재 조회",
@@ -102,9 +105,12 @@ LOG_ACTION_LABELS = {
     "/export_account_extensions_excel": "계정 확장소재 엑셀 다운로드",
     "/update_keyword_bids_by_search": "검색어 기준 키워드 입찰가 변경",
     "/update_keyword_bid_weights_by_search": "검색어 기준 키워드 입찰가중치 변경",
+    "/update_powerlink_device_bid_weights": "파워링크 PC/모바일 입찰가중치 변경",
     "/set_searched_powerlink_keyword_state": "조회 키워드 ON/OFF 변경",
     "/adjust_keyword_bids_by_threshold": "상하한 기준 입찰가 조정",
     "/update_keyword_bids_avg_position": "평균순위 기준 입찰가 적용",
+    "/preview_keyword_avg_position_by_search": "검색어 기준 평균순위 입찰가 미리보기",
+    "/update_keyword_avg_position_by_search": "검색어 기준 평균순위 입찰가 적용",
     "/bulk_delete_by_parent": "부모 기준 일괄 삭제",
     "/bulk_register": "일괄 등록",
     "/bulk_delete": "일괄 삭제",
@@ -163,7 +169,7 @@ def _action_summary(path: str, payload: Dict[str, Any]) -> str:
         if not isinstance(ids, list):
             ids = [ids] if ids else []
         return f"그룹={len(ids)} | 새이름={_line_count(payload.get('target_names_text'))}"
-    if path in {"/update_budget", "/set_campaign_state", "/update_media", "/update_adgroup_options", "/update_schedule", "/update_schedule_campaign_bulk", "/update_non_search_keyword_exclusion", "/update_keyword_bids", "/update_bid_mode_by_scope", "/update_keyword_bids_by_search", "/update_keyword_bid_weights_by_search", "/adjust_keyword_bids_by_threshold", "/update_keyword_bids_avg_position"}:
+    if path in {"/update_budget", "/set_campaign_state", "/update_media", "/update_adgroup_options", "/update_adgroup_search_options", "/update_schedule", "/update_schedule_campaign_bulk", "/update_non_search_keyword_exclusion", "/update_keyword_bids", "/update_bid_mode_by_scope", "/update_keyword_bids_by_search", "/update_keyword_bid_weights_by_search", "/adjust_keyword_bids_by_threshold", "/update_keyword_bids_avg_position", "/preview_keyword_avg_position_by_search", "/update_keyword_avg_position_by_search", "/update_powerlink_device_bid_weights"}:
         ids = payload.get('entity_ids') or payload.get('campaign_ids') or payload.get('adgroup_ids') or []
         if not isinstance(ids, list):
             ids = [ids] if ids else []
@@ -180,6 +186,10 @@ def _action_summary(path: str, payload: Dict[str, Any]) -> str:
             extra.append(f"입찰가={payload.get('bid_amt')}")
         if str(payload.get('bid_weight') or payload.get('bidWeight') or '').strip():
             extra.append(f"입찰가중치={payload.get('bid_weight') or payload.get('bidWeight')}%")
+        if str(payload.get('pc_bid_weight') or '').strip():
+            extra.append(f"PC={payload.get('pc_bid_weight')}%")
+        if str(payload.get('mobile_bid_weight') or '').strip():
+            extra.append(f"MO={payload.get('mobile_bid_weight')}%")
         return " | ".join(extra)
     if path in {"/bulk_delete", "/delete_selected"}:
         rows = payload.get('rows') or payload.get('ids') or []
@@ -1138,6 +1148,9 @@ def _scan_powerlink_keywords_by_search(api_key: str, secret_key: str, cid: str, 
                     "current_bid_weight": int(current_bid_weight),
                     "current_state": "ON" if keyword_enabled is True else ("OFF" if keyword_enabled is False else "-"),
                     "enabled": keyword_enabled,
+                    "status": str((kw or {}).get("status") or ""),
+                    "inspect_status": str((kw or {}).get("inspectStatus") or ""),
+                    "del_flag": bool((kw or {}).get("delFlag")),
                     "matched_terms": matched_terms,
                     "matched_terms_text": ", ".join(matched_terms),
                     "ncc_keyword_id": str((kw or {}).get("nccKeywordId") or "").strip(),
@@ -1291,101 +1304,230 @@ def _build_powerlink_keyword_export_workbook(rows: List[Dict[str, Any]], search_
             cell.alignment = Alignment(vertical="top", wrap_text=True)
     ws.freeze_panes = "A7"
     return wb
-def _find_powerlink_duplicate_keywords(api_key: str, secret_key: str, cid: str, campaign_ids: List[str]):
-    selected_ids = [str(x or "").strip() for x in (campaign_ids or []) if str(x or "").strip()]
-    if not selected_ids:
-        return {"rows": [], "message": "선택한 캠페인이 없습니다.", "skipped": [], "errors": []}
-    res_camp, campaign_rows = _fetch_campaigns(api_key, secret_key, cid)
-    if res_camp.status_code != 200:
-        raise RuntimeError(f"캠페인 조회 실패: {res_camp.text}")
-    campaign_map = {}
-    for row in campaign_rows or []:
-        camp_id = str(row.get("id") or row.get("nccCampaignId") or "").strip()
-        if camp_id:
-            campaign_map[camp_id] = row
-    powerlink_targets: List[Tuple[str, str]] = []
-    skipped: List[str] = []
-    for camp_id in selected_ids:
-        row = campaign_map.get(camp_id)
-        if not row:
-            skipped.append(f"{camp_id} (캠페인 조회 실패 또는 없음)")
-            continue
-        camp_name = str(row.get("name") or camp_id)
-        camp_tp = str(row.get("campaignTp") or "").upper()
-        if camp_tp != "WEB_SITE":
-            skipped.append(f"{camp_name} ({camp_tp or '유형없음'})")
-            continue
-        powerlink_targets.append((camp_id, camp_name))
-    rows_out: List[Dict[str, Any]] = []
+def _find_powerlink_duplicate_keywords(api_key: str, secret_key: str, cid: str, campaign_ids: List[str], duplicate_scope: str = "selected_campaigns", adgroup_ids: List[str] | None = None, target_scope: str = "selected_campaigns"):
+    selected_ids = _unique_keep_order([str(x or "").strip() for x in (campaign_ids or []) if str(x or "").strip()])
+    selected_adgroup_ids = _unique_keep_order([str(x or "").strip() for x in (adgroup_ids or []) if str(x or "").strip()])
+    target_scope = str(target_scope or "selected_campaigns").strip().lower()
+    if target_scope not in {"selected_campaigns", "selected_adgroups"}:
+        target_scope = "selected_adgroups" if selected_adgroup_ids else "selected_campaigns"
+    scope = str(duplicate_scope or "selected_campaigns").strip().lower()
+    if scope not in {"selected_campaigns", "within_campaign", "campaign_internal"}:
+        scope = "selected_campaigns"
+
+    if target_scope == "selected_campaigns" and not selected_ids:
+        return {"rows": [], "message": "선택한 캠페인이 없습니다.", "skipped": [], "errors": [], "duplicate_scope": scope, "target_scope": target_scope}
+    if target_scope == "selected_adgroups" and not selected_adgroup_ids:
+        return {"rows": [], "message": "선택한 광고그룹이 없습니다.", "skipped": [], "errors": [], "duplicate_scope": scope, "target_scope": target_scope, "checked_adgroup_count": 0, "powerlink_adgroup_count": 0}
+
     errors: List[str] = []
-    for camp_id, camp_name in powerlink_targets:
-        res_adg, adgroup_rows = _fetch_adgroups(api_key, secret_key, cid, camp_id, enrich_media=False)
-        if res_adg.status_code != 200:
-            errors.append(f"[{camp_name}] 광고그룹 조회 실패: {res_adg.text}")
-            continue
+    skipped: List[str] = []
+    powerlink_targets: List[Tuple[str, str]] = []
+    adgroup_contexts: List[Dict[str, str]] = []
+
+    if target_scope == "selected_adgroups":
+        # 선택 그룹 기준은 체크한 광고그룹만 키워드 스캔 대상으로 제한한다.
+        # campaign_ids가 넘어오면 해당 캠페인 안에서 먼저 찾고, 누락 시 전체 파워링크 캠페인에서 보정 탐색한다.
+        res_camp, powerlink_campaigns, all_contexts, warnings = _collect_powerlink_campaigns_and_adgroups(
+            api_key, secret_key, cid, campaign_ids=selected_ids or None
+        )
+        if res_camp.status_code != 200:
+            raise RuntimeError(f"캠페인 조회 실패: {res_camp.text}")
+        skipped.extend(warnings or [])
+        selected_adgroup_set = set(selected_adgroup_ids)
+        adgroup_contexts = [ctx for ctx in (all_contexts or []) if str(ctx.get("adgroup_id") or "").strip() in selected_adgroup_set]
+        found_adgroup_ids = {str(ctx.get("adgroup_id") or "").strip() for ctx in adgroup_contexts if str(ctx.get("adgroup_id") or "").strip()}
+
+        if len(found_adgroup_ids) < len(selected_adgroup_set) and selected_ids:
+            res_camp2, powerlink_campaigns2, all_contexts2, warnings2 = _collect_powerlink_campaigns_and_adgroups(
+                api_key, secret_key, cid, campaign_ids=None
+            )
+            if res_camp2.status_code == 200:
+                existing = {str(ctx.get("adgroup_id") or "").strip() for ctx in adgroup_contexts}
+                for ctx in (all_contexts2 or []):
+                    adg_id = str(ctx.get("adgroup_id") or "").strip()
+                    if adg_id in selected_adgroup_set and adg_id not in existing:
+                        adgroup_contexts.append(ctx)
+                        existing.add(adg_id)
+                merged_campaign_ids = {str(c.get("id") or "").strip() for c in (powerlink_campaigns or []) if str(c.get("id") or "").strip()}
+                powerlink_campaigns = list(powerlink_campaigns or [])
+                for c in (powerlink_campaigns2 or []):
+                    cidv = str(c.get("id") or "").strip()
+                    if cidv and cidv not in merged_campaign_ids:
+                        powerlink_campaigns.append(c)
+                        merged_campaign_ids.add(cidv)
+                skipped.extend(warnings2 or [])
+            else:
+                skipped.append(f"선택 광고그룹 보정 조회 실패: {res_camp2.text}")
+            found_adgroup_ids = {str(ctx.get("adgroup_id") or "").strip() for ctx in adgroup_contexts if str(ctx.get("adgroup_id") or "").strip()}
+
+        missing_adgroup_ids = [x for x in selected_adgroup_ids if x not in found_adgroup_ids]
+        if missing_adgroup_ids:
+            skipped.append(f"선택 광고그룹 {len(missing_adgroup_ids)}개를 찾지 못했거나 파워링크 그룹이 아닙니다.")
+        selected_campaign_set = {str(ctx.get("campaign_id") or "").strip() for ctx in adgroup_contexts if str(ctx.get("campaign_id") or "").strip()}
+        for camp in (powerlink_campaigns or []):
+            camp_id = str(camp.get("id") or "").strip()
+            if camp_id and camp_id in selected_campaign_set:
+                powerlink_targets.append((camp_id, str(camp.get("name") or camp_id)))
+    else:
+        res_camp, campaign_rows = _fetch_campaigns(api_key, secret_key, cid)
+        if res_camp.status_code != 200:
+            raise RuntimeError(f"캠페인 조회 실패: {res_camp.text}")
+        campaign_map = {}
+        for row in campaign_rows or []:
+            camp_id = str(row.get("id") or row.get("nccCampaignId") or "").strip()
+            if camp_id:
+                campaign_map[camp_id] = row
+        for camp_id in selected_ids:
+            row = campaign_map.get(camp_id)
+            if not row:
+                skipped.append(f"{camp_id} (캠페인 조회 실패 또는 없음)")
+                continue
+            camp_name = str(row.get("name") or camp_id)
+            camp_tp = str(row.get("campaignTp") or "").upper()
+            if camp_tp != "WEB_SITE":
+                skipped.append(f"{camp_name} ({camp_tp or '유형없음'})")
+                continue
+            powerlink_targets.append((camp_id, camp_name))
+
+        for camp_id, camp_name in powerlink_targets:
+            res_adg, adgroup_rows = _fetch_adgroups(api_key, secret_key, cid, camp_id, enrich_media=False)
+            if res_adg.status_code != 200:
+                errors.append(f"[{camp_name}] 광고그룹 조회 실패: {res_adg.text}")
+                continue
+            for row in adgroup_rows or []:
+                raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+                adgroup_id = str(row.get("id") or row.get("nccAdgroupId") or raw.get("nccAdgroupId") or "").strip()
+                if not adgroup_id:
+                    continue
+                adgroup_contexts.append({
+                    "campaign_id": camp_id,
+                    "campaign_name": camp_name,
+                    "adgroup_id": adgroup_id,
+                    "adgroup_name": str(row.get("name") or raw.get("name") or adgroup_id),
+                })
+
+    all_keyword_map: Dict[str, Dict[str, Any]] = {}
+    max_workers = max(1, min(FAST_IO_WORKERS, len(adgroup_contexts) or 1))
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        future_map = {
+            ex.submit(_fetch_keywords, api_key, secret_key, cid, str(ctx.get("adgroup_id") or "")): ctx
+            for ctx in adgroup_contexts if str(ctx.get("adgroup_id") or "").strip()
+        }
+        for fut in as_completed(future_map):
+            ctx = future_map[fut]
+            camp_id = str(ctx.get("campaign_id") or "").strip()
+            camp_name = str(ctx.get("campaign_name") or camp_id)
+            adg_id = str(ctx.get("adgroup_id") or "").strip()
+            adg_name = str(ctx.get("adgroup_name") or adg_id)
+            try:
+                res_kw, kw_rows = fut.result()
+            except Exception as e:
+                errors.append(f"[{camp_name} > {adg_name}] 키워드 조회 실패: {e}")
+                continue
+            if res_kw.status_code != 200:
+                errors.append(f"[{camp_name} > {adg_name}] 키워드 조회 실패: {res_kw.text}")
+                continue
+            seen_in_group = set()
+            for kw in kw_rows or []:
+                keyword = str(kw.get("keyword") or "").strip()
+                if not keyword:
+                    continue
+                norm = re.sub(r"\s+", " ", keyword).strip().casefold()
+                if not norm or norm in seen_in_group:
+                    continue
+                seen_in_group.add(norm)
+                entry = all_keyword_map.setdefault(norm, {"keyword": keyword, "occurrences": []})
+                entry["occurrences"].append({
+                    "campaign_id": camp_id,
+                    "campaign_name": camp_name,
+                    "adgroup_id": adg_id,
+                    "adgroup_name": adg_name,
+                    "keyword_id": str(kw.get("nccKeywordId") or kw.get("id") or "").strip(),
+                })
+
+    rows_out: List[Dict[str, Any]] = []
+    target_scope_label = "선택 광고그룹" if target_scope == "selected_adgroups" else "선택 캠페인"
+    scope_label = f"{target_scope_label} 전체"
+
+    def _append_duplicate_row(keyword: str, occurrences: List[Dict[str, Any]]):
+        uniq_locations = []
+        seen_location_keys = set()
+        for occ in occurrences:
+            key = f"{occ.get('campaign_id') or ''}|{occ.get('adgroup_id') or ''}"
+            if not key.strip('|') or key in seen_location_keys:
+                continue
+            seen_location_keys.add(key)
+            uniq_locations.append(occ)
+        if len(uniq_locations) < 2:
+            return
+        campaign_names = []
+        campaign_ids_out = []
         adgroups = []
-        for row in adgroup_rows or []:
-            adgroup_id = str(row.get("id") or row.get("nccAdgroupId") or "").strip()
-            if not adgroup_id:
-                continue
-            adgroup_name = str(row.get("name") or adgroup_id)
-            adgroups.append((adgroup_id, adgroup_name))
-        keyword_map: Dict[str, Dict[str, Any]] = {}
-        max_workers = max(1, min(FAST_IO_WORKERS, len(adgroups) or 1))
-        with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            future_map = {ex.submit(_fetch_keywords, api_key, secret_key, cid, adg_id): (adg_id, adg_name) for adg_id, adg_name in adgroups}
-            for fut in as_completed(future_map):
-                adg_id, adg_name = future_map[fut]
-                try:
-                    res_kw, kw_rows = fut.result()
-                except Exception as e:
-                    errors.append(f"[{camp_name} > {adg_name}] 키워드 조회 실패: {e}")
-                    continue
-                if res_kw.status_code != 200:
-                    errors.append(f"[{camp_name} > {adg_name}] 키워드 조회 실패: {res_kw.text}")
-                    continue
-                seen_in_group = set()
-                for kw in kw_rows or []:
-                    keyword = str(kw.get("keyword") or "").strip()
-                    if not keyword:
-                        continue
-                    norm = re.sub(r"\s+", " ", keyword).strip().casefold()
-                    if not norm or norm in seen_in_group:
-                        continue
-                    seen_in_group.add(norm)
-                    entry = keyword_map.setdefault(norm, {"keyword": keyword, "adgroups": []})
-                    entry["adgroups"].append({"id": adg_id, "name": adg_name})
-        for item in keyword_map.values():
-            uniq = []
-            seen_ids = set()
-            for g in item.get("adgroups") or []:
-                gid = str(g.get("id") or "")
-                if not gid or gid in seen_ids:
-                    continue
-                seen_ids.add(gid)
-                uniq.append(g)
-            if len(uniq) < 2:
-                continue
-            uniq_names = [str(g.get("name") or g.get("id") or "") for g in uniq]
-            rows_out.append({
-                "campaign_id": camp_id,
-                "campaign_name": camp_name,
-                "keyword": item.get("keyword") or "",
-                "adgroup_count": len(uniq),
-                "adgroups": uniq,
-                "adgroup_names": uniq_names,
-                "adgroup_names_text": ", ".join(uniq_names),
+        for occ in uniq_locations:
+            cname = str(occ.get("campaign_name") or occ.get("campaign_id") or "")
+            cidv = str(occ.get("campaign_id") or "")
+            if cname and cname not in campaign_names:
+                campaign_names.append(cname)
+            if cidv and cidv not in campaign_ids_out:
+                campaign_ids_out.append(cidv)
+            adgroups.append({
+                "id": str(occ.get("adgroup_id") or ""),
+                "name": str(occ.get("adgroup_name") or occ.get("adgroup_id") or ""),
+                "campaign_id": cidv,
+                "campaign_name": cname,
             })
-    rows_out.sort(key=lambda x: (str(x.get("campaign_name") or ""), -int(x.get("adgroup_count") or 0), str(x.get("keyword") or "").casefold()))
+        adgroup_names = [f"[{g.get('campaign_name')}] {g.get('name')}" if len(campaign_names) > 1 else str(g.get("name") or "") for g in adgroups]
+        campaign_name_text = ", ".join(campaign_names[:3]) + (f" 외 {len(campaign_names) - 3}개" if len(campaign_names) > 3 else "")
+        rows_out.append({
+            "campaign_id": ", ".join(campaign_ids_out),
+            "campaign_name": campaign_name_text,
+            "campaign_names": campaign_names,
+            "campaign_count": len(campaign_names),
+            "keyword": keyword,
+            "adgroup_count": len(adgroups),
+            "adgroups": adgroups,
+            "adgroup_names": adgroup_names,
+            "adgroup_names_text": ", ".join(adgroup_names),
+            "duplicate_scope": scope,
+            "duplicate_scope_label": scope_label,
+            "target_scope": target_scope,
+            "target_scope_label": target_scope_label,
+        })
+
+    if scope in {"within_campaign", "campaign_internal"}:
+        per_campaign: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        for norm, item in all_keyword_map.items():
+            keyword = item.get("keyword") or ""
+            for occ in item.get("occurrences") or []:
+                key = (str(occ.get("campaign_id") or ""), norm)
+                entry = per_campaign.setdefault(key, {"keyword": keyword, "occurrences": []})
+                entry["occurrences"].append(occ)
+        scope_label = f"{target_scope_label} / 캠페인 내부"
+        for item in per_campaign.values():
+            _append_duplicate_row(str(item.get("keyword") or ""), list(item.get("occurrences") or []))
+    else:
+        scope_label = f"{target_scope_label} 전체"
+        for item in all_keyword_map.values():
+            _append_duplicate_row(str(item.get("keyword") or ""), list(item.get("occurrences") or []))
+
+    # scope_label은 중복 판단 후 확정되므로 행별 표기에도 최신 라벨을 맞춘다.
+    for row in rows_out:
+        row["duplicate_scope_label"] = scope_label
+        row["target_scope_label"] = target_scope_label
+
+    rows_out.sort(key=lambda x: (-int(x.get("campaign_count") or 0), str(x.get("keyword") or "").casefold(), str(x.get("campaign_name") or "").casefold()))
     msg_parts = []
-    if powerlink_targets:
+    if target_scope == "selected_adgroups":
+        msg_parts.append(f"파워링크 광고그룹 {len(adgroup_contexts)}개 기준")
+    elif powerlink_targets:
         msg_parts.append(f"파워링크 캠페인 {len(powerlink_targets)}개 기준")
+    msg_parts.append(scope_label)
     if rows_out:
         msg_parts.append(f"중복 키워드 {len(rows_out)}개 발견")
     else:
         msg_parts.append("중복 키워드가 없습니다.")
     if skipped:
-        msg_parts.append(f"제외 {len(skipped)}개")
+        msg_parts.append(f"제외/안내 {len(skipped)}개")
     return {
         "rows": rows_out,
         "message": " / ".join(msg_parts),
@@ -1393,7 +1535,65 @@ def _find_powerlink_duplicate_keywords(api_key: str, secret_key: str, cid: str, 
         "errors": errors[:30],
         "checked_campaign_count": len(selected_ids),
         "powerlink_campaign_count": len(powerlink_targets),
+        "checked_adgroup_count": len(selected_adgroup_ids),
+        "powerlink_adgroup_count": len(adgroup_contexts),
+        "duplicate_scope": scope,
+        "duplicate_scope_label": scope_label,
+        "target_scope": target_scope,
+        "target_scope_label": target_scope_label,
     }
+
+def _build_powerlink_duplicate_keyword_workbook(result: Dict[str, Any], scope_label: str = "선택 캠페인"):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "중복키워드"
+    generated_at = time.strftime("%Y-%m-%d %H:%M:%S")
+    rows = list((result or {}).get("rows") or [])
+    skipped = list((result or {}).get("skipped") or [])
+    errors = list((result or {}).get("errors") or [])
+    message = str((result or {}).get("message") or "")
+    ws["A1"] = "파워링크 중복키워드 조회 결과"
+    ws["A1"].font = Font(size=14, bold=True, color="FFFFFF")
+    ws["A1"].fill = PatternFill("solid", fgColor="1D4ED8")
+    ws.merge_cells("A1:I1")
+    ws["A2"] = f"생성시각: {generated_at}"
+    ws["A3"] = f"조회범위: {scope_label}"
+    ws["A4"] = f"요약: {message}"
+    ws["A5"] = f"제외 캠페인: {', '.join(skipped) if skipped else '없음'}"
+    ws["A6"] = f"오류: {' / '.join(errors) if errors else '없음'}"
+    headers = ["번호", "캠페인명", "중복 캠페인 수", "키워드", "중복 광고그룹 수", "광고그룹명", "캠페인 ID", "광고그룹 ID 목록", "비고"]
+    start_row = 8
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=start_row, column=col_idx, value=header)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="111827")
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+    for idx, row in enumerate(rows, start=1):
+        adgroups = list(row.get("adgroups") or [])
+        adgroup_names = row.get("adgroup_names") or [str(g.get("name") or g.get("id") or "") for g in adgroups]
+        adgroup_ids = [str(g.get("id") or "") for g in adgroups if str(g.get("id") or "").strip()]
+        values = [
+            idx,
+            str(row.get("campaign_name") or ""),
+            int(row.get("campaign_count") or len(row.get("campaign_names") or []) or 1),
+            str(row.get("keyword") or ""),
+            int(row.get("adgroup_count") or len(adgroup_names) or 0),
+            ", ".join(str(x) for x in adgroup_names if str(x).strip()),
+            str(row.get("campaign_id") or ""),
+            ", ".join(adgroup_ids),
+            str(row.get("duplicate_scope_label") or row.get("duplicate_scope") or ""),
+        ]
+        for col_idx, value in enumerate(values, start=1):
+            ws.cell(row=start_row + idx, column=col_idx, value=value)
+    widths = {1: 8, 2: 36, 3: 16, 4: 32, 5: 16, 6: 68, 7: 36, 8: 68, 9: 22}
+    for col_idx, width in widths.items():
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+    end_row = start_row + max(1, len(rows))
+    for row_cells in ws.iter_rows(min_row=1, max_row=end_row, min_col=1, max_col=len(headers)):
+        for cell in row_cells:
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+    ws.freeze_panes = "A9"
+    return wb
 def _find_account_powerlink_duplicate_keywords(api_key: str, secret_key: str, cid: str):
     res_camp, campaign_rows = _fetch_campaigns(api_key, secret_key, cid)
     if res_camp.status_code != 200:
@@ -1406,7 +1606,7 @@ def _find_account_powerlink_duplicate_keywords(api_key: str, secret_key: str, ci
             powerlink_ids.append(camp_id)
     if not powerlink_ids:
         return {"rows": [], "message": "현재 계정에 파워링크 캠페인이 없습니다.", "skipped": [], "errors": [], "checked_campaign_count": 0, "powerlink_campaign_count": 0}
-    result = _find_powerlink_duplicate_keywords(api_key, secret_key, cid, powerlink_ids)
+    result = _find_powerlink_duplicate_keywords(api_key, secret_key, cid, powerlink_ids, duplicate_scope="selected_campaigns")
     rows = list(result.get("rows") or [])
     rows.sort(key=lambda x: (-int(x.get("adgroup_count") or 0), str(x.get("keyword") or "").casefold(), str(x.get("campaign_name") or "").casefold()))
     result["rows"] = rows
@@ -1575,6 +1775,65 @@ def _resolve_adgroup_contexts(api_key: str, secret_key: str, cid: str, entity_ty
                 continue
             _append_context(str(obj.get("nccAdgroupId") or adg_id), obj, fallback_name=str(obj.get("name") or adg_id))
     return contexts, warnings
+
+def _split_filter_words(value: Any) -> List[str]:
+    raw = value
+    if isinstance(raw, (list, tuple, set)):
+        parts = []
+        for item in raw:
+            parts.extend(str(item or "").replace("，", ",").replace(";", ",").replace("\n", ",").split(","))
+    else:
+        parts = str(raw or "").replace("，", ",").replace(";", ",").replace("\n", ",").split(",")
+    return [x.strip().lower() for x in parts if x and x.strip()]
+
+def _adgroup_name_word_match(name: str, word: str, match_mode: str = "contains") -> bool:
+    name_norm = str(name or "").strip().lower()
+    word_norm = str(word or "").strip().lower()
+    if not word_norm:
+        return False
+    if str(match_mode or "").strip().lower() in {"exact", "equals", "equal", "정확히일치", "완전일치"}:
+        return name_norm == word_norm
+    return word_norm in name_norm
+
+def _filter_adgroup_contexts_by_name_conditions(adgroup_contexts: List[Dict[str, Any]], payload: Dict[str, Any]):
+    include_words = _split_filter_words(payload.get("adgroup_name_include") or payload.get("adgroup_include_words") or payload.get("include_adgroup_words"))
+    exclude_words = _split_filter_words(payload.get("adgroup_name_exclude") or payload.get("adgroup_exclude_words") or payload.get("exclude_adgroup_words"))
+    match_mode = str(payload.get("adgroup_name_match_mode") or payload.get("adgroup_match_mode") or "contains").strip().lower()
+    if not include_words and not exclude_words:
+        return adgroup_contexts, {"include_words": [], "exclude_words": [], "match_mode": match_mode, "included_skipped": 0, "excluded_skipped": 0}
+    kept: List[Dict[str, Any]] = []
+    included_skipped = 0
+    excluded_skipped = 0
+    for ctx in adgroup_contexts or []:
+        name = str((ctx or {}).get("name") or "")
+        if include_words and not any(_adgroup_name_word_match(name, w, match_mode) for w in include_words):
+            included_skipped += 1
+            continue
+        if exclude_words and any(_adgroup_name_word_match(name, w, match_mode) for w in exclude_words):
+            excluded_skipped += 1
+            continue
+        kept.append(ctx)
+    return kept, {"include_words": include_words, "exclude_words": exclude_words, "match_mode": match_mode, "included_skipped": included_skipped, "excluded_skipped": excluded_skipped}
+
+def _adgroup_name_filter_summary(filter_info: Dict[str, Any]) -> List[str]:
+    if not filter_info:
+        return []
+    lines: List[str] = []
+    include_words = filter_info.get("include_words") or []
+    exclude_words = filter_info.get("exclude_words") or []
+    if include_words or exclude_words:
+        bits = []
+        if include_words:
+            bits.append("포함 단어: " + ", ".join(include_words))
+        if exclude_words:
+            bits.append("제외 단어: " + ", ".join(exclude_words))
+        lines.append("광고그룹명 조건 필터 적용 - " + " / ".join(bits))
+    included_skipped = int(filter_info.get("included_skipped") or 0)
+    excluded_skipped = int(filter_info.get("excluded_skipped") or 0)
+    if included_skipped or excluded_skipped:
+        lines.append(f"광고그룹명 조건으로 제외된 광고그룹: 포함조건 미충족 {included_skipped}개 / 제외단어 매칭 {excluded_skipped}개")
+    return lines
+
 def _adgroup_uses_ad_level_bid(adgroup_type: str) -> bool:
     return str(adgroup_type or "").upper() in SHOPPING_ADGROUP_TYPES_WITH_AD_LEVEL_BID
 def _ad_item_has_bid_attr(ad_item: Dict[str, Any] | None) -> bool:
@@ -1752,6 +2011,7 @@ def _collect_asset_scope_adgroups(api_key: str, secret_key: str, cid: str, scope
                     "adgroup_id": adg_id,
                     "adgroup_name": str((adg or {}).get("name") or adg_id),
                     "adgroup_type": str((adg or {}).get("adgroupType") or ""),
+                    "adgroup_bid": ((adg or {}).get("raw") if isinstance((adg or {}).get("raw"), dict) else (adg or {})).get("bidAmt"),
                 })
     if not contexts and warnings:
         return _make_fake_response(400, "\n".join(warnings[:10])), [], warnings, target_campaigns
@@ -1771,6 +2031,29 @@ def _summarize_lookup_ad(ad_item: Dict[str, Any] | None) -> str:
         if value:
             return value
     return json.dumps(ad_item, ensure_ascii=False)[:120]
+def _lookup_bid_display_value(value: Any) -> Any:
+    try:
+        bid = int(float(value))
+    except Exception:
+        return ""
+    return bid if bid > 0 else ""
+
+def _lookup_ad_bid_fields(ad_item: Dict[str, Any] | None, adgroup_bid: Any = None) -> Dict[str, Any]:
+    ad_item = ad_item or {}
+    ad_attr = _extract_ad_attr(ad_item)
+    has_ad_bid = _ad_item_has_bid_attr(ad_item) or bool(ad_attr)
+    if not has_ad_bid:
+        return {"adBidAmt": "", "adUseGroupBidAmt": "", "adgroupBidAmt": _lookup_bid_display_value(adgroup_bid), "effectiveBidAmt": ""}
+    use_group = bool(ad_attr.get("useGroupBidAmt"))
+    raw_ad_bid = ad_attr.get("bidAmt")
+    effective_bid = _resolve_effective_bid(raw_ad_bid, use_group, adgroup_bid)
+    return {
+        "adBidAmt": _lookup_bid_display_value(raw_ad_bid),
+        "adUseGroupBidAmt": "Y" if use_group else "N",
+        "adgroupBidAmt": _lookup_bid_display_value(adgroup_bid),
+        "effectiveBidAmt": _lookup_bid_display_value(effective_bid),
+    }
+
 def _summarize_lookup_extension(ext_item: Dict[str, Any] | None) -> str:
     ext_item = ext_item or {}
     ad_ext = ext_item.get("adExtension") if isinstance(ext_item.get("adExtension"), dict) else {}
@@ -1819,6 +2102,7 @@ def _collect_lookup_ads_for_contexts(api_key: str, secret_key: str, cid: str, co
             for ad in (ads or []):
                 ad = ad if isinstance(ad, dict) else {}
                 ad_id = str(ad.get("nccAdId") or ad.get("id") or "").strip()
+                bid_fields = _lookup_ad_bid_fields(ad, ctx.get("adgroup_bid"))
                 rows.append({
                     "campaignId": str(ctx.get("campaign_id") or ""),
                     "campaignName": str(ctx.get("campaign_name") or ""),
@@ -1830,6 +2114,7 @@ def _collect_lookup_ads_for_contexts(api_key: str, secret_key: str, cid: str, co
                     "type": str(ad.get("type") or ad.get("adType") or ""),
                     "status": "ON" if _extract_enabled_from_entity(ad) is not False else "OFF",
                     "summary": _summarize_lookup_ad(ad),
+                    **bid_fields,
                 })
     rows.sort(key=lambda x: (x.get("campaignName") or "", x.get("adgroupName") or "", x.get("type") or "", x.get("summary") or ""))
     return rows, warnings
@@ -1990,7 +2275,7 @@ def _build_asset_lookup_workbook(rows: List[Dict[str, Any]], title: str, scope_l
             ws.cell(row=start_row + row_idx, column=col_idx, value=value)
     widths = {
         "campaignName": 22, "adgroupName": 22, "summary": 36, "type": 16, "status": 10,
-        "adId": 24, "adExtensionId": 24, "ownerId": 24, "campaignId": 20, "adgroupId": 22, "ownerScope": 12,
+        "effectiveBidAmt": 14, "adBidAmt": 14, "adUseGroupBidAmt": 16, "adgroupBidAmt": 16, "adId": 24, "adExtensionId": 24, "ownerId": 24, "campaignId": 20, "adgroupId": 22, "ownerScope": 12,
     }
     for col_idx, (key, label) in enumerate(columns, start=1):
         ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(key, max(12, min(40, len(label) + 4)))
@@ -2409,6 +2694,12 @@ def _copy_adgroup_extra_targets_only(api_key: str, secret_key: str, cid: str, so
         messages.append(f"추가 타겟 조회 실패: {res_src.text}")
     return overall_ok, messages
 def _copy_adgroup_search_option_settings(api_key: str, secret_key: str, cid: str, source_adgroup_id: str, target_adgroup_id: str):
+    """Copy current PowerLink search options from one adgroup to another.
+
+    2026-04 실제 응답 기준 확장검색 필드는 useExpSearch / expSearchBudgetRatio다.
+    신규 광고그룹 생성 시 POST payload에 포함해도 서버에서 기본값으로 재계산될 수 있으므로,
+    그룹/캠페인 복사 후 한 번 더 no-fields 전체 update로 원본값을 맞춘다.
+    """
     try:
         res_get, src_obj = _fetch_adgroup_detail(api_key, secret_key, cid, source_adgroup_id)
     except Exception as e:
@@ -2418,6 +2709,68 @@ def _copy_adgroup_search_option_settings(api_key: str, secret_key: str, cid: str
         return False, f"검색옵션 원본 조회 실패: {detail}"
     if str(src_obj.get("adgroupType") or "").upper() != "WEB_SITE":
         return True, "파워링크 그룹이 아니어서 검색옵션 복사 건너뜀"
+
+    exp_key, exp_value = _read_expanded_search_from_obj(src_obj)
+    ratio_key, ratio_value = _read_expanded_budget_ratio_from_obj(src_obj)
+
+    if exp_key is not None:
+        update_values: Dict[str, Any] = {exp_key: exp_value}
+        if ratio_key is not None:
+            update_values[ratio_key] = ratio_value
+        try:
+            res_tgt, target_obj = _fetch_adgroup_detail(api_key, secret_key, cid, target_adgroup_id)
+        except Exception as e:
+            return False, f"검색옵션 대상 조회 실패: {e}"
+        if res_tgt.status_code != 200 or not isinstance(target_obj, dict):
+            detail = res_tgt.text if res_tgt is not None else "광고그룹 조회 실패"
+            return False, f"검색옵션 대상 조회 실패: {detail}"
+        if str(target_obj.get("adgroupType") or "").upper() != "WEB_SITE":
+            return True, "대상 그룹이 파워링크가 아니어서 검색옵션 복사 건너뜀"
+
+        # 실제 적용 성공이 확인된 방식: fields 없이 전체 광고그룹 update(no-fields).
+        # target_obj를 베이스로 써야 신규 그룹 ID/캠페인/채널 정보가 보존된다.
+        res_put = _put_adgroup_expanded_search_candidate(
+            api_key, secret_key, cid, target_adgroup_id, target_obj, None, update_values, full_payload=True
+        )
+        if res_put.status_code not in [200, 201, 204]:
+            # no-fields가 실패하면 기존 변경 함수의 후보 전략으로 한 번 더 보정한다.
+            expected_enabled = _normalize_bool_for_api(exp_value, False)
+            fallback_ratio = ratio_value if ratio_key is not None else None
+            ok, msg = _update_adgroup_search_options(
+                api_key, secret_key, cid, target_adgroup_id,
+                use_keyword_plus=expected_enabled,
+                keyword_plus_weight=fallback_ratio,
+                use_close_variant=None,
+            )
+            if ok:
+                return True, f"검색옵션 복사 완료(fallback): {msg}"
+            return False, f"검색옵션 복사 실패(no-fields): {res_put.text} / fallback: {msg}"
+
+        res_verify, verify_obj = _fetch_adgroup_detail(api_key, secret_key, cid, target_adgroup_id)
+        if res_verify.status_code != 200 or not isinstance(verify_obj, dict):
+            detail = res_verify.text if res_verify is not None else "재조회 실패"
+            return False, f"검색옵션 복사 후 재조회 실패: {detail}"
+        check_key, check_value = _read_expanded_search_from_obj(verify_obj)
+        if check_key is None:
+            keys_preview = ", ".join(list((verify_obj or {}).keys())[:35])
+            return False, f"검색옵션 복사 후 확인 필드 없음. 확인된 key: {keys_preview}"
+        expected_enabled = _normalize_bool_for_api(exp_value, False)
+        if not _same_expanded_search_value(check_value, expected_enabled):
+            return False, f"검색옵션 복사 미반영({check_key}: 원본 {exp_value} / 확인 {check_value})"
+        if ratio_key is not None:
+            verify_ratio_key, verify_ratio_value = _read_expanded_budget_ratio_from_obj(verify_obj)
+            if verify_ratio_key is None:
+                return False, f"확장검색 예산비율 확인 필드 없음({ratio_key})"
+            try:
+                same_ratio = int(float(verify_ratio_value)) == int(float(ratio_value))
+            except Exception:
+                same_ratio = str(verify_ratio_value) == str(ratio_value)
+            if not same_ratio:
+                return False, f"확장검색 예산비율 복사 미반영({verify_ratio_key}: 원본 {ratio_value} / 확인 {verify_ratio_value})"
+        ratio_msg = f", {ratio_key}={ratio_value}" if ratio_key is not None else ""
+        return True, f"검색옵션 복사 완료({exp_key}={exp_value}{ratio_msg})"
+
+    # 구형 응답 필드가 남아 있는 계정용 호환 fallback.
     use_keyword_plus = src_obj.get("useKeywordPlus") if "useKeywordPlus" in src_obj else None
     keyword_plus_weight = src_obj.get("keywordPlusWeight") if "keywordPlusWeight" in src_obj else None
     use_close_variant = src_obj.get("useCloseVariant") if "useCloseVariant" in src_obj else None
@@ -2425,9 +2778,9 @@ def _copy_adgroup_search_option_settings(api_key: str, secret_key: str, cid: str
         return True, "원본 검색옵션 값이 없어 기본값 유지"
     ok, msg = _update_adgroup_search_options(
         api_key, secret_key, cid, target_adgroup_id,
-        use_keyword_plus=None if use_keyword_plus is None else bool(use_keyword_plus),
+        use_keyword_plus=None if use_keyword_plus is None else _normalize_bool_for_api(use_keyword_plus, False),
         keyword_plus_weight=keyword_plus_weight,
-        use_close_variant=None if use_close_variant is None else bool(use_close_variant),
+        use_close_variant=None if use_close_variant is None else _normalize_bool_for_api(use_close_variant, False),
     )
     return ok, msg
 def _copy_adgroup_media_settings(api_key: str, secret_key: str, cid: str, source_adgroup_id: str, target_adgroup_id: str):
@@ -2449,59 +2802,435 @@ def _copy_adgroup_media_settings(api_key: str, secret_key: str, cid: str, source
     if msg_media:
         messages.append(msg_media)
     return ok_pm and ok_media, messages
+def _prepare_adgroup_full_update_obj_for_search_options(obj: Dict[str, Any], cid: str, target_values: Dict[str, Any], sanitized: bool = True) -> Dict[str, Any]:
+    update_obj = dict(obj or {})
+    update_obj.update(target_values or {})
+    update_obj.setdefault("customerId", _safe_int_default(cid, 0))
+    adgroup_id = str(update_obj.get("nccAdgroupId") or update_obj.get("id") or "").strip()
+    if adgroup_id:
+        update_obj["nccAdgroupId"] = adgroup_id
+
+    # 전체 update(no fields)는 조회 응답의 읽기전용/요약성 필드를 그대로 보내면 실패할 수 있어 제거한다.
+    # PC/MO 입찰가중치 패치에서 성공한 방식과 동일하게, 수정 대상 값은 유지하고 서버 계산값만 걷어낸다.
+    if sanitized:
+        readonly_keys = {
+            "id", "raw", "targets", "targetSummary", "pcChannelKey", "mobileChannelKey",
+            "status", "statusReason", "expectCost", "regTm", "editTm", "migType",
+            "sharedDailyBudget", "sharedBudgetName", "sharedBudgetLock", "sharedBudgetExpectCost",
+            "numberInUse", "pcDevice", "mobileDevice",
+        }
+        for key in readonly_keys:
+            update_obj.pop(key, None)
+    return {k: v for k, v in update_obj.items() if v is not None}
+
+
+def _normalize_bool_for_api(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "y", "yes", "on", "사용", "예", "네"}
+
+
+def _coerce_search_option_value(key: str, value: Any) -> Any:
+    if key in {"useKeywordPlus", "useCloseVariant"}:
+        return _normalize_bool_for_api(value, False)
+    if key == "keywordPlusWeight":
+        try:
+            return int(float(value))
+        except Exception:
+            return value
+    return value
+
+
+def _same_search_option_value(key: str, actual: Any, expected: Any) -> bool:
+    if key in {"useKeywordPlus", "useCloseVariant"}:
+        return _normalize_bool_for_api(actual, False) == _normalize_bool_for_api(expected, False)
+    if key == "keywordPlusWeight":
+        try:
+            return int(float(actual)) == int(float(expected))
+        except Exception:
+            return actual == expected
+    return actual == expected
+
+
+def _verify_adgroup_search_options(api_key: str, secret_key: str, cid: str, adgroup_id: str, expected: Dict[str, Any]) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+    res, verify_obj = _fetch_adgroup_detail(api_key, secret_key, cid, adgroup_id)
+    if res is not None and res.status_code != 200:
+        return False, f"재조회 실패: {res.text}", None
+    if not isinstance(verify_obj, dict):
+        return False, "재조회 응답이 비어 있어 반영 여부를 확인하지 못했습니다.", None
+    mismatches: List[str] = []
+    missing: List[str] = []
+    for key, expected_value in expected.items():
+        if key not in verify_obj:
+            missing.append(key)
+            continue
+        actual_value = verify_obj.get(key)
+        if not _same_search_option_value(key, actual_value, expected_value):
+            mismatches.append(f"{key}: 요청 {expected_value} / 확인 {actual_value}")
+    if missing:
+        return False, "재조회 응답에 확인 필드 없음: " + ", ".join(missing[:3]), verify_obj
+    if mismatches:
+        return False, "반영값 불일치: " + " / ".join(mismatches[:3]), verify_obj
+    return True, "반영값 확인 완료", verify_obj
+
+
+def _put_adgroup_by_fields(api_key: str, secret_key: str, cid: str, adgroup_id: str, values: Dict[str, Any], base_obj: Optional[Dict[str, Any]] = None, mode: str = "minimal"):
+    clean_values = {k: _coerce_search_option_value(k, v) for k, v in (values or {}).items() if v is not None}
+    if not clean_values:
+        return None
+    fields = ",".join(clean_values.keys())
+    if mode == "full":
+        payload = _prepare_adgroup_full_update_obj_for_search_options(base_obj or {}, cid, clean_values, sanitized=True)
+    else:
+        payload = dict(clean_values)
+    return _do_req(
+        "PUT", api_key, secret_key, cid, f"/ncc/adgroups/{adgroup_id}",
+        params={"fields": fields}, json_body=payload
+    )
+
+
+def _put_adgroup_by_fields_body_fallback(api_key: str, secret_key: str, cid: str, adgroup_id: str, values: Dict[str, Any], base_obj: Optional[Dict[str, Any]] = None):
+    # 일부 레거시 예시에서는 fields를 body에 포함한 형태가 섞여 있어, 마지막 호환 fallback으로만 사용한다.
+    clean_values = {k: _coerce_search_option_value(k, v) for k, v in (values or {}).items() if v is not None}
+    if not clean_values:
+        return None
+    payload = _prepare_adgroup_full_update_obj_for_search_options(base_obj or {}, cid, clean_values, sanitized=True)
+    payload["fields"] = ",".join(clean_values.keys())
+    return _do_req(
+        "PUT", api_key, secret_key, cid, f"/ncc/adgroups/{adgroup_id}",
+        params=None, json_body=payload
+    )
+
+
+def _search_option_needs_change(obj: Dict[str, Any], key: str, target_value: Any) -> bool:
+    if key not in obj:
+        return True
+    return not _same_search_option_value(key, obj.get(key), target_value)
+
+
+def _expanded_search_expected_from_inputs(use_keyword_plus: Optional[bool], use_close_variant: Optional[bool]) -> Optional[bool]:
+    """Return requested current Naver PowerLink search mode.
+
+    화면의 "확장검색" 선택값을 기준으로 신규 확장검색 ON/OFF를 결정한다.
+    "일치검색"은 2025-01 이후 기본 노출 유형으로 동작하므로 별도 OFF 대상이 아니며,
+    사용자가 "확장검색 미사용 + 일치검색 사용"을 선택하면 확장검색 OFF 요청으로 처리한다.
+    """
+    if use_keyword_plus is not None:
+        return _normalize_bool_for_api(use_keyword_plus, False)
+    if use_close_variant is not None and _normalize_bool_for_api(use_close_variant, False):
+        return False
+    return None
+
+
+_EXPANDED_SEARCH_RESPONSE_KEYS = (
+    # 실제 광고그룹 조회 응답에서 확인된 현재 필드.
+    # 2026-04 테스트 로그 기준 응답 key: useExpSearch, expSearchBudgetRatio
+    "useExpSearch",
+    "expSearch",
+    # 2024-10 이후 마스터 리포트의 "Using Expanded Search"에 대응될 가능성이 높은 후보.
+    "useExpandedSearch",
+    "usingExpandedSearch",
+    "useExtendedSearch",
+    "usingExtendedSearch",
+    "expandedSearch",
+    "expandedSearchUse",
+    "expandedSearchFlag",
+    "expandedSearchEnabled",
+    "useExpandedSearchAd",
+)
+
+_EXPANDED_SEARCH_BUDGET_RATIO_KEYS = (
+    "expandedSearchBudgetRatio",
+    "expandedSearchBudgetRate",
+    "expandedSearchBudgetPercent",
+    "expSearchBudgetRatio",
+)
+
+_LEGACY_SEARCH_OPTION_KEYS = ("useKeywordPlus", "useCloseVariant", "keywordPlusWeight")
+
+
+def _coerce_expanded_search_payload_value(key: str, enabled: bool, prefer_int: bool = False) -> Any:
+    lk = str(key or "").lower()
+    if prefer_int or lk.endswith("flag") or lk.startswith("using"):
+        return 1 if enabled else 0
+    return bool(enabled)
+
+
+def _same_expanded_search_value(actual: Any, expected: bool) -> bool:
+    if isinstance(actual, bool):
+        return actual == bool(expected)
+    s = str(actual).strip().lower()
+    if s in {"1", "true", "y", "yes", "on", "사용", "used", "enable", "enabled"}:
+        return bool(expected) is True
+    if s in {"0", "false", "n", "no", "off", "미사용", "not_used", "disable", "disabled"}:
+        return bool(expected) is False
+    try:
+        return int(float(actual)) == (1 if expected else 0)
+    except Exception:
+        return False
+
+
+def _read_expanded_search_from_obj(obj: Optional[Dict[str, Any]]) -> Tuple[Optional[str], Optional[Any]]:
+    if not isinstance(obj, dict):
+        return None, None
+    for key in _EXPANDED_SEARCH_RESPONSE_KEYS:
+        if key in obj:
+            return key, obj.get(key)
+    # API 응답명이 문서보다 먼저 바뀌는 경우를 대비해 key 이름으로 탐지한다.
+    for key, value in obj.items():
+        lk = str(key).lower()
+        # 실제 응답 key가 useExpSearch처럼 expanded가 아니라 exp 축약형으로 내려오는 경우가 있다.
+        if (("expanded" in lk or "exp" in lk) and "search" in lk and not lk.endswith("ratio") and "budget" not in lk):
+            return str(key), value
+    return None, None
+
+
+def _read_expanded_budget_ratio_from_obj(obj: Optional[Dict[str, Any]]) -> Tuple[Optional[str], Optional[Any]]:
+    if not isinstance(obj, dict):
+        return None, None
+    for key in _EXPANDED_SEARCH_BUDGET_RATIO_KEYS:
+        if key in obj:
+            return key, obj.get(key)
+    for key, value in obj.items():
+        lk = str(key).lower()
+        if "expanded" in lk and "search" in lk and ("budget" in lk or "ratio" in lk or "rate" in lk):
+            return str(key), value
+    return None, None
+
+
+def _verify_adgroup_expanded_search(api_key: str, secret_key: str, cid: str, adgroup_id: str, expected_enabled: bool, response_obj: Optional[Dict[str, Any]] = None) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+    key, val = _read_expanded_search_from_obj(response_obj)
+    if key is not None:
+        if _same_expanded_search_value(val, expected_enabled):
+            return True, f"응답값 확인 완료({key}={val})", response_obj
+        return False, f"응답값 불일치({key}: 요청 {expected_enabled} / 응답 {val})", response_obj
+
+    res, verify_obj = _fetch_adgroup_detail(api_key, secret_key, cid, adgroup_id)
+    if res is not None and res.status_code != 200:
+        return False, f"재조회 실패: {res.text}", None
+    key, val = _read_expanded_search_from_obj(verify_obj)
+    if key is None:
+        keys_preview = ", ".join(list((verify_obj or {}).keys())[:35]) if isinstance(verify_obj, dict) else ""
+        return False, "재조회 응답에 신규 확장검색 확인 필드가 없습니다." + (f" 확인된 key: {keys_preview}" if keys_preview else ""), verify_obj
+    if not _same_expanded_search_value(val, expected_enabled):
+        return False, f"반영값 불일치({key}: 요청 {expected_enabled} / 확인 {val})", verify_obj
+    return True, f"반영값 확인 완료({key}={val})", verify_obj
+
+
+def _verify_adgroup_legacy_search_options(api_key: str, secret_key: str, cid: str, adgroup_id: str, expected_values: Dict[str, Any], response_obj: Optional[Dict[str, Any]] = None) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+    # 구형 키워드 확장 Beta 필드가 응답에 실제 존재하는 계정/상품용 검증.
+    obj = response_obj if isinstance(response_obj, dict) else None
+    if obj is None:
+        res, obj = _fetch_adgroup_detail(api_key, secret_key, cid, adgroup_id)
+        if res is not None and res.status_code != 200:
+            return False, f"재조회 실패: {res.text}", None
+    if not isinstance(obj, dict):
+        return False, "재조회 응답이 비어 있어 legacy 검색옵션 반영 여부를 확인하지 못했습니다.", None
+    missing: List[str] = []
+    mismatches: List[str] = []
+    for key, expected in (expected_values or {}).items():
+        if key not in obj:
+            missing.append(key)
+            continue
+        actual = obj.get(key)
+        if not _same_search_option_value(key, actual, expected):
+            mismatches.append(f"{key}: 요청 {expected} / 확인 {actual}")
+    if missing:
+        return False, "legacy 확인 필드 없음: " + ", ".join(missing[:3]), obj
+    if mismatches:
+        return False, "legacy 반영값 불일치: " + " / ".join(mismatches[:3]), obj
+    return True, "legacy 반영값 확인 완료", obj
+
+
+def _sanitize_adgroup_for_expanded_search_update(obj: Dict[str, Any], cid: str, update_values: Dict[str, Any]) -> Dict[str, Any]:
+    payload = _prepare_adgroup_full_update_obj_for_search_options(obj or {}, cid, update_values, sanitized=True)
+    for key in [
+        "targetSummary", "targets", "raw", "status", "statusReason", "expectCost",
+        "sharedDailyBudget", "sharedBudgetName", "sharedBudgetLock", "sharedBudgetExpectCost",
+    ]:
+        payload.pop(key, None)
+    return {k: v for k, v in payload.items() if v is not None}
+
+
+def _put_adgroup_expanded_search_candidate(api_key: str, secret_key: str, cid: str, adgroup_id: str, base_obj: Dict[str, Any], field_param: Optional[str], payload_values: Dict[str, Any], full_payload: bool = False):
+    if full_payload:
+        payload = _sanitize_adgroup_for_expanded_search_update(base_obj or {}, cid, payload_values)
+    else:
+        payload = dict(payload_values)
+    params = {"fields": field_param} if field_param else None
+    return _do_req("PUT", api_key, secret_key, cid, f"/ncc/adgroups/{adgroup_id}", params=params, json_body=payload)
+
+
+def _normalize_expanded_budget_ratio(value: Any) -> Optional[int]:
+    if str(value or "").strip() == "":
+        return None
+    try:
+        n = int(float(value))
+    except Exception:
+        return None
+    return max(1, min(100, n))
+
+
+def _expanded_search_candidates(obj: Dict[str, Any], expected_enabled: bool, keyword_plus_weight: Optional[int] = None, use_close_variant: Optional[bool] = None) -> List[Dict[str, Any]]:
+    detected_key, detected_val = _read_expanded_search_from_obj(obj)
+    detected_budget_key, detected_budget_val = _read_expanded_budget_ratio_from_obj(obj)
+    budget_ratio = _normalize_expanded_budget_ratio(keyword_plus_weight)
+    candidates: List[Dict[str, Any]] = []
+    seen = set()
+
+    def add(label: str, field_param: Optional[str], values: Dict[str, Any], full_payload: bool = False, verify_kind: str = "expanded", verify_values: Optional[Dict[str, Any]] = None):
+        clean = {k: v for k, v in (values or {}).items() if v is not None}
+        if not clean:
+            return
+        sig = (label, field_param or "", json.dumps(clean, ensure_ascii=False, sort_keys=True), bool(full_payload), verify_kind)
+        if sig in seen:
+            return
+        seen.add(sig)
+        candidates.append({
+            "label": label,
+            "field_param": field_param,
+            "values": clean,
+            "full_payload": bool(full_payload),
+            "verify_kind": verify_kind,
+            "verify_values": verify_values or clean,
+        })
+
+    def maybe_with_budget(values: Dict[str, Any]) -> Dict[str, Any]:
+        out = dict(values or {})
+        if budget_ratio is not None:
+            if detected_budget_key:
+                out[detected_budget_key] = budget_ratio
+            else:
+                out["expandedSearchBudgetRatio"] = budget_ratio
+        return out
+
+    # 1) PC/MO 입찰가중치처럼 전체 광고그룹 update(no fields)를 먼저 시도한다.
+    #    3726은 fields 부분수정에서 주로 발생하므로, fields 없는 전체 update가 가장 안전한 우선 전략이다.
+    if detected_key:
+        prefer_int = isinstance(detected_val, int) and not isinstance(detected_val, bool)
+        value = _coerce_expanded_search_payload_value(detected_key, expected_enabled, prefer_int=prefer_int)
+        add(f"full/no-fields/detected-{detected_key}", None, maybe_with_budget({detected_key: value}), True, "expanded")
+
+    current_key_candidates = [
+        # 실제 조회 응답에서 확인된 현재 API 필드 우선
+        ("useExpSearch", bool(expected_enabled)),
+        ("expSearch", bool(expected_enabled)),
+        ("useExpandedSearch", bool(expected_enabled)),
+        ("usingExpandedSearch", 1 if expected_enabled else 0),
+        ("useExtendedSearch", bool(expected_enabled)),
+        ("usingExtendedSearch", 1 if expected_enabled else 0),
+        ("expandedSearch", bool(expected_enabled)),
+        ("expandedSearchUse", 1 if expected_enabled else 0),
+        ("expandedSearchFlag", 1 if expected_enabled else 0),
+        ("expandedSearchEnabled", bool(expected_enabled)),
+    ]
+    for key, value in current_key_candidates:
+        add(f"full/no-fields/{key}", None, maybe_with_budget({key: value}), True, "expanded")
+
+    # 2) 구형 필드가 아직 응답에 존재하는 계정 대비: 전체 update(no fields)로 먼저 시도한다.
+    #    fields=useKeywordPlus/useCloseVariant는 현재 3726이 날 수 있으므로 fallback 맨 뒤에 둔다.
+    legacy_values = {
+        "useKeywordPlus": bool(expected_enabled),
+        "useCloseVariant": True if use_close_variant is None else _normalize_bool_for_api(use_close_variant, True),
+        "keywordPlusWeight": budget_ratio if expected_enabled and budget_ratio is not None else (100 if expected_enabled else 0),
+    }
+    if any(k in (obj or {}) for k in _LEGACY_SEARCH_OPTION_KEYS):
+        add("full/no-fields/legacy-useKeywordPlus-useCloseVariant", None, legacy_values, True, "legacy", legacy_values)
+    else:
+        # 응답에 필드가 없어도 일부 계정에서 전체 update로만 받아주는 경우가 있어 한 번은 시도한다.
+        add("full/no-fields/legacy-compat", None, legacy_values, True, "legacy", legacy_values)
+
+    # 3) fields 부분수정은 뒤쪽 fallback으로만 사용한다. 3726이 나도 전체 그룹 반복 실패를 피하기 위해 메시지를 축약한다.
+    if detected_key:
+        prefer_int = isinstance(detected_val, int) and not isinstance(detected_val, bool)
+        value = _coerce_expanded_search_payload_value(detected_key, expected_enabled, prefer_int=prefer_int)
+        add(f"fields/detected-{detected_key}", detected_key, {detected_key: value}, False, "expanded")
+    for key, value in current_key_candidates:
+        add(f"fields/{key}", key, {key: value}, False, "expanded")
+
+    # legacy fields fallback은 정말 마지막.
+    add("fields/legacy-useKeywordPlus", "useKeywordPlus,keywordPlusWeight,useCloseVariant", legacy_values, False, "legacy", legacy_values)
+    return candidates
+
+
+def _compact_api_error(text: str, max_len: int = 180) -> str:
+    t = str(text or "").strip()
+    if len(t) > max_len:
+        return t[:max_len] + "..."
+    return t
+
+
 def _update_adgroup_search_options(api_key: str, secret_key: str, cid: str, adgroup_id: str, use_keyword_plus: Optional[bool] = None, keyword_plus_weight: Optional[int] = None, use_close_variant: Optional[bool] = None):
-    if use_keyword_plus is None and keyword_plus_weight is None and use_close_variant is None:
-        return True, "변경사항 없음"
+    expected_expanded = _expanded_search_expected_from_inputs(use_keyword_plus, use_close_variant)
+    if expected_expanded is None:
+        return True, f"변경사항 없음 · patch={PATCH_VERSION}"
+
     res_get = _do_req("GET", api_key, secret_key, cid, f"/ncc/adgroups/{adgroup_id}")
     if res_get.status_code != 200:
-        return False, f"광고그룹 조회 실패: {res_get.text}"
+        return False, f"광고그룹 조회 실패: {res_get.text} · patch={PATCH_VERSION}"
     obj = res_get.json() or {}
-    fields: List[str] = []
-    ignored_msgs: List[str] = []
-    if use_keyword_plus is not None:
-        obj["useKeywordPlus"] = bool(use_keyword_plus)
-        fields.append("useKeywordPlus")
-        if keyword_plus_weight is None:
-            keyword_plus_weight = int(obj.get("keywordPlusWeight") or 100)
+    if str(obj.get("adgroupType") or "").upper() != "WEB_SITE":
+        return True, f"파워링크 그룹이 아니어서 검색옵션 변경 건너뜀 · patch={PATCH_VERSION}"
+
+    current_key, current_value = _read_expanded_search_from_obj(obj)
+    if current_key is not None and _same_expanded_search_value(current_value, expected_expanded):
+        return True, f"이미 요청값과 동일({current_key}={current_value}) · patch={PATCH_VERSION}"
+
+    failed_details: List[str] = []
+    last_verify_obj: Optional[Dict[str, Any]] = obj
+    not_support_seen = 0
+    for cand in _expanded_search_candidates(obj, expected_expanded, keyword_plus_weight=keyword_plus_weight, use_close_variant=use_close_variant):
+        label = str(cand.get("label") or "candidate")
+        field_param = cand.get("field_param")
+        values = cand.get("values") or {}
+        full_payload = bool(cand.get("full_payload"))
+        verify_kind = str(cand.get("verify_kind") or "expanded")
         try:
-            keyword_plus_weight = max(1, min(999999, int(keyword_plus_weight)))
-        except Exception:
-            keyword_plus_weight = 100
-        obj["keywordPlusWeight"] = int(keyword_plus_weight)
-        fields.append("keywordPlusWeight")
-    elif keyword_plus_weight is not None:
+            res = _put_adgroup_expanded_search_candidate(api_key, secret_key, cid, adgroup_id, last_verify_obj or obj, field_param, values, full_payload=full_payload)
+        except Exception as e:
+            failed_details.append(f"{label}: 요청 예외 {e}")
+            continue
+        response_text = res.text if res is not None else "응답 없음"
+        response_obj = None
         try:
-            keyword_plus_weight = max(1, min(999999, int(keyword_plus_weight)))
+            response_obj = res.json() if res is not None and response_text else None
         except Exception:
-            keyword_plus_weight = 100
-        obj["keywordPlusWeight"] = int(keyword_plus_weight)
-        fields.append("keywordPlusWeight")
-    if use_close_variant is not None:
-        obj["useCloseVariant"] = bool(use_close_variant)
-        fields.append("useCloseVariant")
-    fields = list(dict.fromkeys(fields))
-    if not fields:
-        return True, " / ".join(ignored_msgs) if ignored_msgs else "변경사항 없음"
-    def _put_with_fields(active_fields: List[str]):
-        return _do_req(
-            "PUT", api_key, secret_key, cid, f"/ncc/adgroups/{adgroup_id}",
-            params={"fields": ",".join(active_fields)}, json_body=obj
-        )
-    res_put = _put_with_fields(fields)
-    if res_put.status_code in [200, 201]:
-        msg = "광고그룹 검색옵션 업데이트 완료"
-        if ignored_msgs:
-            msg += " / " + " / ".join(ignored_msgs)
-        return True, msg
-    detail = res_put.text if res_put is not None else ""
-    if use_close_variant is not None and ("Not support modify field" in detail or '3726' in detail):
-        retry_fields = [x for x in fields if x != "useCloseVariant"]
-        if retry_fields:
-            res_retry = _put_with_fields(retry_fields)
-            if res_retry.status_code in [200, 201]:
-                return True, "광고그룹 검색옵션 업데이트 완료 / 일치검색은 API 수정 미지원으로 적용 제외"
-        return False, detail
-    return False, detail
+            response_obj = None
+
+        if res is not None and res.status_code in [200, 201, 204]:
+            if verify_kind == "legacy":
+                ok_verify, verify_msg, verify_obj = _verify_adgroup_legacy_search_options(api_key, secret_key, cid, adgroup_id, cand.get("verify_values") or values, response_obj if isinstance(response_obj, dict) else None)
+            else:
+                ok_verify, verify_msg, verify_obj = _verify_adgroup_expanded_search(api_key, secret_key, cid, adgroup_id, expected_expanded, response_obj if isinstance(response_obj, dict) else None)
+            if isinstance(verify_obj, dict):
+                last_verify_obj = verify_obj
+            if ok_verify:
+                msg = f"확장검색 {'사용' if expected_expanded else '미사용'} 적용 완료 ({label}, {verify_msg}) · patch={PATCH_VERSION}"
+                if use_close_variant is not None:
+                    msg += " · 일치검색은 현재 네이버 기본 동작으로 유지됩니다."
+                return True, msg
+            failed_details.append(f"{label}: 응답 성공이나 {verify_msg}")
+            continue
+
+        short_text = _compact_api_error(response_text)
+        if '"code":3726' in short_text.replace(" ", "") or "Not support modify field" in short_text:
+            not_support_seen += 1
+            # 같은 3726이 길게 반복되지 않게 label만 남긴다.
+            failed_details.append(f"{label}: 3726 Not support modify field")
+        else:
+            failed_details.append(f"{label}: {short_text}")
+
+    checked_keys = ", ".join(list((last_verify_obj or obj or {}).keys())[:35]) if isinstance((last_verify_obj or obj), dict) else ""
+    prefix = "광고그룹 확장검색/일치검색 변경 실패 또는 미반영"
+    if not_support_seen:
+        prefix += f" (fields 방식 3726 {not_support_seen}회 감지, no-fields 전체 update도 함께 시도함)"
+    detail = " / ".join(failed_details[:10])
+    if checked_keys:
+        detail += f" / 확인된 광고그룹 응답 key: {checked_keys}"
+    return False, f"{prefix}: {detail} · patch={PATCH_VERSION}"
+
 def _extract_restricted_rows_from_target(target_obj: Dict[str, Any]) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     if not isinstance(target_obj, dict):
@@ -3540,8 +4269,10 @@ def _extract_adgroup(src, target_camp_id, cid, biz_channel_id):
         if k in src:
             res[k] = src[k]
     if str(src.get("adgroupType") or "").upper() == "WEB_SITE":
-        for k in ["useKeywordPlus", "keywordPlusWeight", "useCloseVariant"]:
-            if k in src:
+        # 확장검색/예산비율은 광고그룹 생성 payload에도 최대한 포함하고,
+        # 생성 후 _copy_adgroup_search_option_settings에서 한 번 더 검증/보정한다.
+        for k in list(_EXPANDED_SEARCH_RESPONSE_KEYS) + list(_EXPANDED_SEARCH_BUDGET_RATIO_KEYS) + ["useKeywordPlus", "keywordPlusWeight", "useCloseVariant"]:
+            if k in src and src.get(k) is not None:
                 res[k] = src.get(k)
     return res
 def _delete_entity_by_id(api_key: str, secret_key: str, cid: str, entity_type: str, entity_id: str):
@@ -3780,7 +4511,7 @@ def export_account_ads_excel():
     scope_label = "선택 캠페인만" if scope == "campaign" else "계정 전체"
     wb = _build_asset_lookup_workbook(rows, "계정 등록 소재 조회", scope_label, [
         ("campaignName", "캠페인명"), ("adgroupName", "광고그룹명"), ("type", "소재유형"), ("status", "상태"),
-        ("summary", "요약"), ("adId", "소재 ID"), ("campaignId", "캠페인 ID"), ("adgroupId", "광고그룹 ID"),
+        ("summary", "요약"), ("effectiveBidAmt", "적용입찰가"), ("adBidAmt", "소재입찰가"), ("adUseGroupBidAmt", "그룹입찰가사용"), ("adgroupBidAmt", "광고그룹입찰가"), ("adId", "소재 ID"), ("campaignId", "캠페인 ID"), ("adgroupId", "광고그룹 ID"),
     ])
     output = io.BytesIO()
     wb.save(output)
@@ -3830,13 +4561,25 @@ def find_powerlink_duplicate_keywords():
     api_key = d.get("api_key")
     secret_key = d.get("secret_key")
     cid = d.get("customer_id")
-    campaign_ids = d.get("campaign_ids") or []
+    campaign_ids = [str(x or "").strip() for x in (d.get("campaign_ids") or []) if str(x or "").strip()]
+    adgroup_ids = [str(x or "").strip() for x in (d.get("adgroup_ids") or []) if str(x or "").strip()]
+    duplicate_scope = str(d.get("duplicate_scope") or "selected_campaigns").strip()
+    target_scope = str(d.get("target_scope") or d.get("search_scope") or "selected_campaigns").strip().lower()
+    if target_scope not in {"selected_campaigns", "selected_adgroups"}:
+        target_scope = "selected_adgroups" if adgroup_ids else "selected_campaigns"
     if not api_key or not secret_key or not cid:
         return jsonify({"error": "API 정보 및 광고주를 선택해주세요."}), 400
-    if not campaign_ids:
+    if target_scope == "selected_adgroups" and not adgroup_ids:
+        return jsonify({"error": "선택 그룹내 조회를 사용하려면 좌측에서 광고그룹을 체크해주세요."}), 400
+    if target_scope == "selected_campaigns" and not campaign_ids:
         return jsonify({"error": "캠페인을 1개 이상 선택해주세요."}), 400
     try:
-        result = _find_powerlink_duplicate_keywords(api_key, secret_key, cid, campaign_ids)
+        result = _find_powerlink_duplicate_keywords(
+            api_key, secret_key, cid, campaign_ids,
+            duplicate_scope=duplicate_scope,
+            adgroup_ids=adgroup_ids,
+            target_scope=target_scope,
+        )
         return jsonify({"ok": True, **result})
     except Exception as e:
         return jsonify({"error": "중복 키워드 조회 실패", "details": str(e)}), 400
@@ -3853,6 +4596,43 @@ def find_account_powerlink_duplicate_keywords():
         return jsonify({"ok": True, **result})
     except Exception as e:
         return jsonify({"error": "계정 중복 키워드 조회 실패", "details": str(e)}), 400
+@app.route("/export_powerlink_duplicate_keywords_excel", methods=["POST"])
+def export_powerlink_duplicate_keywords_excel():
+    d = request.json or {}
+    api_key = str(d.get("api_key") or "").strip()
+    secret_key = str(d.get("secret_key") or "").strip()
+    cid = str(d.get("customer_id") or "").strip()
+    campaign_ids = [str(x or "").strip() for x in (d.get("campaign_ids") or []) if str(x or "").strip()]
+    adgroup_ids = [str(x or "").strip() for x in (d.get("adgroup_ids") or []) if str(x or "").strip()]
+    duplicate_scope = str(d.get("duplicate_scope") or "selected_campaigns").strip()
+    target_scope = str(d.get("target_scope") or d.get("search_scope") or "selected_campaigns").strip().lower()
+    if target_scope not in {"selected_campaigns", "selected_adgroups"}:
+        target_scope = "selected_adgroups" if adgroup_ids else "selected_campaigns"
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API 정보 및 광고주를 선택해주세요."}), 400
+    if target_scope == "selected_adgroups" and not adgroup_ids:
+        return jsonify({"error": "선택 그룹내 조회를 사용하려면 좌측에서 광고그룹을 체크해주세요."}), 400
+    if target_scope == "selected_campaigns" and not campaign_ids:
+        return jsonify({"error": "캠페인을 1개 이상 선택해주세요."}), 400
+    try:
+        result = _find_powerlink_duplicate_keywords(
+            api_key, secret_key, cid, campaign_ids,
+            duplicate_scope=duplicate_scope,
+            adgroup_ids=adgroup_ids,
+            target_scope=target_scope,
+        )
+        rows = result.get("rows") or []
+        if not rows:
+            return jsonify({"error": "내보낼 중복 키워드가 없습니다.", "details": result.get("message") or "중복 키워드가 없습니다."}), 400
+        scope_label = result.get("duplicate_scope_label") or result.get("target_scope_label") or "선택 캠페인"
+        wb = _build_powerlink_duplicate_keyword_workbook(result, scope_label=scope_label)
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        return send_file(output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name=f"powerlink_duplicate_keywords_{stamp}.xlsx")
+    except Exception as e:
+        return jsonify({"error": "중복 키워드 엑셀 다운로드 실패", "details": str(e)}), 400
 @app.route("/get_powerlink_keyword_stats", methods=["POST"])
 def get_powerlink_keyword_stats():
     d = request.json or {}
@@ -4002,6 +4782,79 @@ def get_action_logs():
         return jsonify(_read_action_logs(limit))
     except Exception as e:
         return jsonify({"error": "작업 로그 조회 실패", "details": str(e)}), 500
+
+@app.route("/export_action_logs_excel", methods=["GET"])
+def export_action_logs_excel():
+    try:
+        limit_raw = str(request.args.get("limit") or str(_ACTION_LOG_MAX_LINES)).strip()
+        try:
+            limit = int(limit_raw)
+        except Exception:
+            limit = _ACTION_LOG_MAX_LINES
+        if limit <= 0:
+            limit = _ACTION_LOG_MAX_LINES
+        limit = min(limit, _ACTION_LOG_MAX_LINES)
+
+        rows = _read_action_logs(limit)
+        if not rows:
+            return jsonify({"error": "다운로드할 작업 로그가 없습니다."}), 404
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "작업이력로그"
+        headers = [
+            "번호", "일시", "상태", "HTTP상태", "작업", "광고주ID",
+            "요약", "메시지", "요청경로"
+        ]
+        ws.append(headers)
+
+        header_fill = PatternFill("solid", fgColor="E8F0FE")
+        header_font = Font(bold=True)
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        for idx, row in enumerate(rows, 1):
+            status_raw = str(row.get("status") or "").strip().lower()
+            status_label = "실패" if status_raw == "error" else "성공"
+            ws.append([
+                idx,
+                row.get("ts") or "",
+                status_label,
+                row.get("http_status") or "",
+                row.get("action") or "",
+                row.get("customer_id") or "",
+                row.get("summary") or "",
+                row.get("message") or "",
+                row.get("path") or "",
+            ])
+
+        widths = {
+            "A": 8, "B": 20, "C": 10, "D": 12, "E": 24,
+            "F": 18, "G": 46, "H": 58, "I": 36,
+        }
+        for col, width in widths.items():
+            ws.column_dimensions[col].width = width
+        for row_cells in ws.iter_rows(min_row=2):
+            for cell in row_cells:
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+        ws.freeze_panes = "A2"
+        ws.auto_filter.ref = ws.dimensions
+
+        bio = io.BytesIO()
+        wb.save(bio)
+        bio.seek(0)
+        filename = f"action_logs_{time.strftime('%Y%m%d_%H%M%S')}.xlsx"
+        return send_file(
+            bio,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=filename,
+        )
+    except Exception as e:
+        return jsonify({"error": "작업 로그 엑셀 다운로드 실패", "details": str(e)}), 500
+
 @app.route("/clear_action_logs", methods=["POST"])
 def clear_action_logs():
     try:
@@ -4134,8 +4987,8 @@ def create_adgroup_simple():
             if not ok_media_network:
                 warnings.append(f"세부 매체 적용 실패: {detail_media_network}")
             if is_web_campaign:
-                ukp = None if use_keyword_plus is None else bool(use_keyword_plus)
-                ucv = None if use_close_variant is None else bool(use_close_variant)
+                ukp = None if use_keyword_plus is None else _normalize_bool_for_api(use_keyword_plus, False)
+                ucv = None if use_close_variant is None else _normalize_bool_for_api(use_close_variant, False)
                 kwp = None
                 if str(keyword_plus_weight or "").strip() != "":
                     try:
@@ -5245,37 +6098,63 @@ def update_media():
             fail += 1
     status_code = 200 if success > 0 else 400
     return jsonify({"ok": success > 0, "message": f"총 {len(entity_ids)}개 매체 변경 성공: {success}개 / 실패: {fail}개", "success": success, "fail": fail, "results": results}), status_code
-@app.route("/update_adgroup_options", methods=["POST"])
-def update_adgroup_options():
-    d = request.json or {}
+def _handle_update_adgroup_options_request():
+    d = request.get_json(silent=True) or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
-    entity_ids = [str(x).strip() for x in (d.get("entity_ids") or []) if str(x).strip()]
+    raw_entity_ids = [str(x).strip() for x in (d.get("entity_ids") or []) if str(x).strip()]
+    entity_type = str(d.get("entity_type") or d.get("scope") or "adgroup").strip().lower()
+    if entity_type not in {"campaign", "adgroup"}:
+        return jsonify({"error": "entity_type은 campaign 또는 adgroup 이어야 합니다."}), 400
     media_type = d.get("media_type")
     media_detail = _normalize_media_detail(d.get("media_detail"))
     use_keyword_plus = d.get("use_keyword_plus")
     use_close_variant = d.get("use_close_variant")
     keyword_plus_weight = d.get("keyword_plus_weight")
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API Key / Secret Key / Customer ID가 필요합니다."}), 400
+    if not raw_entity_ids:
+        return jsonify({"error": "선택된 캠페인 또는 광고그룹이 없습니다."}), 400
+
+    if entity_type == "campaign":
+        entity_ids, resolve_warnings = _resolve_bulk_target_adgroup_ids(api_key, secret_key, cid, "campaign", raw_entity_ids, [])
+    else:
+        entity_ids, resolve_warnings = _resolve_bulk_target_adgroup_ids(api_key, secret_key, cid, "adgroup", [], raw_entity_ids)
+    entity_ids = _unique_keep_order([str(x).strip() for x in (entity_ids or []) if str(x).strip()])
     if not entity_ids:
-        return jsonify({"error": "선택된 광고그룹이 없습니다."}), 400
+        msg = "적용할 광고그룹이 없습니다."
+        if resolve_warnings:
+            msg += "\n" + "\n".join(resolve_warnings[:10])
+        return jsonify({"error": msg, "ok": False, "patch_version": PATCH_VERSION}), 400
+
     results = []
-    success = fail = skipped = 0
+    success = fail = skipped = unchanged = 0
+    for warn in (resolve_warnings or []):
+        results.append({"nccAdgroupId": "", "name": "확인", "ok": None, "detail": warn})
+
     for adg_id in entity_ids:
         detail_res, adgroup_obj = _fetch_adgroup_detail(api_key, secret_key, cid, adg_id)
         if detail_res.status_code != 200 or not adgroup_obj:
             fail += 1
             results.append({"nccAdgroupId": adg_id, "ok": False, "detail": f"광고그룹 조회 실패: {detail_res.text}"})
             continue
+        name = str(adgroup_obj.get("name") or adg_id)
         row_msgs: List[str] = []
         row_ok = True
+        row_changed = False
+
         if str(media_type or "").strip() != "" or d.get("media_detail") is not None:
             ok_media_pm, detail_media_pm = _update_pc_mobile_target(api_key, secret_key, cid, adg_id, media_type or "ALL")
             row_msgs.append(f"PC/모바일 매체: {detail_media_pm}")
             row_ok = row_ok and ok_media_pm
+            row_changed = row_changed or bool(ok_media_pm)
             ok_media_network, detail_media_network = _update_media_target(api_key, secret_key, cid, adg_id, media_detail)
             row_msgs.append(f"세부 매체: {detail_media_network}")
             row_ok = row_ok and ok_media_network
+            row_changed = row_changed or bool(ok_media_network)
+
         is_web_site = str(adgroup_obj.get("adgroupType") or "").upper() == "WEB_SITE"
-        if use_keyword_plus is not None or use_close_variant is not None or str(keyword_plus_weight or "").strip() != "":
+        wants_search_options = (use_keyword_plus is not None) or (use_close_variant is not None) or (str(keyword_plus_weight or "").strip() != "")
+        if wants_search_options:
             if not is_web_site:
                 skipped += 1
                 row_msgs.append("파워링크 그룹이 아니어서 확장검색/일치검색은 건너뜀")
@@ -5283,26 +6162,145 @@ def update_adgroup_options():
                 kwp = None
                 if str(keyword_plus_weight or "").strip() != "":
                     try:
-                        kwp = int(keyword_plus_weight)
+                        kwp = int(float(keyword_plus_weight))
                     except Exception:
+                        row_ok = False
                         kwp = None
-                ok_opts, detail_opts = _update_adgroup_search_options(api_key, secret_key, cid, adg_id, use_keyword_plus=None if use_keyword_plus is None else bool(use_keyword_plus), keyword_plus_weight=kwp, use_close_variant=None if use_close_variant is None else bool(use_close_variant))
-                row_msgs.append(f"검색옵션: {detail_opts}")
-                row_ok = row_ok and ok_opts
+                        row_msgs.append("검색옵션: 확장검색 예산비율은 숫자로 입력해주세요.")
+                if row_ok:
+                    ok_opts, detail_opts = _update_adgroup_search_options(
+                        api_key, secret_key, cid, adg_id,
+                        use_keyword_plus=None if use_keyword_plus is None else _normalize_bool_for_api(use_keyword_plus, False),
+                        keyword_plus_weight=kwp,
+                        use_close_variant=None if use_close_variant is None else _normalize_bool_for_api(use_close_variant, False),
+                    )
+                    row_msgs.append(f"검색옵션: {detail_opts}")
+                    row_ok = row_ok and ok_opts
+                    if ok_opts and not str(detail_opts or "").startswith("이미 요청값과 동일"):
+                        row_changed = True
+
         if row_ok:
-            success += 1
+            if row_changed:
+                success += 1
+            else:
+                unchanged += 1
         else:
             fail += 1
-        results.append({"nccAdgroupId": adg_id, "ok": row_ok, "detail": " | ".join(row_msgs) if row_msgs else "변경 완료"})
-    status_code = 200 if success > 0 else 400
-    return jsonify({
-        "ok": success > 0,
-        "message": f"총 {len(entity_ids)}개 광고그룹 설정 변경 완료 · 성공 {success}개 / 실패 {fail}개 / 건너뜀 {skipped}개",
+        results.append({"nccAdgroupId": adg_id, "name": name, "ok": row_ok, "detail": " | ".join(row_msgs) if row_msgs else "변경 완료"})
+
+    _cache_invalidate(api_key, secret_key, cid)
+    tone_ok = success > 0 or unchanged > 0
+    status_code = 200 if tone_ok else 400
+    scope_label = "선택 캠페인 하위" if entity_type == "campaign" else "선택 광고그룹"
+    message = f"{scope_label} 총 {len(entity_ids)}개 광고그룹 설정 변경 완료 · 변경 {success}개 / 유지 {unchanged}개 / 실패 {fail}개 / 건너뜀 {skipped}개"
+    resp = {
+        "ok": tone_ok,
+        "message": message,
         "success": success,
+        "unchanged": unchanged,
         "fail": fail,
         "skipped": skipped,
         "results": results,
-    }), status_code
+        "patch_version": PATCH_VERSION,
+    }
+    if not tone_ok:
+        resp["error"] = message + ("\n" + "\n".join([f"[{r.get('name') or r.get('nccAdgroupId')}] {r.get('detail')}" for r in results[:5]]) if results else "")
+    return jsonify(resp), status_code
+
+@app.route("/update_adgroup_search_options", methods=["GET", "POST", "OPTIONS"])
+@app.route("/update_adgroup_search_options/", methods=["GET", "POST", "OPTIONS"])
+@app.route("/update_adgroup_options", methods=["GET", "POST", "OPTIONS"])
+@app.route("/update_adgroup_options/", methods=["GET", "POST", "OPTIONS"])
+def update_adgroup_options():
+    if request.method == "OPTIONS":
+        return Response(status=204)
+    if request.method == "GET":
+        return jsonify({"ok": False, "error": "이 기능은 POST 요청으로만 실행됩니다. 화면의 버튼으로 다시 실행해주세요."}), 400
+    return _handle_update_adgroup_options_request()
+
+
+@app.route("/update_powerlink_device_bid_weights", methods=["POST"])
+def update_powerlink_device_bid_weights():
+    d = request.get_json(silent=True) or {}
+    api_key = d.get("api_key")
+    secret_key = d.get("secret_key")
+    cid = d.get("customer_id")
+    raw_pc_weight = d.get("pc_bid_weight")
+    raw_mobile_weight = d.get("mobile_bid_weight")
+    pc_weight = _normalize_optional_bid_weight(raw_pc_weight)
+    mobile_weight = _normalize_optional_bid_weight(raw_mobile_weight)
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API Key / Secret Key / Customer ID가 필요합니다."}), 400
+    if str(raw_pc_weight or "").strip() and pc_weight is None:
+        return jsonify({"error": "PC 입찰가중치는 10~500% 사이로 입력해주세요."}), 400
+    if str(raw_mobile_weight or "").strip() and mobile_weight is None:
+        return jsonify({"error": "모바일 입찰가중치는 10~500% 사이로 입력해주세요."}), 400
+    if pc_weight is None and mobile_weight is None:
+        return jsonify({"error": "변경할 PC 또는 모바일 입찰가중치를 1개 이상 입력해주세요."}), 400
+
+    scope = str(d.get("entity_type") or d.get("scope") or "adgroup").strip().lower()
+    entity_ids = [str(x).strip() for x in (d.get("entity_ids") or []) if str(x).strip()]
+    if not entity_ids:
+        return jsonify({"error": "좌측 체크박스에서 캠페인 또는 광고그룹을 선택해주세요."}), 400
+
+    campaign_ids = entity_ids if scope == "campaign" else []
+    adgroup_ids = entity_ids if scope != "campaign" else []
+    target_adgroup_ids, warnings = _resolve_bulk_target_adgroup_ids(api_key, secret_key, cid, scope, campaign_ids, adgroup_ids)
+    if not target_adgroup_ids:
+        msg = "적용할 광고그룹이 없습니다."
+        if warnings:
+            msg += "\n" + "\n".join(warnings[:10])
+        return jsonify({"error": msg}), 400
+
+    success = 0
+    unchanged = 0
+    fail = 0
+    skipped = 0
+    details: List[str] = list(warnings)
+    preferred_strategy: Optional[str] = None
+    hard_stop = False
+
+    for adg_id in target_adgroup_ids:
+        ok, detail, obj, meta = _update_powerlink_device_bid_weight_for_adgroup(
+            api_key, secret_key, cid, adg_id, pc_weight, mobile_weight, preferred_strategy=preferred_strategy
+        )
+        name = str((obj or {}).get("name") or adg_id)
+        if ok is None:
+            skipped += 1
+            details.append(f"[{name}] 건너뜀: {detail}")
+            continue
+        if ok:
+            strategy = str((meta or {}).get("strategy") or "")
+            if strategy and strategy not in {"unchanged", "none"}:
+                preferred_strategy = strategy
+            if strategy == "unchanged" or str(detail or "").startswith("이미 동일값"):
+                unchanged += 1
+                details.append(f"[{name}] 유지: {detail}")
+            else:
+                success += 1
+                details.append(f"[{name}] 변경 완료: {detail}")
+            continue
+        fail += 1
+        details.append(f"[{name}] 변경 실패: {detail}")
+        if (meta or {}).get("unsupported_field"):
+            hard_stop = True
+            break
+
+    _cache_invalidate(api_key, secret_key, cid)
+    total_done = success + unchanged + fail + skipped
+    stopped_msg = " / 미지원 응답 감지로 나머지 그룹 적용 중단" if hard_stop and total_done < len(target_adgroup_ids) else ""
+    tone_ok = success > 0 or unchanged > 0
+    return jsonify({
+        "ok": tone_ok,
+        "success": success,
+        "unchanged": unchanged,
+        "fail": fail,
+        "skipped": skipped,
+        "message": f"파워링크 PC/모바일 입찰가중치 변경 완료 · 변경 {success}개 / 유지 {unchanged}개 / 실패 {fail}개 / 건너뜀 {skipped}개{stopped_msg}"
+                   + ("\n" + "\n".join(details[:30]) if details else ""),
+        "details": details,
+    }), (200 if tone_ok else 400)
+
 @app.route("/apply_target_settings_bulk", methods=["POST"])
 def apply_target_settings_bulk():
     d = request.get_json(silent=True) or {}
@@ -5433,10 +6431,14 @@ def _normalize_schedule_days(values: Any) -> List[int]:
             out.append(n)
     return out
 def _normalize_schedule_hours(values: Any) -> List[int]:
-    raw: List[int] = []
+    """Return selected one-hour slots as 0~23 integers.
+
+    선택한 시간 슬롯은 그대로 보존하고, 코드 생성 단계에서 연속 슬롯을
+    14~16처럼 하나의 구간으로 병합합니다.
+    """
     if not isinstance(values, list):
-        return raw
-    uniq: List[int] = []
+        return []
+    out: List[int] = []
     seen = set()
     for v in values:
         try:
@@ -5445,26 +6447,98 @@ def _normalize_schedule_hours(values: Any) -> List[int]:
             continue
         if 0 <= n <= 23 and n not in seen:
             seen.add(n)
-            uniq.append(n)
+            out.append(n)
+    out.sort()
+    return out
+
+def _merge_schedule_hour_ranges(hours: List[int]) -> List[Tuple[int, int]]:
+    """Merge hour slots into [start, end) ranges.
+
+    [14, 15] -> [(14, 16)]
+    [8, 9, 10, 11] -> [(8, 12)]
+    [0, 1, 22, 23] -> [(0, 2), (22, 24)]
+    """
+    uniq: List[int] = []
+    seen = set()
+    for v in hours or []:
+        try:
+            h = int(v)
+        except Exception:
+            continue
+        if 0 <= h <= 23 and h not in seen:
+            seen.add(h)
+            uniq.append(h)
     uniq.sort()
     if not uniq:
         return []
-    is_contiguous = len(uniq) >= 2 and all(uniq[i] == uniq[i - 1] + 1 for i in range(1, len(uniq)))
-    if is_contiguous:
-        return uniq[:-1]
-    return uniq
+    ranges: List[Tuple[int, int]] = []
+    start = prev = uniq[0]
+    for h in uniq[1:]:
+        if h == prev + 1:
+            prev = h
+            continue
+        ranges.append((start, prev + 1))
+        start = prev = h
+    ranges.append((start, prev + 1))
+    return ranges
+
 def _build_schedule_codes(days: List[int], hours: List[int]) -> List[str]:
     codes: List[str] = []
+    hour_ranges = _merge_schedule_hour_ranges(hours)
     for d_num in days:
         day_code = DAY_NUM_TO_CODE.get(int(d_num))
         if not day_code:
             continue
-        for h in hours:
-            start_h = int(h)
-            end_h = start_h + 1
-            if 0 <= start_h <= 23 and 1 <= end_h <= 24:
+        for start_h, end_h in hour_ranges:
+            if 0 <= start_h <= 23 and 1 <= end_h <= 24 and end_h > start_h:
                 codes.append(f"SD{day_code}{start_h:02d}{end_h:02d}")
     return codes
+
+def _schedule_code_to_slots(code: str) -> List[Tuple[str, int]]:
+    s = str(code or '').strip()
+    if not re.fullmatch(r"SD[A-Z]{3}\d{4}", s):
+        return []
+    day_code = s[2:5]
+    try:
+        start_h = int(s[5:7])
+        end_h = int(s[7:9])
+    except Exception:
+        return []
+    if not (0 <= start_h <= 23 and 1 <= end_h <= 24 and end_h > start_h):
+        return []
+    return [(day_code, h) for h in range(start_h, end_h)]
+
+def _schedule_map_to_slot_map(schedule_map: Dict[str, int]) -> Dict[Tuple[str, int], int]:
+    slots: Dict[Tuple[str, int], int] = {}
+    for code, weight in (schedule_map or {}).items():
+        try:
+            w = int(weight or 100)
+        except Exception:
+            w = 100
+        for slot in _schedule_code_to_slots(str(code)):
+            slots[slot] = w
+    return slots
+
+def _collapse_schedule_slot_map(slot_map: Dict[Tuple[str, int], int]) -> Dict[str, int]:
+    day_order = {v: i for i, v in DAY_NUM_TO_CODE.items()}
+    grouped: Dict[Tuple[str, int], List[int]] = defaultdict(list)
+    for (day_code, hour), weight in (slot_map or {}).items():
+        try:
+            h = int(hour)
+            w = int(weight or 100)
+        except Exception:
+            continue
+        if day_code not in day_order or not (0 <= h <= 23):
+            continue
+        grouped[(day_code, w)].append(h)
+    collapsed: Dict[str, int] = {}
+    for (day_code, weight), grouped_hours in sorted(
+        grouped.items(),
+        key=lambda item: (day_order.get(item[0][0], 99), min(item[1]) if item[1] else 99, item[0][1]),
+    ):
+        for start_h, end_h in _merge_schedule_hour_ranges(grouped_hours):
+            collapsed[f"SD{day_code}{start_h:02d}{end_h:02d}"] = int(weight)
+    return collapsed
 
 def _normalize_schedule_blocks(values: Any) -> List[Dict[str, Any]]:
     blocks: List[Dict[str, Any]] = []
@@ -5492,24 +6566,31 @@ def _normalize_schedule_blocks(values: Any) -> List[Dict[str, Any]]:
     return blocks
 
 def _build_schedule_weighted_codes(days: List[int], hours: List[int], bid_weight: int = 100, schedule_blocks: Optional[List[Dict[str, Any]]] = None) -> List[Tuple[str, int]]:
-    dedup: Dict[str, int] = {}
+    slot_map: Dict[Tuple[str, int], int] = {}
     if schedule_blocks:
         for block in schedule_blocks:
             block_days = _normalize_schedule_days(block.get("days") or []) or list(days or [])
             start_h = int(block.get("startHour", 0))
             end_h = int(block.get("endHour", 0))
             bw = int(block.get("bidWeight", 100))
+            if not (0 <= start_h <= 23 and 1 <= end_h <= 24 and end_h > start_h):
+                continue
             for d_num in block_days:
                 day_code = DAY_NUM_TO_CODE.get(int(d_num))
                 if not day_code:
                     continue
                 for h in range(start_h, end_h):
                     if 0 <= h <= 23:
-                        dedup[f"SD{day_code}{h:02d}{h+1:02d}"] = bw
+                        slot_map[(day_code, h)] = bw
     else:
-        for code in _build_schedule_codes(days, hours):
-            dedup[code] = int(bid_weight)
-    return [(code, weight) for code, weight in dedup.items()]
+        for d_num in days:
+            day_code = DAY_NUM_TO_CODE.get(int(d_num))
+            if not day_code:
+                continue
+            for h in _normalize_schedule_hours(hours):
+                slot_map[(day_code, h)] = int(bid_weight)
+    collapsed = _collapse_schedule_slot_map(slot_map)
+    return [(code, weight) for code, weight in collapsed.items()]
 
 def _extract_schedule_weight_map(rows: List[Dict[str, Any]]) -> Dict[str, int]:
     out: Dict[str, int] = {}
@@ -5534,18 +6615,20 @@ def _apply_schedule_action(existing_map: Dict[str, int], incoming_weighted_codes
             incoming_map[s] = int(weight)
         except Exception:
             incoming_map[s] = 100
-    base = dict(existing_map or {})
+
+    incoming_slots = _schedule_map_to_slot_map(incoming_map)
     if mode == "overwrite":
-        return incoming_map
+        return _collapse_schedule_slot_map(incoming_slots)
+
+    base_slots = _schedule_map_to_slot_map(existing_map or {})
     if mode == "add":
-        merged = dict(base)
-        merged.update(incoming_map)
-        return merged
+        base_slots.update(incoming_slots)
+        return _collapse_schedule_slot_map(base_slots)
     if mode == "delete":
-        for code in incoming_map.keys():
-            base.pop(code, None)
-        return base
-    return incoming_map
+        for slot in incoming_slots.keys():
+            base_slots.pop(slot, None)
+        return _collapse_schedule_slot_map(base_slots)
+    return _collapse_schedule_slot_map(incoming_slots)
 
 def _put_schedule_weight_map(api_key: str, secret_key: str, cid: str, owner_id: str, final_map: Dict[str, int]):
     owner_id = str(owner_id or "").strip()
@@ -5614,7 +6697,7 @@ def update_schedule():
     if not schedule_blocks and not raw_hours:
         return jsonify({"error": "시간을 1개 이상 선택해주세요."}), 400
     if not schedule_blocks and not hours:
-        return jsonify({"error": "연속 시간 선택 시 마지막 시간은 종료시각으로 처리됩니다. 예: 8~20 선택 → 실제 적용 8~19"}), 400
+        return jsonify({"error": "적용할 시간대가 없습니다. 예: 14·15 선택 → 실제 적용 14~16"}), 400
     weighted_codes = _build_schedule_weighted_codes(days, hours, bid_weight, schedule_blocks)
     codes = [code for code, _ in weighted_codes]
     if not codes and action_mode != "delete":
@@ -5698,7 +6781,7 @@ def update_schedule_campaign_bulk():
     if not schedule_blocks and not raw_hours:
         return jsonify({"error": "시간을 1개 이상 선택해주세요."}), 400
     if not schedule_blocks and not hours:
-        return jsonify({"error": "연속 시간 선택 시 마지막 시간은 종료시각으로 처리됩니다. 예: 8~20 선택 → 실제 적용 8~19"}), 400
+        return jsonify({"error": "적용할 시간대가 없습니다. 예: 14·15 선택 → 실제 적용 14~16"}), 400
     adgroup_ids = []
     fetch_errors = []
     for camp_id in campaign_ids:
@@ -5850,12 +6933,258 @@ def _normalize_bid_amt(value: Any, max_bid: Optional[int] = None) -> Optional[in
         bid = min(bid, int(max_bid))
     bid = max(70, min(100000, bid))
     return bid
+
+def _normalize_estimated_bid_amt(value: Any, max_bid: Optional[int] = None) -> Optional[int]:
+    try:
+        bid = float(value)
+    except Exception:
+        return None
+    if bid <= 0:
+        return None
+    bid = int(round(bid / 10.0) * 10)
+    if max_bid is not None:
+        bid = min(bid, int(max_bid))
+    bid = max(70, min(100000, bid))
+    return bid
 def _normalize_bid_weight(value: Any) -> Optional[int]:
     try:
         weight = int(float(value))
     except Exception:
         return None
     return max(10, min(500, weight))
+def _normalize_optional_bid_weight(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    if str(value).strip() == "":
+        return None
+    try:
+        weight = int(float(value))
+    except Exception:
+        return None
+    if not (10 <= weight <= 500):
+        return None
+    return weight
+
+def _safe_int_default(value: Any, default: int = 100) -> int:
+    try:
+        return int(float(value))
+    except Exception:
+        return int(default)
+
+def _is_not_support_modify_field_response(res: Any) -> bool:
+    try:
+        text = str(getattr(res, "text", "") or "")
+    except Exception:
+        text = ""
+    return ("Not support modify field" in text) or ('"code":3726' in text.replace(" ", "")) or ("code=3726" in text)
+
+
+def _device_bid_weight_strategy_candidates(pc_weight: Optional[int], mobile_weight: Optional[int], preferred_strategy: Optional[str] = None) -> List[Dict[str, Any]]:
+    # PC/MO 입찰가중치는 `fields=pcNetworkBidWeight` 형태의 부분수정에서 3726이 날 수 있다.
+    # 그래서 실제 광고그룹 객체를 조회한 뒤 값만 바꿔 전체 update(no fields)를 먼저 시도한다.
+    strategies: List[Dict[str, Any]] = []
+    target_parts: List[str] = []
+    if pc_weight is not None:
+        target_parts.append("pcNetworkBidWeight")
+    if mobile_weight is not None:
+        target_parts.append("mobileNetworkBidWeight")
+    if not target_parts:
+        return strategies
+
+    strategies.append({"kind": "full", "fields": "__FULL_SANITIZED__"})
+    strategies.append({"kind": "full", "fields": "__FULL_RAW__"})
+    if pc_weight is not None and mobile_weight is not None:
+        strategies.append({"kind": "combined", "fields": "pcNetworkBidWeight,mobileNetworkBidWeight"})
+        strategies.append({"kind": "combined", "fields": "networkBidWeight"})
+        strategies.append({"kind": "separate", "fields": "pcNetworkBidWeight|mobileNetworkBidWeight"})
+    elif pc_weight is not None:
+        strategies.append({"kind": "combined", "fields": "pcNetworkBidWeight"})
+    elif mobile_weight is not None:
+        strategies.append({"kind": "combined", "fields": "mobileNetworkBidWeight"})
+
+    if preferred_strategy:
+        preferred_strategy = str(preferred_strategy or "").strip()
+        preferred = [x for x in strategies if str(x.get("fields") or "") == preferred_strategy]
+        rest = [x for x in strategies if str(x.get("fields") or "") != preferred_strategy]
+        if preferred:
+            return preferred + rest
+    return strategies
+
+
+def _verify_powerlink_device_bid_weight(api_key: str, secret_key: str, cid: str, adgroup_id: str, target_pc: int, target_mobile: int):
+    _, verify_obj = _fetch_adgroup_detail(api_key, secret_key, cid, adgroup_id)
+    if not isinstance(verify_obj, dict):
+        return None, None, None
+    verified_pc = _safe_int_default(verify_obj.get("pcNetworkBidWeight"), target_pc)
+    verified_mobile = _safe_int_default(verify_obj.get("mobileNetworkBidWeight"), target_mobile)
+    return verified_pc, verified_mobile, verify_obj
+
+
+def _prepare_powerlink_device_bid_weight_update_obj(obj: Dict[str, Any], cid: str, target_pc: int, target_mobile: int, sanitized: bool = True) -> Dict[str, Any]:
+    update_obj = dict(obj or {})
+    update_obj["pcNetworkBidWeight"] = int(target_pc)
+    update_obj["mobileNetworkBidWeight"] = int(target_mobile)
+    update_obj.setdefault("customerId", _safe_int_default(cid, 0))
+    adgroup_id = str(update_obj.get("nccAdgroupId") or update_obj.get("id") or "").strip()
+    if adgroup_id:
+        update_obj["nccAdgroupId"] = adgroup_id
+
+    # PC/MO 가중치와 무관한 콘텐츠 네트워크 값은 기존 값 유지. 누락 시에만 안전 기본값을 채운다.
+    update_obj.setdefault("useCntsNetworkBidWeight", bool(obj.get("useCntsNetworkBidWeight", False)))
+    update_obj.setdefault("contentsNetworkBidWeight", _safe_int_default(obj.get("contentsNetworkBidWeight"), 100))
+    update_obj.setdefault("useCntsNetworkBidAmt", bool(obj.get("useCntsNetworkBidAmt", False)))
+    update_obj.setdefault("contentsNetworkBidAmt", _safe_int_default(obj.get("contentsNetworkBidAmt"), _safe_int_default(obj.get("bidAmt"), 70)))
+
+    if not sanitized:
+        return update_obj
+
+    # 전체 update(no fields)는 읽기전용/요약성 필드를 같이 보내면 계정/상품에 따라 실패할 수 있어 제거한다.
+    readonly_keys = {
+        "id", "raw", "targets", "targetSummary", "pcChannelKey", "mobileChannelKey",
+        "status", "statusReason", "expectCost", "regTm", "editTm", "migType",
+        "sharedDailyBudget", "sharedBudgetName", "sharedBudgetLock", "sharedBudgetExpectCost",
+        "numberInUse", "pcDevice", "mobileDevice",
+    }
+    for key in readonly_keys:
+        update_obj.pop(key, None)
+    return {k: v for k, v in update_obj.items() if v is not None}
+
+
+def _put_powerlink_device_bid_weight_full(api_key: str, secret_key: str, cid: str, adgroup_id: str, obj: Dict[str, Any], target_pc: int, target_mobile: int, sanitized: bool = True):
+    update_obj = _prepare_powerlink_device_bid_weight_update_obj(obj, cid, target_pc, target_mobile, sanitized=sanitized)
+    return _do_req(
+        "PUT", api_key, secret_key, cid, f"/ncc/adgroups/{adgroup_id}",
+        params=None, json_body=update_obj
+    )
+
+
+def _put_powerlink_device_bid_weight_combined(api_key: str, secret_key: str, cid: str, adgroup_id: str, obj: Dict[str, Any], target_pc: int, target_mobile: int, fields: str):
+    update_obj = _prepare_powerlink_device_bid_weight_update_obj(obj, cid, target_pc, target_mobile, sanitized=False)
+    return _do_req(
+        "PUT", api_key, secret_key, cid, f"/ncc/adgroups/{adgroup_id}",
+        params={"fields": fields}, json_body=update_obj
+    )
+
+
+def _put_powerlink_device_bid_weight_separate(api_key: str, secret_key: str, cid: str, adgroup_id: str, obj: Dict[str, Any], current_pc: int, current_mobile: int, target_pc: int, target_mobile: int):
+    working_obj = _prepare_powerlink_device_bid_weight_update_obj(obj, cid, current_pc, current_mobile, sanitized=False)
+    changed_parts: List[str] = []
+    last_res = None
+    if current_pc != target_pc:
+        working_obj["pcNetworkBidWeight"] = int(target_pc)
+        working_obj.setdefault("mobileNetworkBidWeight", int(current_mobile))
+        res_pc = _do_req(
+            "PUT", api_key, secret_key, cid, f"/ncc/adgroups/{adgroup_id}",
+            params={"fields": "pcNetworkBidWeight"}, json_body=working_obj
+        )
+        last_res = res_pc
+        if res_pc.status_code not in [200, 201]:
+            return False, res_pc, changed_parts
+        changed_parts.append("pcNetworkBidWeight")
+        try:
+            maybe_obj = res_pc.json()
+            if isinstance(maybe_obj, dict):
+                working_obj = maybe_obj
+        except Exception:
+            pass
+    if current_mobile != target_mobile:
+        working_obj["mobileNetworkBidWeight"] = int(target_mobile)
+        working_obj.setdefault("pcNetworkBidWeight", int(target_pc))
+        res_mo = _do_req(
+            "PUT", api_key, secret_key, cid, f"/ncc/adgroups/{adgroup_id}",
+            params={"fields": "mobileNetworkBidWeight"}, json_body=working_obj
+        )
+        last_res = res_mo
+        if res_mo.status_code not in [200, 201]:
+            return False, res_mo, changed_parts
+        changed_parts.append("mobileNetworkBidWeight")
+    return True, last_res, changed_parts
+
+
+def _update_powerlink_device_bid_weight_for_adgroup(api_key: str, secret_key: str, cid: str, adgroup_id: str, pc_weight: Optional[int], mobile_weight: Optional[int], preferred_strategy: Optional[str] = None):
+    res_get, obj = _fetch_adgroup_detail(api_key, secret_key, cid, adgroup_id)
+    if res_get.status_code != 200 or not isinstance(obj, dict):
+        detail = res_get.text if res_get is not None else "광고그룹 조회 실패"
+        return False, f"광고그룹 조회 실패: {detail}", None, {}
+    if str(obj.get("adgroupType") or "").upper() != "WEB_SITE":
+        return None, "파워링크 광고그룹이 아니어서 건너뜀", obj, {}
+
+    current_pc = _safe_int_default(obj.get("pcNetworkBidWeight"), 100)
+    current_mobile = _safe_int_default(obj.get("mobileNetworkBidWeight"), 100)
+    target_pc = int(pc_weight) if pc_weight is not None else current_pc
+    target_mobile = int(mobile_weight) if mobile_weight is not None else current_mobile
+
+    if current_pc == target_pc and current_mobile == target_mobile:
+        return True, f"이미 동일값 유지(PC {current_pc}%, MO {current_mobile}%)", obj, {"strategy": "unchanged"}
+
+    strategies = _device_bid_weight_strategy_candidates(pc_weight, mobile_weight, preferred_strategy)
+    if not strategies:
+        return True, "변경사항 없음", obj, {"strategy": "none"}
+
+    unsupported_details: List[str] = []
+    failed_details: List[str] = []
+    last_error = ""
+    for strategy in strategies:
+        kind = str(strategy.get("kind") or "combined")
+        fields = str(strategy.get("fields") or "")
+        if kind == "full":
+            sanitized = fields != "__FULL_RAW__"
+            res_put = _put_powerlink_device_bid_weight_full(
+                api_key, secret_key, cid, adgroup_id, obj, target_pc, target_mobile, sanitized=sanitized
+            )
+            if res_put.status_code in [200, 201]:
+                verified_pc, verified_mobile, verify_obj = _verify_powerlink_device_bid_weight(api_key, secret_key, cid, adgroup_id, target_pc, target_mobile)
+                if verified_pc is not None and (verified_pc != target_pc or verified_mobile != target_mobile):
+                    return False, f"API 응답은 성공이나 반영값 불일치(요청 PC {target_pc}%/MO {target_mobile}%, 확인 PC {verified_pc}%/MO {verified_mobile}%)", verify_obj or obj, {"strategy": fields}
+                return True, f"PC {current_pc}%→{target_pc}% / MO {current_mobile}%→{target_mobile}% (전체 update)", verify_obj or obj, {"strategy": fields}
+            last_error = res_put.text if res_put is not None else "입찰가중치 변경 실패"
+            failed_details.append(f"{fields}: {last_error}")
+            if _is_not_support_modify_field_response(res_put):
+                unsupported_details.append(f"{fields}: {last_error}")
+            continue
+
+        if kind == "separate":
+            ok, res_put, changed_parts = _put_powerlink_device_bid_weight_separate(
+                api_key, secret_key, cid, adgroup_id, obj, current_pc, current_mobile, target_pc, target_mobile
+            )
+            if ok:
+                verified_pc, verified_mobile, verify_obj = _verify_powerlink_device_bid_weight(api_key, secret_key, cid, adgroup_id, target_pc, target_mobile)
+                if verified_pc is not None and (verified_pc != target_pc or verified_mobile != target_mobile):
+                    return False, f"API 응답은 성공이나 반영값 불일치(요청 PC {target_pc}%/MO {target_mobile}%, 확인 PC {verified_pc}%/MO {verified_mobile}%)", verify_obj or obj, {"strategy": fields}
+                return True, f"PC {current_pc}%→{target_pc}% / MO {current_mobile}%→{target_mobile}%", verify_obj or obj, {"strategy": fields}
+            detail = getattr(res_put, "text", "") if res_put is not None else "입찰가중치 변경 실패"
+            last_error = str(detail or "")
+            failed_details.append(f"fields={fields}: {last_error}")
+            if _is_not_support_modify_field_response(res_put):
+                unsupported_details.append(f"fields={fields}: {last_error}")
+                continue
+            if changed_parts:
+                return False, f"일부 필드({', '.join(changed_parts)}) 적용 후 실패: {last_error}", obj, {"strategy": fields}
+            continue
+
+        res_put = _put_powerlink_device_bid_weight_combined(
+            api_key, secret_key, cid, adgroup_id, obj, target_pc, target_mobile, fields
+        )
+        if res_put.status_code in [200, 201]:
+            verified_pc, verified_mobile, verify_obj = _verify_powerlink_device_bid_weight(api_key, secret_key, cid, adgroup_id, target_pc, target_mobile)
+            if verified_pc is not None and (verified_pc != target_pc or verified_mobile != target_mobile):
+                return False, f"API 응답은 성공이나 반영값 불일치(요청 PC {target_pc}%/MO {target_mobile}%, 확인 PC {verified_pc}%/MO {verified_mobile}%)", verify_obj or obj, {"strategy": fields}
+            return True, f"PC {current_pc}%→{target_pc}% / MO {current_mobile}%→{target_mobile}%", verify_obj or obj, {"strategy": fields}
+        last_error = res_put.text if res_put is not None else "입찰가중치 변경 실패"
+        failed_details.append(f"fields={fields}: {last_error}")
+        if _is_not_support_modify_field_response(res_put):
+            unsupported_details.append(f"fields={fields}: {last_error}")
+            continue
+        continue
+
+    compact_error = " / ".join(failed_details[:3]) if failed_details else last_error
+    unsupported_only = bool(unsupported_details) and len(unsupported_details) == len(failed_details)
+    return False, (
+        "PC/모바일 입찰가중치 변경 실패. "
+        + ("지원 필드 방식이 모두 거절되었습니다. " if unsupported_only else "")
+        + f"마지막 응답: {compact_error}"
+    ), obj, {"unsupported_field": unsupported_only, "strategy": "unsupported"}
+
 def _calc_bid_stats(values: List[int]):
     if not values:
         return {"min": None, "max": None, "median": None}
@@ -5886,10 +7215,70 @@ def _is_ad_editable_for_avg_position(row: Dict[str, Any], include_paused: bool =
     if (not include_pending) and inspect and inspect not in {"APPROVED", "NONE", "NORMAL"}:
         return False, f"검수:{inspect}"
     return True, ""
-def _estimate_keyword_bids_by_avg_position(api_key: str, secret_key: str, cid: str, keyword_ids: List[str], device: str, position: int, max_bid: Optional[int] = None):
+def _estimate_keyword_bids_by_avg_position(api_key: str, secret_key: str, cid: str, keyword_ids: List[str], device: str, position: int, max_bid: Optional[int] = None, keyword_meta: Optional[Dict[str, Dict[str, Any]]] = None):
     estimated: Dict[str, int] = {}
     warnings: List[str] = []
     device = str(device or "PC").upper()
+    keyword_meta = keyword_meta or {}
+
+    text_to_ids: Dict[str, List[str]] = {}
+    ordered_texts: List[str] = []
+    for kid in keyword_ids:
+        kid = str(kid or "").strip()
+        if not kid:
+            continue
+        kw_text = str((keyword_meta.get(kid) or {}).get("keyword") or "").strip()
+        if not kw_text:
+            continue
+        if kw_text not in text_to_ids:
+            text_to_ids[kw_text] = []
+            ordered_texts.append(kw_text)
+        text_to_ids[kw_text].append(kid)
+
+    text_estimated = False
+    for i in range(0, len(ordered_texts), 100):
+        chunk = [str(x).strip() for x in ordered_texts[i:i + 100] if str(x).strip()]
+        if not chunk:
+            continue
+        body = {
+            "device": device,
+            "items": [{"key": kw, "position": int(position)} for kw in chunk],
+        }
+        res = _do_req("POST", api_key, secret_key, cid, "/estimate/average-position-bid/keyword", json_body=body)
+        if res.status_code != 200:
+            if len(warnings) < 10:
+                warnings.append(f"파워링크 텍스트 기준 평균순위 추정 실패({device}, {position}위): {res.text}")
+            text_estimated = False
+            break
+        payload = res.json() or {}
+        items = None
+        if isinstance(payload, dict):
+            items = payload.get("items")
+            if not isinstance(items, list):
+                items = payload.get("estimate")
+        elif isinstance(payload, list):
+            items = payload
+        if not isinstance(items, list):
+            if len(warnings) < 10:
+                warnings.append(f"파워링크 텍스트 기준 평균순위 추정 응답 형식이 예상과 다릅니다: {payload}")
+            text_estimated = False
+            break
+        text_estimated = True
+        for item in items:
+            try:
+                kw_text = str(item.get("keyword") or item.get("key") or "").strip()
+                bid = _normalize_estimated_bid_amt(item.get("bid"), max_bid=max_bid)
+            except Exception:
+                kw_text = ""
+                bid = None
+            if not kw_text or bid is None:
+                continue
+            for kid in text_to_ids.get(kw_text, []):
+                estimated[kid] = bid
+
+    if estimated:
+        return estimated, warnings
+
     for i in range(0, len(keyword_ids), 100):
         chunk = [str(x).strip() for x in keyword_ids[i:i + 100] if str(x).strip()]
         if not chunk:
@@ -5900,7 +7289,8 @@ def _estimate_keyword_bids_by_avg_position(api_key: str, secret_key: str, cid: s
         }
         res = _do_req("POST", api_key, secret_key, cid, "/npc-estimate/average-position-bid/id", json_body=body)
         if res.status_code != 200:
-            warnings.append(f"평균순위 추정 실패({device}, {position}위): {res.text}")
+            if len(warnings) < 10:
+                warnings.append(f"파워링크 ID 기준 평균순위 추정 실패({device}, {position}위): {res.text}")
             continue
         payload = res.json() or {}
         items = None
@@ -5911,12 +7301,13 @@ def _estimate_keyword_bids_by_avg_position(api_key: str, secret_key: str, cid: s
         elif isinstance(payload, list):
             items = payload
         if not isinstance(items, list):
-            warnings.append(f"평균순위 추정 응답 형식이 예상과 다릅니다: {payload}")
+            if len(warnings) < 10:
+                warnings.append(f"파워링크 ID 기준 평균순위 추정 응답 형식이 예상과 다릅니다: {payload}")
             continue
         for item in items:
             try:
                 key = str(item.get("key") or item.get("nccKeywordId") or "").strip()
-                bid = _normalize_bid_amt(item.get("bid"), max_bid=max_bid)
+                bid = _normalize_estimated_bid_amt(item.get("bid"), max_bid=max_bid)
             except Exception:
                 bid = None
                 key = ""
@@ -6064,26 +7455,45 @@ def preview_keyword_bids_by_search():
     cid = str(d.get("customer_id") or "").strip()
     search_text = str(d.get("search_text") or d.get("keyword_query") or "").strip()
     exact_match = _boolish(d.get("exact_match"), False)
+    exclude_text = str(d.get("exclude_text") or d.get("exclude_keyword_query") or "").strip()
     search_scope = str(d.get("search_scope") or "account").strip().lower()
     campaign_ids = [str(x or "").strip() for x in (d.get("campaign_ids") or []) if str(x or "").strip()]
+    adgroup_ids = [str(x or "").strip() for x in (d.get("adgroup_ids") or []) if str(x or "").strip()]
     if not api_key or not secret_key or not cid:
         return jsonify({"error": "API Key / Secret Key / Customer ID가 필요합니다."}), 400
     if not search_text:
         return jsonify({"error": "검색할 단어를 입력해주세요."}), 400
-    scan = _scan_powerlink_keywords_by_search(api_key, secret_key, cid, search_text, exact_match=exact_match)
+    if search_scope not in {"account", "selected_campaigns", "selected_adgroups"}:
+        search_scope = "account"
+    if search_scope == "selected_campaigns" and not campaign_ids:
+        return jsonify({"error": "선택 캠페인 조회를 사용하려면 좌측에서 캠페인을 체크해주세요."}), 400
+    if search_scope == "selected_adgroups" and not adgroup_ids:
+        return jsonify({"error": "선택 그룹내 조회를 사용하려면 좌측에서 광고그룹을 체크해주세요."}), 400
+    scan = _scan_powerlink_keywords_by_search(
+        api_key,
+        secret_key,
+        cid,
+        search_text,
+        exact_match=exact_match,
+        campaign_ids=(campaign_ids if search_scope == "selected_campaigns" else None),
+        adgroup_ids=(adgroup_ids if search_scope == "selected_adgroups" else None),
+        exclude_text=exclude_text,
+    )
     powerlink_campaigns = scan["powerlink_campaigns"]
     adgroup_contexts = scan["adgroup_contexts"]
     matched_rows = scan["matched_rows"]
     err_details = scan["warnings"]
     scanned_keyword_count = int(scan["scanned_keyword_count"])
     matched_count = int(scan["matched_count"])
-    preview_token = hashlib.sha256(f"{cid}|{search_text}|{'1' if exact_match else '0'}|{matched_count}".encode('utf-8')).hexdigest()[:20]
+    preview_token = hashlib.sha256(f"{cid}|{search_scope}|{'/'.join(campaign_ids)}|{'/'.join(adgroup_ids)}|{search_text}|{exclude_text}|{'1' if exact_match else '0'}|{matched_count}".encode('utf-8')).hexdigest()[:20]
+    scope_label = "선택 캠페인 기준" if search_scope == "selected_campaigns" else ("선택 그룹 기준" if search_scope == "selected_adgroups" else "계정 전체 기준")
     return jsonify({
         "ok": True,
-        "message": _build_powerlink_keyword_search_message(search_text, exact_match, scan, row_preview_limit=30),
+        "message": f"[{scope_label}]\n" + _build_powerlink_keyword_search_message(search_text, exact_match, scan, row_preview_limit=30, exclude_text=exclude_text),
         "search_text": search_text,
         "search_groups": scan.get("search_groups") or _parse_keyword_search_groups(search_text),
         "exact_match": bool(exact_match),
+        "exclude_text": exclude_text,
         "matched_count": matched_count,
         "scanned_keyword_count": scanned_keyword_count,
         "total_powerlink_campaign_count": len(powerlink_campaigns),
@@ -6091,6 +7501,9 @@ def preview_keyword_bids_by_search():
         "rows": matched_rows[:100],
         "warnings": err_details[:10],
         "preview_token": preview_token,
+        "search_scope": search_scope,
+        "selected_campaign_count": len(campaign_ids) if search_scope == "selected_campaigns" else 0,
+        "selected_adgroup_count": len(adgroup_ids) if search_scope == "selected_adgroups" else 0,
     })
 @app.route("/update_keyword_bids_by_search", methods=["POST"])
 def update_keyword_bids_by_search():
@@ -6100,8 +7513,10 @@ def update_keyword_bids_by_search():
     cid = str(d.get("customer_id") or "").strip()
     search_text = str(d.get("search_text") or d.get("keyword_query") or "").strip()
     exact_match = _boolish(d.get("exact_match"), False)
+    exclude_text = str(d.get("exclude_text") or d.get("exclude_keyword_query") or "").strip()
     search_scope = str(d.get("search_scope") or "account").strip().lower()
     campaign_ids = [str(x or "").strip() for x in (d.get("campaign_ids") or []) if str(x or "").strip()]
+    adgroup_ids = [str(x or "").strip() for x in (d.get("adgroup_ids") or []) if str(x or "").strip()]
     target_bid = _normalize_bid_amt(d.get("bid_amt"))
     if not api_key or not secret_key or not cid:
         return jsonify({"error": "API Key / Secret Key / Customer ID가 필요합니다."}), 400
@@ -6109,7 +7524,22 @@ def update_keyword_bids_by_search():
         return jsonify({"error": "검색할 단어를 입력해주세요."}), 400
     if target_bid is None:
         return jsonify({"error": "적용할 입찰가를 올바르게 입력해주세요."}), 400
-    scan = _scan_powerlink_keywords_by_search(api_key, secret_key, cid, search_text, exact_match=exact_match)
+    if search_scope not in {"account", "selected_campaigns", "selected_adgroups"}:
+        search_scope = "account"
+    if search_scope == "selected_campaigns" and not campaign_ids:
+        return jsonify({"error": "선택 캠페인 조회를 사용하려면 좌측에서 캠페인을 체크해주세요."}), 400
+    if search_scope == "selected_adgroups" and not adgroup_ids:
+        return jsonify({"error": "선택 그룹내 조회를 사용하려면 좌측에서 광고그룹을 체크해주세요."}), 400
+    scan = _scan_powerlink_keywords_by_search(
+        api_key,
+        secret_key,
+        cid,
+        search_text,
+        exact_match=exact_match,
+        campaign_ids=(campaign_ids if search_scope == "selected_campaigns" else None),
+        adgroup_ids=(adgroup_ids if search_scope == "selected_adgroups" else None),
+        exclude_text=exclude_text,
+    )
     powerlink_campaigns = scan["powerlink_campaigns"]
     adgroup_contexts = scan["adgroup_contexts"]
     matched_rows = scan["matched_rows"]
@@ -6118,10 +7548,11 @@ def update_keyword_bids_by_search():
     err_details = list(scan["warnings"])
     scanned_keyword_count = int(scan["scanned_keyword_count"])
     matched_count = int(scan["matched_count"])
+    scope_label = "선택 캠페인 기준" if search_scope == "selected_campaigns" else ("선택 그룹 기준" if search_scope == "selected_adgroups" else "계정 전체 기준")
     if not powerlink_campaigns:
-        return jsonify({"ok": True, "message": "현재 계정에 파워링크 캠페인이 없습니다.", "matched_count": 0, "updated_count": 0, "skipped_count": 0, "fail_count": 0, "rows": [], "updated_adgroup_ids": []})
+        return jsonify({"ok": True, "message": f"[{scope_label}] 현재 계정에 파워링크 캠페인이 없습니다.", "matched_count": 0, "updated_count": 0, "skipped_count": 0, "fail_count": 0, "rows": [], "updated_adgroup_ids": [], "search_scope": search_scope})
     if not adgroup_contexts:
-        return jsonify({"ok": True, "message": "현재 계정에서 조회 가능한 파워링크 광고그룹이 없습니다.", "matched_count": 0, "updated_count": 0, "skipped_count": 0, "fail_count": 0, "rows": [], "warnings": err_details[:10], "updated_adgroup_ids": []})
+        return jsonify({"ok": True, "message": f"[{scope_label}] 현재 계정에서 조회 가능한 파워링크 광고그룹이 없습니다.", "matched_count": 0, "updated_count": 0, "skipped_count": 0, "fail_count": 0, "rows": [], "warnings": err_details[:10], "updated_adgroup_ids": [], "search_scope": search_scope})
     update_payload: List[Dict[str, Any]] = []
     skipped_count = 0
     bid_by_id = {str(row.get("ncc_keyword_id") or "").strip(): row for row in matched_rows}
@@ -6174,7 +7605,9 @@ def update_keyword_bids_by_search():
     mode_label = "완전일치" if exact_match else "부분일치"
     lines = [
         f"검색어 기준 파워링크 키워드 입찰가 변경 완료! ({mode_label})",
+        f"범위: {scope_label}",
         f"검색어: {search_text}",
+        (f"제외어: {exclude_text}" if str(exclude_text or "").strip() else "제외어: 없음"),
         f"대상 입찰가: {int(target_bid):,}원",
         f"조회한 파워링크 캠페인: {len(powerlink_campaigns)}개 | 광고그룹: {len(adgroup_contexts)}개 | 키워드 스캔: {scanned_keyword_count}개",
         f"검색 일치 키워드: {matched_count}개 | 변경 성공: {updated_count}개 | 유지: {skipped_count}개 | 실패: {fail_count}개",
@@ -6198,6 +7631,8 @@ def update_keyword_bids_by_search():
         "message": "\n".join(lines),
         "search_text": search_text,
         "exact_match": bool(exact_match),
+        "exclude_text": exclude_text,
+        "search_scope": search_scope,
         "target_bid": int(target_bid),
         "matched_count": int(matched_count),
         "updated_count": int(updated_count),
@@ -6209,6 +7644,8 @@ def update_keyword_bids_by_search():
         "rows": matched_rows[:100],
         "warnings": err_details[:10],
         "updated_adgroup_ids": _unique_keep_order(updated_adgroup_ids),
+        "selected_campaign_count": len(campaign_ids) if search_scope == "selected_campaigns" else 0,
+        "selected_adgroup_count": len(adgroup_ids) if search_scope == "selected_adgroups" else 0,
     })
 @app.route("/preview_keyword_bid_weights_by_search", methods=["POST"])
 def preview_keyword_bid_weights_by_search():
@@ -6388,6 +7825,11 @@ def update_keyword_bids():
     adgroup_contexts, resolve_warnings = _resolve_adgroup_contexts(api_key, secret_key, cid, entity_type, entity_ids)
     if not adgroup_contexts:
         return jsonify({"error": "대상 광고그룹을 찾지 못했습니다."}), 400
+    adgroup_contexts, name_filter_info = _filter_adgroup_contexts_by_name_conditions(adgroup_contexts, d)
+    if not adgroup_contexts:
+        lines = ["광고그룹명 조건 필터 적용 후 대상 광고그룹이 없습니다."]
+        lines.extend(_adgroup_name_filter_summary(name_filter_info))
+        return jsonify({"ok": True, "message": "\n".join(lines)}), 200
     use_group_bid = bid_amt == 0
     target_bid = _normalize_bid_amt(bid_amt if bid_amt else 70) or 70
     kw_success = kw_fail = kw_skipped = 0
@@ -6541,6 +7983,7 @@ def update_keyword_bids():
         f"키워드 변경 성공: {kw_success}개 / 실패: {kw_fail}개 / 유지: {kw_skipped}개",
         f"쇼핑 소재 변경 성공: {ad_success}개 / 실패: {ad_fail}개 / 유지: {ad_skipped}개",
     ]
+    lines.extend(_adgroup_name_filter_summary(name_filter_info))
     if err_details:
         lines.append("\n[상세 내역]")
         lines.extend(err_details[:10])
@@ -6559,6 +8002,11 @@ def update_bid_mode_by_scope():
     adgroup_contexts, resolve_warnings = _resolve_adgroup_contexts(api_key, secret_key, cid, entity_type, entity_ids)
     if not adgroup_contexts:
         return jsonify({"error": "대상 광고그룹을 찾지 못했습니다."}), 400
+    adgroup_contexts, name_filter_info = _filter_adgroup_contexts_by_name_conditions(adgroup_contexts, d)
+    if not adgroup_contexts:
+        lines = ["광고그룹명 조건 필터 적용 후 대상 광고그룹이 없습니다."]
+        lines.extend(_adgroup_name_filter_summary(name_filter_info))
+        return jsonify({"ok": True, "message": "\n".join(lines)}), 200
 
     target_use_group = bid_mode == "group"
     keyword_contexts = [ctx for ctx in adgroup_contexts if not _adgroup_uses_ad_level_bid(ctx.get("adgroup_type"))]
@@ -6715,6 +8163,7 @@ def update_bid_mode_by_scope():
     ]
     if not target_use_group:
         lines.append("개별 입찰가 전환 시 현재 적용 중인 유효 입찰가를 각 키워드/소재의 개별 입찰가로 저장합니다.")
+    lines.extend(_adgroup_name_filter_summary(name_filter_info))
     if err_details:
         lines.append("\n[상세 내역]")
         lines.extend(err_details[:10])
@@ -6761,6 +8210,11 @@ def adjust_keyword_bids_by_threshold():
     adgroup_contexts, resolve_warnings = _resolve_adgroup_contexts(api_key, secret_key, cid, entity_type, entity_ids)
     if not adgroup_contexts:
         return jsonify({"error": "대상 광고그룹을 찾지 못했습니다."}), 400
+    adgroup_contexts, name_filter_info = _filter_adgroup_contexts_by_name_conditions(adgroup_contexts, d)
+    if not adgroup_contexts:
+        lines = ["광고그룹명 조건 필터 적용 후 대상 광고그룹이 없습니다."]
+        lines.extend(_adgroup_name_filter_summary(name_filter_info))
+        return jsonify({"ok": True, "message": "\n".join(lines)}), 200
     keyword_meta: Dict[str, Dict[str, Any]] = {}
     keyword_bid_map: Dict[str, int] = {}
     ad_meta: Dict[str, Dict[str, Any]] = {}
@@ -6892,6 +8346,7 @@ def adjust_keyword_bids_by_threshold():
         rule_bits.append(f"하한 {lower_bid:,}원 이하 → {lower_bid:,}원 기준 {lower_delta:+,}원 = {lower_target:,}원")
     if rule_bits:
         lines.append("적용 규칙: " + " / ".join(rule_bits))
+    lines.extend(_adgroup_name_filter_summary(name_filter_info))
     detail_lines = warnings + err_details
     if detail_lines:
         lines.append("\n[상세 내역]")
@@ -6911,6 +8366,250 @@ def adjust_keyword_bids_by_threshold():
             "skipped": kw_skipped + ad_skipped,
         },
     })
+
+def _keyword_avg_position_by_search_common(d: Dict[str, Any], preview_only: bool):
+    api_key = str(d.get("api_key") or "").strip()
+    secret_key = str(d.get("secret_key") or "").strip()
+    cid = str(d.get("customer_id") or "").strip()
+    search_text = str(d.get("search_text") or d.get("keyword_query") or "").strip()
+    exclude_text = str(d.get("exclude_text") or d.get("keyword_exclude") or "").strip()
+    exact_match = _boolish(d.get("exact_match"), False)
+    search_scope = str(d.get("search_scope") or "account").strip().lower()
+    campaign_ids = _unique_keep_order([str(x or "").strip() for x in (d.get("campaign_ids") or []) if str(x or "").strip()])
+    adgroup_ids = _unique_keep_order([str(x or "").strip() for x in (d.get("adgroup_ids") or []) if str(x or "").strip()])
+    device = str(d.get("device") or "PC").strip().upper()
+    try:
+        position = int(d.get("position") or 1)
+    except Exception:
+        position = 1
+    include_paused = _boolish(d.get("include_paused"), False)
+    include_pending = _boolish(d.get("include_pending"), False)
+    if "exclude_paused" in d:
+        include_paused = not _boolish(d.get("exclude_paused"), True)
+    if "exclude_pending" in d:
+        include_pending = not _boolish(d.get("exclude_pending"), True)
+    max_bid_raw = d.get("max_bid")
+    max_bid = None
+    if str(max_bid_raw or "").strip() != "":
+        max_bid = _normalize_bid_amt(max_bid_raw)
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API Key / Secret Key / Customer ID가 필요합니다."}), 400
+    if not search_text:
+        return jsonify({"error": "검색어를 입력해주세요."}), 400
+    if device not in {"PC", "MOBILE"}:
+        return jsonify({"error": "디바이스는 PC 또는 MOBILE 이어야 합니다."}), 400
+    max_position = 10 if device == "PC" else 5
+    if position < 1 or position > max_position:
+        return jsonify({"error": f"목표 평균순위는 {device} 기준 1~{max_position} 사이로 입력해주세요."}), 400
+
+    scope_campaign_ids = campaign_ids if search_scope == "campaign" else None
+    scope_adgroup_ids = adgroup_ids if search_scope == "adgroup" else None
+    if search_scope == "campaign" and not scope_campaign_ids:
+        return jsonify({"error": "좌측에서 캠페인을 선택해주세요."}), 400
+    if search_scope == "adgroup" and not scope_adgroup_ids:
+        return jsonify({"error": "좌측에서 광고그룹을 선택해주세요."}), 400
+
+    scan = _scan_powerlink_keywords_by_search(
+        api_key, secret_key, cid, search_text,
+        exact_match=exact_match,
+        campaign_ids=scope_campaign_ids,
+        adgroup_ids=scope_adgroup_ids,
+        exclude_text=exclude_text,
+    )
+    matched_rows = scan.get("matched_rows") or []
+    if not matched_rows:
+        scope_label = "선택 캠페인" if search_scope == "campaign" else ("선택 광고그룹" if search_scope == "adgroup" else "전체 계정")
+        return jsonify({
+            "ok": True,
+            "preview": bool(preview_only),
+            "message": f"검색어 기준 평균순위 입찰가 대상 키워드가 없습니다.\n범위: {scope_label}\n검색어: {search_text}",
+            "matched_count": 0,
+            "estimated": 0,
+            "changed": 0,
+            "updated_count": 0,
+            "fail_count": 0,
+            "rows": [],
+        })
+
+    keyword_ids: List[str] = []
+    keyword_meta: Dict[str, Dict[str, Any]] = {}
+    keyword_adgroup_ids: List[str] = []
+    skipped_paused = 0
+    skipped_pending = 0
+    skipped_invalid = 0
+    for row in matched_rows:
+        kid = str(row.get("ncc_keyword_id") or "").strip()
+        if not kid:
+            skipped_invalid += 1
+            continue
+        if (not include_paused) and row.get("enabled") is False:
+            skipped_paused += 1
+            continue
+        check_row = {
+            "status": row.get("status"),
+            "inspectStatus": row.get("inspect_status"),
+            "delFlag": row.get("del_flag"),
+        }
+        ok, reason = _is_keyword_editable_for_avg_position(check_row, include_paused=include_paused, include_pending=include_pending)
+        if not ok:
+            if str(reason).startswith("상태:"):
+                skipped_paused += 1
+            elif str(reason).startswith("검수:"):
+                skipped_pending += 1
+            else:
+                skipped_invalid += 1
+            continue
+        keyword_ids.append(kid)
+        keyword_adgroup_ids.append(str(row.get("adgroup_id") or "").strip())
+        keyword_meta[kid] = {
+            "keyword": str(row.get("keyword") or ""),
+            "current_bid": row.get("current_bid"),
+            "use_group_bid": bool(row.get("current_use_group")),
+            "adgroup_id": str(row.get("adgroup_id") or "").strip(),
+        }
+    keyword_ids = _unique_keep_order(keyword_ids)
+    keyword_adgroup_ids = _unique_keep_order(keyword_adgroup_ids)
+    if not keyword_ids:
+        lines = [
+            "검색어 기준 파워링크 평균순위 입찰가 대상이 없습니다.",
+            f"검색어: {search_text}",
+            f"검색 일치 키워드: {len(matched_rows)}개",
+        ]
+        if skipped_paused:
+            lines.append(f"중지 상태 제외: {skipped_paused}개")
+        if skipped_pending:
+            lines.append(f"검수보류/비승인 제외: {skipped_pending}개")
+        if skipped_invalid:
+            lines.append(f"기타 제외: {skipped_invalid}개")
+        return jsonify({"ok": True, "preview": bool(preview_only), "message": "\n".join(lines), "matched_count": len(matched_rows), "estimated": 0, "changed": 0, "updated_count": 0, "fail_count": 0, "rows": []})
+
+    estimated_map, estimate_warnings = _estimate_keyword_bids_by_avg_position(api_key, secret_key, cid, keyword_ids, device, position, max_bid=max_bid, keyword_meta=keyword_meta)
+    if not estimated_map:
+        msg = f"{device} {position}위 평균순위 추정값을 받지 못했습니다."
+        warnings = list(scan.get("warnings") or []) + list(estimate_warnings or [])
+        if warnings:
+            msg += "\n" + "\n".join(warnings[:5])
+        return jsonify({"error": msg}), 400
+
+    changed_bids: List[int] = []
+    unchanged_cnt = 0
+    preview_rows: List[Dict[str, Any]] = []
+    for row in matched_rows:
+        kid = str(row.get("ncc_keyword_id") or "").strip()
+        if kid not in estimated_map:
+            continue
+        current_bid = _normalize_bid_amt(row.get("current_bid")) or 70
+        current_use_group = bool(row.get("current_use_group"))
+        new_bid = int(estimated_map[kid])
+        will_change = (current_bid != new_bid) or current_use_group
+        if will_change:
+            changed_bids.append(new_bid)
+        else:
+            unchanged_cnt += 1
+        if len(preview_rows) < 40:
+            preview_rows.append({
+                "campaign_name": row.get("campaign_name"),
+                "adgroup_name": row.get("adgroup_name"),
+                "keyword": row.get("keyword"),
+                "keyword_id": kid,
+                "current_bid": current_bid,
+                "new_bid": new_bid,
+                "use_group_bid": current_use_group,
+                "matched_terms_text": row.get("matched_terms_text"),
+                "will_change": will_change,
+            })
+    stats = _calc_bid_stats(list(estimated_map.values()))
+    mode_label = "완전일치" if exact_match else "부분일치"
+    scope_label = "선택 캠페인" if search_scope == "campaign" else ("선택 광고그룹" if search_scope == "adgroup" else "전체 계정")
+    lines = [
+        f"검색어 기준 파워링크 평균순위 {device} {position}위 입찰가 {'미리보기' if preview_only else '적용'} 완료 ({mode_label})",
+        f"범위: {scope_label}",
+        f"검색어: {search_text}",
+    ]
+    if exclude_text:
+        lines.append(f"제외 검색어: {exclude_text}")
+    lines.extend([
+        f"검색 일치 키워드: {len(matched_rows)}개 / 추정 성공: {len(estimated_map)}개",
+        f"변경 예정: {len(changed_bids)}개 / 동일해서 유지: {unchanged_cnt}개",
+    ])
+    if stats.get("min") is not None:
+        lines.append(f"예상 입찰가 범위: 최소 {stats['min']:,}원 · 중앙 {stats['median']:,}원 · 최대 {stats['max']:,}원")
+    if max_bid is not None:
+        lines.append(f"최대 입찰가 상한 적용: {max_bid:,}원")
+    if skipped_paused:
+        lines.append(f"중지 상태 제외: {skipped_paused}개")
+    if skipped_pending:
+        lines.append(f"검수보류/비승인 제외: {skipped_pending}개")
+    if skipped_invalid:
+        lines.append(f"기타 제외: {skipped_invalid}개")
+    if preview_rows:
+        lines.append("\n[대상 예시]")
+        for row in preview_rows[:25]:
+            cur = f"{int(row.get('current_bid') or 0):,}원"
+            if row.get("use_group_bid"):
+                cur += " (그룹입찰가 사용)"
+            matched_label = f" | 매칭: {row.get('matched_terms_text')}" if row.get("matched_terms_text") else ""
+            lines.append(f"- {row.get('campaign_name')} > {row.get('adgroup_name')} > {row.get('keyword')}{matched_label} | 현재 {cur} → 예상 {int(row.get('new_bid') or 0):,}원")
+    warnings = list(scan.get("warnings") or []) + list(estimate_warnings or [])
+    if warnings:
+        lines.append("\n[참고]")
+        lines.extend(warnings[:5])
+
+    if preview_only:
+        token_src = f"{cid}|{search_text}|{exclude_text}|{exact_match}|{search_scope}|{','.join(scope_campaign_ids or [])}|{','.join(scope_adgroup_ids or [])}|{device}|{position}|{max_bid or ''}|{len(estimated_map)}|{len(changed_bids)}"
+        preview_token = hashlib.sha256(token_src.encode("utf-8")).hexdigest()[:20]
+        return jsonify({
+            "ok": True,
+            "preview": True,
+            "message": "\n".join(lines),
+            "preview_token": preview_token,
+            "matched_count": len(matched_rows),
+            "estimated": len(estimated_map),
+            "changed": len(changed_bids),
+            "unchanged": unchanged_cnt,
+            "stats": stats,
+            "rows": preview_rows,
+            "skipped_paused": skipped_paused,
+            "skipped_pending": skipped_pending,
+        })
+
+    success_cnt, fail_cnt, skipped_cnt, err_details = _apply_keyword_bid_map(api_key, secret_key, cid, keyword_adgroup_ids, estimated_map, keyword_meta=keyword_meta)
+    lines.append(f"\n변경 성공: {success_cnt}개 / 실패: {fail_cnt}개 / 유지/생략: {skipped_cnt}개")
+    if err_details:
+        lines.append("\n[실패 상세]")
+        lines.extend(err_details[:5])
+    return jsonify({
+        "ok": True,
+        "preview": False,
+        "message": "\n".join(lines),
+        "matched_count": len(matched_rows),
+        "estimated": len(estimated_map),
+        "changed": len(changed_bids),
+        "updated_count": success_cnt,
+        "fail_count": fail_cnt,
+        "skipped_count": skipped_cnt,
+        "updated_adgroup_ids": keyword_adgroup_ids,
+        "rows": preview_rows,
+        "warnings": warnings[:10],
+    }), (200 if fail_cnt == 0 else 207)
+
+
+@app.route("/preview_keyword_avg_position_by_search", methods=["POST"])
+@app.route("/preview_keyword_avg_position_search", methods=["POST"])
+@app.route("/preview_powerlink_keyword_avg_position_by_search", methods=["POST"])
+@app.route("/preview_powerlink_keyword_avg_position_search", methods=["POST"])
+def preview_keyword_avg_position_by_search():
+    return _keyword_avg_position_by_search_common(request.json or {}, preview_only=True)
+
+
+@app.route("/update_keyword_avg_position_by_search", methods=["POST"])
+@app.route("/update_keyword_avg_position_search", methods=["POST"])
+@app.route("/update_powerlink_keyword_avg_position_by_search", methods=["POST"])
+@app.route("/update_powerlink_keyword_avg_position_search", methods=["POST"])
+def update_keyword_avg_position_by_search():
+    return _keyword_avg_position_by_search_common(request.json or {}, preview_only=False)
+
+
 @app.route("/update_keyword_bids_avg_position", methods=["POST"])
 def update_keyword_bids_avg_position():
     d = request.json or {}
@@ -6920,6 +8619,22 @@ def update_keyword_bids_avg_position():
     device = str(d.get("device") or "PC").upper()
     position = int(d.get("position") or 1)
     preview_only = bool(d.get("preview_only"))
+    avg_target_type = str(d.get("avg_target_type") or d.get("campaign_type") or d.get("target_type") or "all").strip().lower()
+    avg_target_alias = {
+        "powerlink": "powerlink",
+        "web_site": "powerlink",
+        "website": "powerlink",
+        "파워링크": "powerlink",
+        "shopping": "shopping",
+        "shop": "shopping",
+        "shopping_search": "shopping",
+        "쇼핑검색": "shopping",
+        "all": "all",
+        "": "all",
+    }
+    avg_target_type = avg_target_alias.get(avg_target_type, avg_target_type)
+    if avg_target_type not in {"powerlink", "shopping", "all"}:
+        return jsonify({"error": "avg_target_type은 powerlink 또는 shopping 이어야 합니다."}), 400
     include_paused = _boolish(d.get("include_paused"), False)
     include_pending = _boolish(d.get("include_pending"), False)
     if "exclude_paused" in d:
@@ -6946,17 +8661,42 @@ def update_keyword_bids_avg_position():
         if resolve_warnings:
             msg += "\n" + "\n".join(resolve_warnings[:5])
         return jsonify({"error": msg}), 400
+    adgroup_contexts, name_filter_info = _filter_adgroup_contexts_by_name_conditions(adgroup_contexts, d)
+    if not adgroup_contexts:
+        lines = ["광고그룹명 조건 필터 적용 후 대상 광고그룹이 없습니다."]
+        lines.extend(_adgroup_name_filter_summary(name_filter_info))
+        return jsonify({"ok": True, "message": "\n".join(lines)}), 200
     warnings: List[str] = list(resolve_warnings)
     keyword_adgroup_ids: List[str] = []
     shopping_contexts: List[Dict[str, Any]] = []
     skipped_other_groups = 0
+    skipped_unselected_type = 0
     for ctx in adgroup_contexts:
-        if _adgroup_uses_ad_level_bid(ctx.get("adgroup_type")):
+        adgroup_type = str(ctx.get("adgroup_type") or "").upper()
+        is_shopping = _adgroup_uses_ad_level_bid(adgroup_type)
+        is_powerlink = (adgroup_type == "WEB_SITE") or (not adgroup_type and not is_shopping)
+
+        if avg_target_type == "powerlink":
+            if is_powerlink:
+                keyword_adgroup_ids.append(str(ctx.get("adgroup_id") or "").strip())
+            else:
+                skipped_unselected_type += 1
+            continue
+
+        if avg_target_type == "shopping":
+            if is_shopping:
+                shopping_contexts.append(ctx)
+            else:
+                skipped_unselected_type += 1
+            continue
+
+        # 호환용(all): 기존처럼 파워링크+쇼핑을 모두 처리하되, 기타 유형만 제외합니다.
+        if is_shopping:
             shopping_contexts.append(ctx)
-        else:
+        elif is_powerlink:
             keyword_adgroup_ids.append(str(ctx.get("adgroup_id") or "").strip())
-            if not str(ctx.get("adgroup_type") or "").upper() in {"WEB_SITE", ""}:
-                skipped_other_groups += 1
+        else:
+            skipped_other_groups += 1
     keyword_ids: List[str] = []
     keyword_meta: Dict[str, Dict[str, Any]] = {}
     keyword_count = 0
@@ -7034,11 +8774,15 @@ def update_keyword_bids_avg_position():
             }
     ad_ids = _unique_keep_order(ad_ids)
     if not keyword_ids and not ad_ids:
-        return jsonify({"error": "평균순위 추정에 사용할 활성 키워드/소재가 없습니다."}), 400
+        type_label = "파워링크 키워드" if avg_target_type == "powerlink" else ("쇼핑검색 소재" if avg_target_type == "shopping" else "키워드/소재")
+        msg = f"평균순위 추정에 사용할 활성 {type_label}가 없습니다."
+        if skipped_unselected_type:
+            msg += f" 선택한 광고유형이 아닌 광고그룹 {skipped_unselected_type}개는 제외되었습니다."
+        return jsonify({"error": msg}), 400
     estimated_keyword_bid_map: Dict[str, int] = {}
     estimated_ad_bid_map: Dict[str, int] = {}
     if keyword_ids:
-        estimated_keyword_bid_map, estimate_warnings = _estimate_keyword_bids_by_avg_position(api_key, secret_key, cid, keyword_ids, device, position, max_bid=max_bid)
+        estimated_keyword_bid_map, estimate_warnings = _estimate_keyword_bids_by_avg_position(api_key, secret_key, cid, keyword_ids, device, position, max_bid=max_bid, keyword_meta=keyword_meta)
         warnings.extend(estimate_warnings)
     if ad_ids:
         estimated_ad_bid_map, ad_estimate_warnings = _estimate_ad_bids_by_avg_position(api_key, secret_key, cid, ad_ids, device, position, max_bid=max_bid)
@@ -7106,8 +8850,9 @@ def update_keyword_bids_avg_position():
         return {"min": vals[0], "max": vals[-1], "median": median}
     stats = _calc_stats(list(estimated_keyword_bid_map.values()) + list(estimated_ad_bid_map.values()))
     if preview_only:
+        type_label = "파워링크" if avg_target_type == "powerlink" else ("쇼핑검색" if avg_target_type == "shopping" else "전체")
         lines = [
-            f"{device} 평균순위 {position}위 기준 변경사항 확인 완료",
+            f"{type_label} · {device} 평균순위 {position}위 기준 변경사항 확인 완료",
             f"파워링크 추정 성공: {len(estimated_keyword_bid_map)}개 / 적용 대상 키워드: {len(keyword_ids)}개",
             f"쇼핑 추정 성공: {len(estimated_ad_bid_map)}개 / 적용 대상 소재: {len(ad_ids)}개",
             f"변경 예정: {len(changed_bids)}개 / 동일해서 유지: {unchanged_cnt}개",
@@ -7120,8 +8865,11 @@ def update_keyword_bids_avg_position():
             lines.append(f"중지 상태 제외: {skipped_keyword_paused + skipped_ad_paused}개")
         if skipped_keyword_pending or skipped_ad_pending:
             lines.append(f"검수보류/비승인 제외: {skipped_keyword_pending + skipped_ad_pending}개")
+        if skipped_unselected_type:
+            lines.append(f"선택한 광고유형이 아닌 광고그룹 제외: {skipped_unselected_type}개")
         if skipped_other_groups:
             lines.append(f"기타 광고그룹 제외: {skipped_other_groups}개")
+        lines.extend(_adgroup_name_filter_summary(name_filter_info))
         for msg in warnings[:5]:
             lines.append(msg)
         return jsonify({
@@ -7147,8 +8895,9 @@ def update_keyword_bids_avg_position():
     if estimated_ad_bid_map:
         ad_success, ad_fail, ad_skipped, ad_err_details = _apply_ad_bid_map(api_key, secret_key, cid, shopping_contexts, estimated_ad_bid_map, ad_meta=ad_meta)
         err_details.extend(ad_err_details)
+    type_label = "파워링크" if avg_target_type == "powerlink" else ("쇼핑검색" if avg_target_type == "shopping" else "전체")
     lines = [
-        f"{device} 평균순위 {position}위 기준 입찰가 적용 완료!",
+        f"{type_label} · {device} 평균순위 {position}위 기준 입찰가 적용 완료!",
         f"파워링크 광고그룹: {len(keyword_adgroup_ids)}개 / 쇼핑 광고그룹: {len(shopping_contexts)}개",
         f"파워링크 추정 성공: {len(estimated_keyword_bid_map)}개 / 전체 조회 키워드: {keyword_count}개",
         f"쇼핑 추정 성공: {len(estimated_ad_bid_map)}개 / 전체 조회 소재: {shopping_ad_count}개",
@@ -7160,6 +8909,8 @@ def update_keyword_bids_avg_position():
         lines.append(f"예상 입찰가 범위: 최소 {stats['min']:,}원 · 중앙 {stats['median']:,}원 · 최대 {stats['max']:,}원")
     if max_bid is not None:
         lines.append(f"최대 입찰가 상한 적용: {max_bid:,}원")
+    if skipped_unselected_type:
+        lines.append(f"선택한 광고유형이 아닌 광고그룹 건너뜀: {skipped_unselected_type}개")
     if skipped_other_groups:
         lines.append(f"기타 광고그룹 건너뜀: {skipped_other_groups}개")
     if keyword_fetch_fail:
@@ -7172,6 +8923,7 @@ def update_keyword_bids_avg_position():
         lines.append(f"검수보류/비승인 제외: {skipped_keyword_pending + skipped_ad_pending}개")
     if kw_skipped + ad_skipped:
         lines.append(f"추정값 없음/변경 생략: {kw_skipped + ad_skipped}개")
+    lines.extend(_adgroup_name_filter_summary(name_filter_info))
     for msg in (warnings[:5] + err_details[:5]):
         lines.append(msg)
     return jsonify({

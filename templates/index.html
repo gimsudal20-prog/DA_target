@@ -205,6 +205,9 @@
           <div style="display:flex; align-items:center; gap:6px;"><input type="checkbox" id="adg_select_all" onclick="toggleSelectAll('adgroup')"> 광고그룹</div>
           <span id="master_adg_count" class="badge green">0</span>
         </div>
+        <div class="form-group" style="margin: 10px 0 8px;">
+          <input type="text" id="adgroup_search" placeholder="광고그룹명 검색" oninput="renderMasterList()" style="width:100%; padding:8px; font-size:13px;">
+        </div>
         <div class="quick-select-row">
           <button class="type-select-btn" type="button" onclick="selectByType('adgroup', 'WEB_SITE')">파워링크 전체선택</button>
           <button class="type-select-btn" type="button" onclick="selectByType('adgroup', 'SHOPPING_LIKE')">쇼핑검색 전체선택</button>
@@ -352,8 +355,8 @@
                         <div id="new_powerlink_options_wrap">
                             <div class="grid-2">
                                 <div class="form-group"><label>확장검색</label><select id="new_adgroup_use_keyword_plus"><option value="true">사용</option><option value="false" selected>미사용</option></select></div>
-                                <div class="form-group"><label>확장검색 가중치(%)</label><input type="number" id="new_adgroup_keyword_plus_weight" value="100" min="1" max="999999"></div>
-                                <div class="form-group"><label>일치검색</label><select id="new_adgroup_use_close_variant" disabled><option value="true" selected>API 미지원</option></select><div class="field-note">현재 네이버 API에서 수정 지원이 확인되지 않아 안내만 표시합니다.</div></div>
+                                <div class="form-group"><label>확장검색 예산비율(%)</label><input type="number" id="new_adgroup_keyword_plus_weight" value="100" min="1" max="100"><div class="field-note">신규 확장검색에서는 예산비율 기준으로 관리됩니다.</div></div>
+                                <div class="form-group"><label>일치검색</label><select id="new_adgroup_use_close_variant"><option value="true" selected>기본 사용</option></select><div class="field-note">일치검색은 현재 기본 동작이라 별도 OFF 없이 유지됩니다.</div></div>
                             </div>
                         </div>
                         <label style="display:flex; gap:6px; font-size:12px; margin-top:-4px; margin-bottom:12px; color:var(--muted);"><input type="checkbox" id="new_adgroup_unlimited" onchange="toggleBudgetInput('new_adgroup_unlimited', 'new_adgroup_budget')"> 제한없음</label>
@@ -521,6 +524,15 @@
                         <div class="card-title">고정 입찰가 일괄 변경</div>
                         <div class="form-group"><label>적용 범위</label><select id="bid_scope_type_fixed"><option value="campaign">선택한 캠페인 하위 키워드/쇼핑소재 전체</option><option value="adgroup">선택한 광고그룹 키워드/쇼핑소재 전체</option></select></div>
                         <div class="form-group"><label>일괄 적용할 입찰가 (원)</label><input type="number" id="bid_scope_fixed_val" value="100"></div>
+                        <div class="form-group">
+                            <label>광고그룹명 포함 단어</label>
+                            <input type="text" id="bid_filter_include_fixed" placeholder="예: 메인, 일반">
+                            <div class="field-note">입력 시 해당 단어가 들어간 광고그룹만 변경합니다. 비워두면 전체 대상입니다.</div>
+                        </div>
+                        <div class="form-group">
+                            <label>광고그룹명 제외 단어</label>
+                            <input type="text" id="bid_filter_exclude_fixed" placeholder="예: 벌크, 테스트, 임시">
+                        </div>
                         <button class="btn btn-primary" style="width:100%;" onclick="saveKeywordBidsByScope()">입찰가 변경 실행</button>
                     </div>
                     <div class="card">
@@ -528,8 +540,29 @@
                         <div class="field-note" style="margin-bottom:12px;">입찰가 숫자를 바꾸지 않고도 <strong>그룹 입찰가 사용 / 개별 입찰가 사용</strong> 설정만 캠페인·광고그룹 단위로 바꿉니다.</div>
                         <div class="form-group"><label>적용 범위</label><select id="bid_mode_scope_type"><option value="campaign">선택한 캠페인 하위 키워드/쇼핑소재 전체</option><option value="adgroup">선택한 광고그룹 키워드/쇼핑소재 전체</option></select></div>
                         <div class="form-group"><label>변경할 설정</label><select id="bid_mode_target"><option value="group">그룹 입찰가 설정</option><option value="individual">개별 입찰가 설정</option></select></div>
+                        <div class="form-group">
+                            <label>광고그룹명 포함 단어</label>
+                            <input type="text" id="bid_filter_include_mode" placeholder="예: 메인, 일반">
+                            <div class="field-note">입력 시 해당 단어가 들어간 광고그룹만 설정을 변경합니다.</div>
+                        </div>
+                        <div class="form-group">
+                            <label>광고그룹명 제외 단어</label>
+                            <input type="text" id="bid_filter_exclude_mode" placeholder="예: 벌크, 테스트, 임시">
+                        </div>
                         <div class="field-note" style="margin-bottom:12px;">개별 입찰가 설정으로 바꿀 때는 현재 적용 중인 유효 입찰가를 각 키워드/소재의 개별 입찰가로 저장합니다.</div>
                         <button class="btn btn-primary" style="width:100%;" onclick="changeBidModeByScope()">입찰가 설정만 변경 실행</button>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">파워링크 PC/모바일 입찰가중치 변경</div>
+                        <div class="field-note" style="margin-bottom:12px;">
+                            선택한 캠페인 또는 광고그룹의 파워링크 광고그룹만 대상으로 PC/모바일 입찰가중치를 각각 변경합니다. 값은 10~500% 범위로 입력하세요.
+                        </div>
+                        <div class="form-group"><label>적용 범위</label><select id="device_bid_weight_scope"><option value="campaign">선택한 캠페인 하위 파워링크 그룹 전체</option><option value="adgroup">선택한 광고그룹 중 파워링크 그룹</option></select></div>
+                        <div class="grid-2">
+                            <div class="form-group"><label>PC 입찰가중치 (%)</label><input type="number" id="device_pc_bid_weight" value="100" min="10" max="500"><div class="field-note">비워두면 PC 값은 유지</div></div>
+                            <div class="form-group"><label>모바일 입찰가중치 (%)</label><input type="number" id="device_mobile_bid_weight" value="100" min="10" max="500"><div class="field-note">비워두면 모바일 값은 유지</div></div>
+                        </div>
+                        <button class="btn btn-primary" style="width:100%;" onclick="updatePowerlinkDeviceBidWeights()">PC/모바일 입찰가중치 변경 실행</button>
                     </div>
                     <div class="card">
                         <div class="card-title">상/하한 기준 자동 증감</div>
@@ -541,6 +574,15 @@
                         <div class="grid-2">
                             <div class="form-group"><label>하한가 (이하)</label><input type="number" id="threshold_lower_bid" placeholder="예: 300" value="300"></div>
                             <div class="form-group"><label>하한가 조정값</label><input type="number" id="threshold_lower_delta" placeholder="예: 100" value="100"></div>
+                        </div>
+                        <div class="form-group">
+                            <label>광고그룹명 포함 단어</label>
+                            <input type="text" id="bid_filter_include_threshold" placeholder="예: 메인, 일반">
+                            <div class="field-note">입력 시 해당 단어가 들어간 광고그룹만 조정합니다.</div>
+                        </div>
+                        <div class="form-group">
+                            <label>광고그룹명 제외 단어</label>
+                            <input type="text" id="bid_filter_exclude_threshold" placeholder="예: 벌크, 테스트, 임시">
                         </div>
                         <div style="font-size:12px; color:var(--muted); margin-bottom:16px;">예: 상한 1,000원 이상이면 1,000원 기준 -100원 → 900원, 하한 300원 이하면 300원 기준 +100원 → 400원으로 변경됩니다. 쇼핑검색은 키워드가 아니라 광고그룹 내 소재 입찰가를 기준으로 처리합니다.</div>
                         <button class="btn btn-primary" style="width:100%;" onclick="adjustKeywordBidsByThreshold()">조건부 입찰가 조정 실행</button>
@@ -578,17 +620,39 @@
 
                     <div class="card" style="grid-column:1/-1;">
                         <div class="card-title">목표 평균순위 기준 입찰가 (자동 계산)</div>
-                        <div class="form-group"><label>적용 범위</label><select id="bid_scope_type_avg_position"><option value="campaign">선택한 캠페인 하위 키워드/쇼핑소재 전체</option><option value="adgroup">선택한 광고그룹 키워드/쇼핑소재 전체</option></select></div>
+                        <div class="form-group">
+                            <label>광고유형</label>
+                            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                                <label class="lookup-check-label" style="padding:8px 12px; border:1px solid var(--line); border-radius:10px; background:#fff;">
+                                    <input type="radio" name="avg_position_target_type" value="powerlink" checked> 파워링크
+                                </label>
+                                <label class="lookup-check-label" style="padding:8px 12px; border:1px solid var(--line); border-radius:10px; background:#fff;">
+                                    <input type="radio" name="avg_position_target_type" value="shopping"> 쇼핑검색
+                                </label>
+                            </div>
+                        </div>
+                        <div class="form-group"><label>적용 범위</label><select id="bid_scope_type_avg_position"><option value="campaign">선택한 캠페인 하위 대상 전체</option><option value="adgroup">선택한 광고그룹 대상 전체</option></select></div>
                         <div class="grid-2">
                             <div class="form-group"><label>디바이스</label><select id="avg_position_device" onchange="syncAvgPositionLimit()"><option value="PC">PC</option><option value="MOBILE">모바일</option></select></div>
                             <div class="form-group"><label>목표 순위</label><select id="avg_position_val"></select></div>
                         </div>
                         <div class="form-group"><label>최대 상한선 설정 (원)</label><input type="number" id="avg_position_max_bid" placeholder="예: 3000"></div>
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label>광고그룹명 포함 단어</label>
+                                <input type="text" id="avg_position_adgroup_include" placeholder="예: 메인, 일반">
+                                <div class="field-note">입력 시 해당 단어가 들어간 광고그룹만 계산합니다.</div>
+                            </div>
+                            <div class="form-group">
+                                <label>광고그룹명 제외 단어</label>
+                                <input type="text" id="avg_position_adgroup_exclude" placeholder="예: 벌크, 테스트, 임시">
+                            </div>
+                        </div>
                         <div style="display:flex; gap:16px; font-size:12px; margin-bottom:6px; color:var(--muted); flex-wrap:wrap;">
                             <label><input type="checkbox" id="avg_position_exclude_paused" checked> 중지 키워드/소재 제외</label>
                             <label><input type="checkbox" id="avg_position_exclude_pending" checked> 비승인 제외</label>
                         </div>
-                        <div class="field-note" style="margin-bottom:12px;">파워링크는 키워드 기준, 쇼핑검색은 소재 기준으로 목표 평균순위 입찰가를 자동 계산합니다.</div>
+                        <div class="field-note" style="margin-bottom:12px;">선택한 광고유형만 처리합니다. 파워링크는 키워드 기준, 쇼핑검색은 소재 기준으로 목표 평균순위 입찰가를 자동 계산합니다.</div>
                         <div class="btn-row">
                             <button class="btn btn-sub" style="flex:1;" onclick="previewAvgPositionBids()">예상금액 미리보기</button>
                             <button class="btn btn-primary" style="flex:1;" onclick="applyAvgPositionBids()">자동 변경 실행</button>
@@ -623,10 +687,10 @@
                             <button class="btn btn-sub" type="button" onclick="addScheduleBlock()">구간 추가</button>
                             <button class="btn btn-sub" type="button" onclick="clearScheduleBlocks()">구간 초기화</button>
                         </div>
-                        <div class="field-note" style="margin-top:8px;">구간에 요일을 따로 지정하면 그 구간은 지정한 요일에만 적용됩니다. 지정하지 않으면 위 공통 요일을 사용합니다.</div>
+                        <div class="field-note" style="margin-top:8px;">구간에 요일을 따로 지정하면 그 구간은 지정한 요일에만 적용됩니다. 지정하지 않으면 위 공통 요일을 사용합니다. 연속 시간은 하나의 구간으로 병합되어 적용됩니다. 예: 14~16시는 14:00~16:00 한 구간으로 저장됩니다.</div>
                     </div>
                     <div class="form-group">
-                        <label>단일 시간 선택 (기존 방식 유지)</label>
+                        <label>단일 시간 선택 (연속 시간 자동 병합)</label>
                         <div class="hours-grid schedule-grid" id="schedule_hours"></div>
                         <div class="btn-row" style="margin-top:8px;">
                             <button class="btn btn-sub" style="padding:4px 8px; font-size:12px;" onclick="selectAllScheduleHours(true)">시간 전체선택</button>
@@ -642,8 +706,8 @@
             <div id="b_keyword_inspect" class="tab-content">
                 <div class="grid-2">
                     <div class="card" style="grid-column:1/-1;">
-                        <div class="card-title">검색어 기준 파워링크 키워드 조회 / 엑셀 다운로드</div>
-                        <div class="field-note" style="margin-bottom:8px;">현재 계정 전체 조회는 유지하면서, 필요하면 좌측에서 체크한 파워링크 캠페인 안에서만 검색할 수 있어요.</div>
+                        <div class="card-title">검색어 기준 파워링크 키워드 조회 / 엑셀 다운로드 / 입찰가 변경</div>
+                        <div class="field-note" style="margin-bottom:8px;">현재 계정 전체 조회는 유지하면서, 좌측에서 체크한 파워링크 캠페인/광고그룹 안에서만 검색하고 바로 입찰가까지 변경할 수 있어요.</div>
                         <div class="field-note" style="margin-bottom:12px;">쉼표(,), 줄바꿈, 세미콜론(;)으로 여러 검색어를 한 번에 넣을 수 있어요. 예: 종로, 용산, 마포, 강남, 서초, 송파</div>
                         <div class="grid-2">
                             <div class="form-group">
@@ -677,8 +741,9 @@
                                 <div class="field-note">부분일치: 각 검색어를 포함하는 키워드 조회 / 완전일치: 입력한 검색어와 정확히 같은 키워드만 조회</div>
                             </div>
                             <div class="form-group">
-                                <label>캠페인 선택 안내</label>
-                                <div class="field-note">선택 캠페인 기준은 좌측 캠페인 체크 후, 선택 그룹 기준은 좌측 광고그룹 체크 후 조회하면 됩니다.</div>
+                                <label>입찰가 변경</label>
+                                <input type="number" id="keyword_lookup_target_bid" value="100" min="70" step="10" placeholder="적용 입찰가(원)">
+                                <div class="field-note" style="margin-top:6px;">먼저 현재 조건으로 키워드를 조회한 뒤, 조회 결과 기준으로 입찰가 변경을 실행합니다.</div>
                             </div>
                         </div>
                         <div class="btn-row" style="margin-bottom:12px; flex-wrap:wrap;">
@@ -686,6 +751,7 @@
                             <button class="btn btn-sub" onclick="searchPowerlinkKeywordsForInspect('selected_campaigns')">선택 캠페인 조회</button>
                             <button class="btn btn-sub" onclick="searchPowerlinkKeywordsForInspect('selected_adgroups')">선택 그룹 조회</button>
                             <button class="btn btn-sub" onclick="downloadPowerlinkKeywordSearchExcel()">현재 범위 엑셀 다운로드</button>
+                            <button class="btn btn-primary" onclick="applyPowerlinkKeywordBidsFromLookup()">조회 결과 입찰가 변경</button>
                             <button class="btn btn-sub" onclick="clearPowerlinkKeywordLookupResult()">결과 비우기</button>
                         </div>
                         <div id="powerlink_keyword_lookup_result" class="log-list">
@@ -693,32 +759,53 @@
                         </div>
                     </div>
                     <div class="card" style="grid-column:1/-1;">
-                        <div class="card-title">검색어 기준 파워링크 키워드 입찰가 변경</div>
-                        <div class="field-note" style="margin-bottom:8px;">현재 계정의 파워링크 키워드 전체 또는 좌측에서 체크한 파워링크 캠페인 안에서 검색어와 교집합이 있는 키워드를 찾아 입찰가를 일괄 변경합니다.</div>
-                        <div class="field-note" style="margin-bottom:12px;">기본은 <strong>부분일치</strong>이며, 부분일치는 입력한 단어/토큰이 모두 포함된 키워드를 찾습니다. 필요할 때만 <strong>완전일치</strong>로 바꿔서 동일 키워드만 잡을 수 있습니다.</div>
-                        <div class="form-group">
-                            <label>검색어</label>
-                            <textarea id="keyword_bid_search_text" rows="3" placeholder="예: 종로, 용산, 마포&#10;강남&#10;서초&#10;송파"></textarea>
-                        </div>
-                        <div class="form-group" style="max-width:240px;">
-                            <label>적용 입찰가 (원)</label>
-                            <input type="number" id="keyword_bid_search_target_bid" value="100">
-                        </div>
-                        <div class="form-group">
-                            <label>일치 방식</label>
-                            <input type="hidden" id="keyword_bid_search_match_mode" value="partial">
-                            <input type="hidden" id="keyword_bid_search_preview_token" value="">
-                            <div class="btn-row">
-                                <button type="button" class="btn btn-primary kw-bid-match-btn" data-mode="partial" onclick="setKeywordBidSearchMatchMode('partial')">부분일치</button>
-                                <button type="button" class="btn btn-sub kw-bid-match-btn" data-mode="exact" onclick="setKeywordBidSearchMatchMode('exact')">완전일치</button>
+                        <div class="card-title">검색어 기준 목표 평균순위 입찰가 변경 (파워링크)</div>
+                        <div class="field-note" style="margin-bottom:8px;">검색어와 일치하는 파워링크 키워드만 골라 목표 평균순위 기준 예상 입찰가를 계산하고 변경합니다. 쇼핑검색은 처리하지 않습니다.</div>
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label>적용 범위</label>
+                                <select id="keyword_avg_search_scope">
+                                    <option value="account">전체 계정의 파워링크 키워드</option>
+                                    <option value="campaign">좌측 체크 캠페인 안에서만</option>
+                                    <option value="adgroup">좌측 체크 광고그룹 안에서만</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>검색어</label>
+                                <textarea id="keyword_avg_search_text" rows="3" placeholder="예: 종로, 용산, 마포&#10;강남&#10;서초&#10;송파"></textarea>
                             </div>
                         </div>
-                        <div class="btn-row" style="margin-bottom:12px; flex-wrap:wrap;">
-                            <button class="btn btn-sub" onclick="previewPowerlinkKeywordBidsBySearch()">먼저 조회하기</button>
-                            <button class="btn btn-primary" onclick="applyPowerlinkKeywordBidsBySearch()">조회 결과 확인 후 변경 실행</button>
-                            <button class="btn btn-sub" onclick="clearKeywordBidSearchResult()">결과 비우기</button>
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label>제외 검색어</label>
+                                <input type="text" id="keyword_avg_exclude_text" placeholder="예: 벌크, 테스트">
+                                <div class="field-note">입력한 단어가 들어간 키워드는 제외합니다. 비워두면 제외 없이 처리합니다.</div>
+                            </div>
+                            <div class="form-group">
+                                <label>일치 방식</label>
+                                <input type="hidden" id="keyword_avg_match_mode" value="partial">
+                                <input type="hidden" id="keyword_avg_preview_token" value="">
+                                <div class="btn-row">
+                                    <button type="button" class="btn btn-primary kw-avg-match-btn" data-mode="partial" onclick="setKeywordAvgSearchMatchMode('partial')">부분일치</button>
+                                    <button type="button" class="btn btn-sub kw-avg-match-btn" data-mode="exact" onclick="setKeywordAvgSearchMatchMode('exact')">완전일치</button>
+                                </div>
+                            </div>
                         </div>
-                        <textarea id="keyword_bid_search_result" rows="11" readonly placeholder="먼저 조회하기를 눌러 매칭 키워드를 확인한 뒤 변경 실행하세요."></textarea>
+                        <div class="grid-2">
+                            <div class="form-group"><label>디바이스</label><select id="keyword_avg_device" onchange="syncKeywordAvgPositionLimit()"><option value="PC">PC</option><option value="MOBILE">모바일</option></select></div>
+                            <div class="form-group"><label>목표 순위</label><select id="keyword_avg_position_val"></select></div>
+                        </div>
+                        <div class="form-group"><label>최대 상한선 설정 (원)</label><input type="number" id="keyword_avg_max_bid" placeholder="예: 3000"></div>
+                        <div style="display:flex; gap:16px; font-size:12px; margin-bottom:6px; color:var(--muted); flex-wrap:wrap;">
+                            <label><input type="checkbox" id="keyword_avg_exclude_paused" checked> 중지 키워드 제외</label>
+                            <label><input type="checkbox" id="keyword_avg_exclude_pending" checked> 비승인 제외</label>
+                        </div>
+                        <div class="btn-row" style="margin-bottom:12px; flex-wrap:wrap;">
+                            <button class="btn btn-sub" onclick="previewPowerlinkKeywordAvgPositionBySearch()">예상금액 미리보기</button>
+                            <button class="btn btn-primary" onclick="applyPowerlinkKeywordAvgPositionBySearch()">미리보기 확인 후 변경 실행</button>
+                            <button class="btn btn-sub" onclick="clearKeywordAvgSearchResult()">결과 비우기</button>
+                        </div>
+                        <textarea id="keyword_avg_result" rows="12" readonly placeholder="예상금액 미리보기를 눌러 매칭 키워드와 예상 입찰가를 확인한 뒤 변경 실행하세요."></textarea>
                     </div>
 
                     <div class="card">
@@ -734,11 +821,29 @@
                         </div>
                     </div>
                     <div class="card">
-                        <div class="card-title">파워링크 캠페인 내부 중복키워드 조회</div>
-                        <div class="field-note" style="margin-bottom:8px;">체크한 캠페인 중 파워링크 캠페인만 대상으로, 서로 다른 광고그룹 2개 이상에 들어간 동일 키워드를 찾아줍니다.</div>
-                        
+                        <div class="card-title">파워링크 중복키워드 조회</div>
+                        <div class="field-note" style="margin-bottom:8px;">체크한 캠페인 또는 광고그룹 중 파워링크 대상만 동일 키워드를 찾아줍니다. 선택 그룹 기준도 지원합니다.</div>
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label>대상 범위</label>
+                                <select id="duplicate_keyword_target_scope">
+                                    <option value="selected_campaigns" selected>선택 캠페인 기준</option>
+                                    <option value="selected_adgroups">선택 광고그룹 기준</option>
+                                </select>
+                                <div class="field-note">선택 광고그룹 기준은 좌측에서 체크한 그룹끼리만 비교합니다.</div>
+                            </div>
+                            <div class="form-group">
+                                <label>중복 판단 방식</label>
+                                <select id="duplicate_keyword_scope">
+                                    <option value="selected_campaigns" selected>전체 중복 포함</option>
+                                    <option value="within_campaign">캠페인 내부만</option>
+                                </select>
+                                <div class="field-note">예: DA_경기도와 DA_서울에 같은 키워드가 있으면 전체 중복에서 잡힙니다.</div>
+                            </div>
+                        </div>
                         <div class="btn-row" style="margin-bottom:12px;">
                             <button class="btn btn-primary" onclick="findPowerlinkDuplicateKeywords()">중복키워드 조회</button>
+                            <button class="btn btn-sub" onclick="downloadPowerlinkDuplicateKeywordsExcel()">엑셀 다운로드</button>
                             <button class="btn btn-sub" onclick="clearPowerlinkDuplicateKeywordResult()">결과 비우기</button>
                         </div>
                         <div id="duplicate_keyword_result" class="log-list">
@@ -919,11 +1024,12 @@
                         </div>
                         <button class="btn btn-sub" style="width:100%; margin-bottom:16px;" onclick="updateAdgroupMedia()">선택 광고그룹 매체 변경</button>
                         <div class="grid-2">
-                            <div class="form-group"><label>확장검색</label><select id="adgroup_use_keyword_plus"><option value="true">사용</option><option value="false">미사용</option></select></div>
-                            <div class="form-group"><label>확장검색 가중치(%)</label><input type="number" id="adgroup_keyword_plus_weight" value="100" min="1" max="999999"></div>
-                            <div class="form-group"><label>일치검색</label><select id="adgroup_use_close_variant" disabled><option value="true">API 미지원</option></select><div class="field-note">현재 네이버 API에서 수정 지원이 확인되지 않아 적용 제외됩니다.</div></div>
+                            <div class="form-group"><label>적용 범위</label><select id="adgroup_search_option_scope"><option value="adgroup">선택 광고그룹</option><option value="campaign">선택 캠페인 하위 광고그룹 전체</option></select><div class="field-note">캠페인 기준 선택 시 선택 캠페인 하위의 파워링크 광고그룹에만 적용됩니다.</div></div>
+                            <div class="form-group"><label>확장검색</label><select id="adgroup_use_keyword_plus"><option value="true">사용</option><option value="false">미사용</option></select><div class="field-note">미사용 선택 시 일치검색 중심으로 운영됩니다.</div></div>
+                            <div class="form-group"><label>확장검색 예산비율(%)</label><input type="number" id="adgroup_keyword_plus_weight" value="100" min="1" max="100"><div class="field-note">실제 API 응답 필드 기준: useExpSearch / expSearchBudgetRatio</div></div>
+                            <div class="form-group"><label>일치검색</label><select id="adgroup_use_close_variant"><option value="true" selected>기본 사용</option></select><div class="field-note">일치검색은 현재 기본 동작입니다. 확장검색 미사용을 선택하면 일치검색 중심으로 운영됩니다.</div></div>
                         </div>
-                        <button class="btn btn-sub" style="width:100%; margin-bottom:16px;" onclick="updateAdgroupPowerlinkOptions()">선택 광고그룹 파워링크 옵션 변경</button>
+                        <button class="btn btn-sub" style="width:100%; margin-bottom:16px;" onclick="updateAdgroupPowerlinkOptions()">선택 범위 파워링크 검색옵션 변경</button>
                         <div style="padding-top:16px; border-top:1px dashed var(--line);">
                             <div class="form-group"><label>검색어 없는 경우 광고 노출 제외 (쇼핑 전용)</label><select id="shopping_non_search_excluded"><option value="true">사용</option><option value="false">사용 안함</option></select><div class="field-note">선택한 광고그룹 또는 선택한 캠페인 하위 쇼핑 광고그룹에만 적용됩니다.</div></div>
                             <div class="form-group"><label>적용 범위</label><select id="shopping_non_search_scope"><option value="adgroup">선택한 광고그룹</option><option value="campaign">선택한 캠페인 하위 광고그룹 전체</option></select></div>
@@ -1002,6 +1108,7 @@
             </div>
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
               <button class="btn btn-sub" type="button" onclick="loadActionLogs(true)">새로고침</button>
+              <button class="btn btn-sub" type="button" onclick="downloadActionLogs()">엑셀 다운로드</button>
               <button class="btn btn-danger" type="button" onclick="clearActionLogs()">로그 비우기</button>
             </div>
           </div>
@@ -1239,10 +1346,10 @@ function isShoppingLikeType(value) {
     return ['SHOPPING', 'SHOPPING_BRAND', 'CATALOG', 'PRODUCT', 'SHOPPING_PRODUCT'].includes(s) || s.includes('SHOPPING') || s.includes('CATALOG') || (s.includes('PRODUCT') && s !== 'WEB_SITE');
 }
 function getFilteredMasterItems(type) {
-    const q = document.getElementById('master_search').value.toLowerCase();
     const isCampaign = type === 'campaign';
+    const searchEl = isCampaign ? document.getElementById('master_search') : document.getElementById('adgroup_search');
+    const q = String(searchEl?.value || '').trim().toLowerCase();
     const source = isCampaign ? campaigns : (currentCampaignId ? adgroups : []);
-    if(!isCampaign) return source;
     return source.filter(x => !q || String(x?.name || '').toLowerCase().includes(q));
 }
 function isTypeMatch(type, item, targetType) {
@@ -1382,6 +1489,34 @@ function renderActionLogs(rows) {
     }).join('');
 }
 
+
+async function downloadActionLogs() {
+    try {
+        const res = await fetch('/export_action_logs_excel?limit=2000');
+        if(!res.ok) {
+            const text = await res.text();
+            let data = {};
+            try { data = text ? JSON.parse(text) : {}; } catch(e) { data = {error: text || `${res.status}`}; }
+            throw new Error([data.error, data.details].filter(Boolean).join(' | ') || `${res.status}`);
+        }
+        const blob = await res.blob();
+        const disposition = res.headers.get('Content-Disposition') || '';
+        const match = disposition.match(/filename\*?=(?:UTF-8''|")?([^";]+)/i);
+        const filename = match ? decodeURIComponent(match[1].replace(/"/g, '')) : 'action_logs.xlsx';
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        showToast('작업 로그 엑셀 다운로드를 시작했습니다.', 'success');
+    } catch(err) {
+        showToast(`로그 다운로드 실패: ${err.message}`, 'error');
+    }
+}
+
 async function clearActionLogs() {
     if(!confirm('저장된 작업 로그를 비울까요?')) return;
     try {
@@ -1407,6 +1542,7 @@ window.onload = async function() {
     }
     syncExtensionForm();
     syncAvgPositionLimit();
+    syncKeywordAvgPositionLimit();
     toggleBudgetInput('new_campaign_unlimited', 'new_campaign_budget');
     toggleBudgetInput('new_adgroup_unlimited', 'new_adgroup_budget');
     toggleBudgetInput('campaign_budget_unlimited', 'campaign_budget_val');
@@ -2005,6 +2141,10 @@ function renderAccountAdsPreview() {
         {k:'type', l:'소재유형'},
         {k:'status', l:'상태'},
         {k:'summary', l:'요약'},
+        {k:'effectiveBidAmt', l:'적용입찰가', f:(v)=>v ? num(v) : ''},
+        {k:'adBidAmt', l:'소재입찰가', f:(v)=>v ? num(v) : ''},
+        {k:'adUseGroupBidAmt', l:'그룹입찰가사용'},
+        {k:'adgroupBidAmt', l:'광고그룹입찰가', f:(v)=>v ? num(v) : ''},
         {k:'adId', l:'소재 ID'},
     ], rows, '아직 조회된 소재가 없습니다.');
 }
@@ -2291,19 +2431,26 @@ async function updateAdgroupMedia() {
 
 async function updateAdgroupPowerlinkOptions() {
     const c = ensureReady(); if(!c) return;
-    const ids = Array.from(checkedAdgroupIds);
-    if(!ids.length) { showToast('좌측 체크박스에서 광고그룹을 선택해주세요.', 'error'); return; }
+    const scopeEl = document.getElementById('adgroup_search_option_scope');
+    const scope = scopeEl ? scopeEl.value : 'adgroup';
+    const ids = scope === 'campaign' ? Array.from(checkedCampaignIds) : Array.from(checkedAdgroupIds);
+    if(!ids.length) {
+        showToast(scope === 'campaign' ? '좌측 체크박스에서 캠페인을 선택해주세요.' : '좌측 체크박스에서 광고그룹을 선택해주세요.', 'error');
+        return;
+    }
     try {
-        const data = await postJson('/update_adgroup_options', {
+        const data = await postJson('/update_adgroup_search_options', {
             ...c,
+            entity_type: scope,
             entity_ids: ids,
             use_keyword_plus: document.getElementById('adgroup_use_keyword_plus').value === 'true',
             keyword_plus_weight: document.getElementById('adgroup_keyword_plus_weight').value,
             use_close_variant: document.getElementById('adgroup_use_close_variant').value === 'true'
-        }, '파워링크 그룹옵션 변경 중...');
-        showToast(data.message, data.fail > 0 ? 'info' : 'success');
+        }, scope === 'campaign' ? '캠페인 하위 파워링크 검색옵션 변경 중...' : '파워링크 그룹옵션 변경 중...');
+        const patchMsg = data.patch_version ? (data.message + ' · patch=' + data.patch_version) : data.message;
+        showToast(patchMsg, Number(data.fail || 0) > 0 ? 'info' : 'success');
         await refreshAdgroups();
-        if(currentAdgroupId && ids.includes(currentAdgroupId)) updateBreadcrumb();
+        if(scope === 'adgroup' && currentAdgroupId && ids.includes(currentAdgroupId)) updateBreadcrumb();
     } catch(err) { showToast(err.message, 'error'); }
 }
 
@@ -2553,6 +2700,15 @@ async function createNegatives() {
 }
 
 // --- 7. Bulk Actions ---
+
+function getAdgroupNameFilterPayload(includeId, excludeId) {
+    return {
+        adgroup_name_include: (document.getElementById(includeId)?.value || '').trim(),
+        adgroup_name_exclude: (document.getElementById(excludeId)?.value || '').trim(),
+        adgroup_name_match_mode: 'contains'
+    };
+}
+
 async function saveKeywordBidsByScope() {
     const c = ensureReady(); if(!c) return;
     const scope = document.getElementById('bid_scope_type_fixed').value;
@@ -2561,7 +2717,11 @@ async function saveKeywordBidsByScope() {
     
     try {
         const data = await postJson('/update_keyword_bids', {
-            ...c, entity_type: scope, entity_ids: ids, bid_amt: document.getElementById('bid_scope_fixed_val').value
+            ...c,
+            entity_type: scope,
+            entity_ids: ids,
+            bid_amt: document.getElementById('bid_scope_fixed_val').value,
+            ...getAdgroupNameFilterPayload('bid_filter_include_fixed', 'bid_filter_exclude_fixed')
         }, '고정 입찰가 일괄 변경 중...');
         showToast(data.message, 'success');
         if(scope === 'adgroup' && ids.includes(currentAdgroupId)) await loadAdgroupDetails();
@@ -2577,11 +2737,55 @@ async function changeBidModeByScope() {
     const modeLabel = bidMode === 'group' ? '그룹 입찰가 설정' : '개별 입찰가 설정';
     try {
         const data = await postJson('/update_bid_mode_by_scope', {
-            ...c, entity_type: scope, entity_ids: ids, bid_mode: bidMode
+            ...c,
+            entity_type: scope,
+            entity_ids: ids,
+            bid_mode: bidMode,
+            ...getAdgroupNameFilterPayload('bid_filter_include_mode', 'bid_filter_exclude_mode')
         }, `${modeLabel} 적용 중...`);
         showToast(data.message, 'success');
         if(scope === 'adgroup' && ids.includes(currentAdgroupId)) await loadAdgroupDetails();
     } catch(err) { showToast(err.message, 'error'); }
+}
+
+
+async function updatePowerlinkDeviceBidWeights() {
+    const c = ensureReady(); if(!c) return;
+    const scope = document.getElementById('device_bid_weight_scope').value;
+    const ids = scope === 'campaign' ? Array.from(checkedCampaignIds) : Array.from(checkedAdgroupIds);
+    if(!ids.length){
+        showToast(scope === 'campaign' ? '좌측 체크박스에서 캠페인을 선택하세요.' : '좌측 체크박스에서 광고그룹을 선택하세요.', 'error');
+        return;
+    }
+    const pc = String(document.getElementById('device_pc_bid_weight')?.value || '').trim();
+    const mobile = String(document.getElementById('device_mobile_bid_weight')?.value || '').trim();
+    if(!pc && !mobile){
+        showToast('PC 또는 모바일 입찰가중치를 1개 이상 입력해주세요.', 'error');
+        return;
+    }
+    const checkWeight = (v, label) => {
+        if(!v) return true;
+        const n = Number(v);
+        if(!Number.isFinite(n) || n < 10 || n > 500) {
+            showToast(`${label} 입찰가중치는 10~500% 사이로 입력해주세요.`, 'error');
+            return false;
+        }
+        return true;
+    };
+    if(!checkWeight(pc, 'PC') || !checkWeight(mobile, '모바일')) return;
+    try {
+        const data = await postJson('/update_powerlink_device_bid_weights', {
+            ...c,
+            entity_type: scope,
+            entity_ids: ids,
+            pc_bid_weight: pc,
+            mobile_bid_weight: mobile
+        }, '파워링크 PC/모바일 입찰가중치 변경 중...');
+        showToast(data.message || '파워링크 PC/모바일 입찰가중치 변경 완료', data.ok ? 'success' : 'warning');
+        await loadAdgroupDetails();
+    } catch(err) {
+        showToast(`파워링크 PC/모바일 입찰가중치 변경 실패: ${err.message}`, 'error');
+    }
 }
 
 async function adjustKeywordBidsByThreshold() {
@@ -2598,6 +2802,7 @@ async function adjustKeywordBidsByThreshold() {
         upper_delta: document.getElementById('threshold_upper_delta').value,
         lower_bid: document.getElementById('threshold_lower_bid').value,
         lower_delta: document.getElementById('threshold_lower_delta').value,
+        ...getAdgroupNameFilterPayload('bid_filter_include_threshold', 'bid_filter_exclude_threshold')
     };
 
     try {
@@ -2609,16 +2814,19 @@ async function adjustKeywordBidsByThreshold() {
 
 function getAvgPositionPayload(c, previewOnly=false) {
     const scope = document.getElementById('bid_scope_type_avg_position').value;
+    const targetType = document.querySelector('input[name="avg_position_target_type"]:checked')?.value || 'powerlink';
     const ids = scope==='campaign' ? Array.from(checkedCampaignIds) : Array.from(checkedAdgroupIds);
     if(!ids.length){ showToast('좌측 체크박스에서 대상을 선택하세요.', 'error'); return null; }
     return {
         ...c, entity_type: scope, entity_ids: ids,
+        avg_target_type: targetType,
         device: document.getElementById('avg_position_device').value,
         position: Number(document.getElementById('avg_position_val').value),
         max_bid: document.getElementById('avg_position_max_bid').value,
         exclude_paused: document.getElementById('avg_position_exclude_paused').checked,
         exclude_pending: document.getElementById('avg_position_exclude_pending').checked,
-        preview_only: previewOnly
+        ...getAdgroupNameFilterPayload('avg_position_adgroup_include', 'avg_position_adgroup_exclude'),
+        preview_only: previewOnly,
     };
 }
 async function previewAvgPositionBids() {
@@ -2974,6 +3182,120 @@ async function applyPowerlinkKeywordBidsBySearch() {
 }
 
 
+
+function setKeywordAvgSearchMatchMode(mode) {
+    const hidden = document.getElementById('keyword_avg_match_mode');
+    if(hidden) hidden.value = mode === 'exact' ? 'exact' : 'partial';
+    document.querySelectorAll('.kw-avg-match-btn').forEach(btn => {
+        const active = String(btn.dataset.mode || '') === (mode === 'exact' ? 'exact' : 'partial');
+        btn.classList.toggle('btn-primary', active);
+        btn.classList.toggle('btn-sub', !active);
+    });
+}
+
+function syncKeywordAvgPositionLimit() {
+    const dev = document.getElementById('keyword_avg_device')?.value || 'PC';
+    const pos = document.getElementById('keyword_avg_position_val');
+    if(!pos) return;
+    const max = dev === 'PC' ? 10 : 5;
+    const prev = Number(pos.value || 1);
+    pos.innerHTML = Array.from({length:max}, (_,i)=>`<option value="${i+1}">${i+1}위</option>`).join('');
+    pos.value = String((prev >= 1 && prev <= max) ? prev : 1);
+}
+
+function clearKeywordAvgSearchResult() {
+    const el = document.getElementById('keyword_avg_result');
+    const previewEl = document.getElementById('keyword_avg_preview_token');
+    if(el) el.value = '';
+    if(previewEl) previewEl.value = '';
+}
+
+function buildKeywordAvgSearchPreviewKey() {
+    const searchText = document.getElementById('keyword_avg_search_text')?.value?.trim() || '';
+    const excludeText = document.getElementById('keyword_avg_exclude_text')?.value?.trim() || '';
+    const mode = document.getElementById('keyword_avg_match_mode')?.value === 'exact' ? 'exact' : 'partial';
+    const scope = document.getElementById('keyword_avg_search_scope')?.value || 'account';
+    const dev = document.getElementById('keyword_avg_device')?.value || 'PC';
+    const pos = document.getElementById('keyword_avg_position_val')?.value || '1';
+    const maxBid = String(document.getElementById('keyword_avg_max_bid')?.value || '').trim();
+    const campaignIds = Array.from(checkedCampaignIds || []).filter(Boolean).join(',');
+    const adgroupIds = Array.from(checkedAdgroupIds || []).filter(Boolean).join(',');
+    return `${mode}::${scope}::${searchText}::${excludeText}::${dev}::${pos}::${maxBid}::${campaignIds}::${adgroupIds}`;
+}
+
+function getKeywordAvgSearchPayload(c, previewOnly=false) {
+    const searchText = document.getElementById('keyword_avg_search_text')?.value?.trim() || '';
+    const scope = document.getElementById('keyword_avg_search_scope')?.value || 'account';
+    const mode = document.getElementById('keyword_avg_match_mode')?.value === 'exact' ? 'exact' : 'partial';
+    if(!searchText) { showToast('검색어를 입력해주세요.', 'error'); return null; }
+    if(scope === 'campaign' && !Array.from(checkedCampaignIds || []).filter(Boolean).length) {
+        showToast('좌측 체크박스에서 캠페인을 선택해주세요.', 'error');
+        return null;
+    }
+    if(scope === 'adgroup' && !Array.from(checkedAdgroupIds || []).filter(Boolean).length) {
+        showToast('좌측 체크박스에서 광고그룹을 선택해주세요.', 'error');
+        return null;
+    }
+    return {
+        ...c,
+        search_scope: scope,
+        campaign_ids: Array.from(checkedCampaignIds || []).filter(Boolean),
+        adgroup_ids: Array.from(checkedAdgroupIds || []).filter(Boolean),
+        search_text: searchText,
+        exclude_text: document.getElementById('keyword_avg_exclude_text')?.value?.trim() || '',
+        exact_match: mode === 'exact',
+        device: document.getElementById('keyword_avg_device')?.value || 'PC',
+        position: Number(document.getElementById('keyword_avg_position_val')?.value || 1),
+        max_bid: document.getElementById('keyword_avg_max_bid')?.value || '',
+        exclude_paused: document.getElementById('keyword_avg_exclude_paused')?.checked ?? true,
+        exclude_pending: document.getElementById('keyword_avg_exclude_pending')?.checked ?? true,
+        preview_only: previewOnly,
+        keyword_search_avg_position: true
+    };
+}
+
+async function previewPowerlinkKeywordAvgPositionBySearch() {
+    const c = ensureReady(); if(!c) return;
+    const payload = getKeywordAvgSearchPayload(c, true); if(!payload) return;
+    const resultEl = document.getElementById('keyword_avg_result');
+    const previewEl = document.getElementById('keyword_avg_preview_token');
+    try {
+        const data = await postJson('/preview_keyword_avg_position_by_search', payload, '검색어 기준 평균순위 예상금액 계산 중...');
+        if(resultEl) resultEl.value = String(data?.message || '미리보기 완료');
+        if(previewEl) previewEl.value = `${buildKeywordAvgSearchPreviewKey()}::${String(data?.preview_token || '')}`;
+        const estimated = Number(data?.estimated || 0);
+        showToast(estimated > 0 ? `미리보기 완료: ${estimated.toLocaleString()}개 추정` : '미리보기 완료: 추정 대상 없음', estimated > 0 ? 'success' : 'info');
+    } catch(err) {
+        if(resultEl) resultEl.value = `실패: ${err.message}`;
+        if(previewEl) previewEl.value = '';
+        showToast(`검색어 기준 평균순위 미리보기 실패: ${err.message}`, 'error');
+    }
+}
+
+async function applyPowerlinkKeywordAvgPositionBySearch() {
+    const c = ensureReady(); if(!c) return;
+    const payload = getKeywordAvgSearchPayload(c, false); if(!payload) return;
+    const resultEl = document.getElementById('keyword_avg_result');
+    const previewEl = document.getElementById('keyword_avg_preview_token');
+    const previewKey = `${buildKeywordAvgSearchPreviewKey()}::`;
+    if(!String(previewEl?.value || '').startsWith(previewKey)) {
+        showToast('예상금액 미리보기로 현재 조건을 확인한 뒤 변경 실행해주세요.', 'error');
+        return;
+    }
+    try {
+        const data = await postJson('/update_keyword_avg_position_by_search', payload, '검색어 기준 평균순위 입찰가 적용 중...');
+        if(resultEl) resultEl.value = String(data?.message || '완료');
+        const tone = Number(data?.fail_count || 0) > 0 ? 'info' : (Number(data?.updated_count || 0) > 0 ? 'success' : 'info');
+        showToast(data?.message || '검색어 기준 평균순위 입찰가 변경 완료', tone);
+        if(currentAdgroupId && Array.isArray(data?.updated_adgroup_ids) && data.updated_adgroup_ids.includes(currentAdgroupId)) await loadAdgroupDetails();
+    } catch(err) {
+        if(resultEl) resultEl.value = `실패: ${err.message}`;
+        showToast(`검색어 기준 평균순위 입찰가 변경 실패: ${err.message}`, 'error');
+    }
+}
+
+
+
 function setKeywordBidWeightSearchMatchMode(mode) {
     const hidden = document.getElementById('keyword_bid_weight_match_mode');
     if(hidden) hidden.value = mode === 'exact' ? 'exact' : 'partial';
@@ -3321,6 +3643,60 @@ async function searchPowerlinkKeywordsForInspect(scopeOverride = null) {
     }
 }
 
+
+async function applyPowerlinkKeywordBidsFromLookup() {
+    const c = ensureReady(); if(!c) return;
+    const searchText = document.getElementById('keyword_lookup_search_text')?.value?.trim() || '';
+    const excludeText = document.getElementById('keyword_lookup_exclude_text')?.value?.trim() || '';
+    const bidAmt = document.getElementById('keyword_lookup_target_bid')?.value;
+    const mode = document.getElementById('keyword_lookup_match_mode')?.value === 'exact' ? 'exact' : 'partial';
+    const previewEl = document.getElementById('keyword_lookup_preview_token');
+    const scopePayload = getKeywordLookupScopePayload();
+    const previewKey = `${buildPowerlinkKeywordLookupPreviewKey()}::`;
+    if(!searchText) { showToast('검색어를 입력해주세요.', 'error'); return; }
+    if(!String(bidAmt || '').trim()) { showToast('적용 입찰가를 입력해주세요.', 'error'); return; }
+    if(scopePayload.search_scope === 'selected_campaigns' && !(scopePayload.campaign_ids || []).length) { showToast('좌측에서 캠페인을 체크한 뒤 조회해주세요.', 'error'); return; }
+    if(scopePayload.search_scope === 'selected_adgroups' && !(scopePayload.adgroup_ids || []).length) { showToast('좌측에서 광고그룹을 체크한 뒤 조회해주세요.', 'error'); return; }
+    if(!String(previewEl?.value || '').startsWith(previewKey)) {
+        showToast('먼저 현재 조건으로 키워드 조회를 실행한 뒤 입찰가를 변경해주세요.', 'error');
+        return;
+    }
+    if(!Array.isArray(powerlinkKeywordLookupRows) || !powerlinkKeywordLookupRows.length) {
+        showToast('변경할 조회 결과가 없습니다.', 'error');
+        return;
+    }
+    try {
+        const data = await postJson('/update_keyword_bids_by_search', {
+            ...c,
+            ...scopePayload,
+            search_text: searchText,
+            exclude_text: excludeText,
+            exact_match: mode === 'exact',
+            bid_amt: bidAmt
+        }, '검색어 기준 파워링크 키워드 입찰가 변경 중...');
+        const failCount = Number(data?.fail_count || 0);
+        const updatedCount = Number(data?.updated_count || 0);
+        const targetBid = Number(data?.target_bid || bidAmt || 0);
+        if(failCount === 0 && targetBid > 0 && Array.isArray(powerlinkKeywordLookupRows)) {
+            powerlinkKeywordLookupRows = powerlinkKeywordLookupRows.map(row => ({ ...row, current_bid: targetBid, current_use_group: false }));
+        }
+        const wrap = document.getElementById('powerlink_keyword_lookup_result');
+        renderPowerlinkKeywordLookupResult({
+            rows: powerlinkKeywordLookupRows,
+            matched_count: powerlinkKeywordLookupRows.length,
+            scanned_keyword_count: Number(wrap?.dataset.scannedKeywordCount || data?.scanned_keyword_count || 0),
+            search_groups: JSON.parse(wrap?.dataset.searchGroupsJson || '[]'),
+            warnings: Array.isArray(data?.warnings) ? data.warnings : [],
+            message: String(data?.message || '입찰가 변경 완료')
+        });
+        const tone = failCount > 0 ? 'info' : (updatedCount > 0 ? 'success' : 'info');
+        showToast(data?.message || '검색어 기준 파워링크 키워드 입찰가 변경 완료', tone);
+        if(currentAdgroupId && Array.isArray(data?.updated_adgroup_ids) && data.updated_adgroup_ids.includes(currentAdgroupId)) await loadAdgroupDetails();
+    } catch(err) {
+        showToast(`검색어 기준 입찰가 변경 실패: ${err.message}`, 'error');
+    }
+}
+
 async function downloadPowerlinkKeywordSearchExcel() {
     const c = ensureReady(); if(!c) return;
     const searchText = document.getElementById('keyword_lookup_search_text')?.value?.trim() || '';
@@ -3430,6 +3806,26 @@ function clearPowerlinkDuplicateKeywordResult() {
     wrap.innerHTML = '<div class="log-empty">아직 조회한 결과가 없습니다.</div>';
 }
 
+function getDuplicateKeywordScope() {
+    const el = document.getElementById('duplicate_keyword_scope');
+    return el ? (el.value || 'selected_campaigns') : 'selected_campaigns';
+}
+
+function getDuplicateKeywordTargetScope() {
+    const el = document.getElementById('duplicate_keyword_target_scope');
+    return el ? (el.value || 'selected_campaigns') : 'selected_campaigns';
+}
+
+function getDuplicateKeywordPayloadIds(targetScope = null) {
+    const scope = targetScope || getDuplicateKeywordTargetScope();
+    if(scope === 'selected_adgroups') {
+        const adgroupIds = getCheckedAdgroupIdsInViewOrder();
+        const campaignIds = currentCampaignId ? [String(currentCampaignId)] : getCheckedCampaignIdsInViewOrder();
+        return { campaignIds, adgroupIds };
+    }
+    return { campaignIds: getCheckedCampaignIdsInViewOrder(), adgroupIds: [] };
+}
+
 function renderPowerlinkDuplicateKeywordResult(data) {
     const wrap = document.getElementById('duplicate_keyword_result');
     if(!wrap) return;
@@ -3455,6 +3851,7 @@ function renderPowerlinkDuplicateKeywordResult(data) {
               <div class="log-top">
                 <div class="log-title">${escapeMaybe(row.keyword || '-')}</div>
                 <span class="badge blue">${escapeMaybe(String(row.adgroup_count || 0))}개 그룹</span>
+                ${Number(row.campaign_count || 0) > 1 ? `<span class="badge">${escapeMaybe(String(row.campaign_count))}개 캠페인</span>` : ''}
               </div>
               <div class="log-summary">${escapeMaybe((row.adgroup_names || []).join(', '))}</div>
             </div>
@@ -3471,14 +3868,47 @@ function renderPowerlinkDuplicateKeywordResult(data) {
 
 async function findPowerlinkDuplicateKeywords() {
     const c = ensureReady(); if(!c) return;
-    const ids = getCheckedCampaignIdsInViewOrder();
-    if(!ids.length) { showToast('캠페인을 1개 이상 체크해주세요.', 'error'); return; }
+    const targetScope = getDuplicateKeywordTargetScope();
+    const { campaignIds, adgroupIds } = getDuplicateKeywordPayloadIds(targetScope);
+    if(targetScope === 'selected_adgroups') {
+        if(!adgroupIds.length) { showToast('좌측에서 광고그룹을 1개 이상 체크해주세요.', 'error'); return; }
+    } else if(!campaignIds.length) {
+        showToast('캠페인을 1개 이상 체크해주세요.', 'error'); return;
+    }
     try {
-        const data = await postJson('/find_powerlink_duplicate_keywords', { ...c, campaign_ids: ids }, '중복 키워드 조회 중...');
+        const data = await postJson('/find_powerlink_duplicate_keywords', {
+            ...c,
+            target_scope: targetScope,
+            campaign_ids: campaignIds,
+            adgroup_ids: adgroupIds,
+            duplicate_scope: getDuplicateKeywordScope()
+        }, targetScope === 'selected_adgroups' ? '선택 그룹 기준 중복 키워드 조회 중...' : '중복 키워드 조회 중...');
         renderPowerlinkDuplicateKeywordResult(data);
         showToast(data?.message || '중복 키워드 조회 완료', (Array.isArray(data?.rows) && data.rows.length) ? 'success' : 'info');
     } catch(err) {
         showToast(`중복 키워드 조회 실패: ${err.message}`, 'error');
+    }
+}
+
+async function downloadPowerlinkDuplicateKeywordsExcel() {
+    const c = ensureReady(); if(!c) return;
+    const targetScope = getDuplicateKeywordTargetScope();
+    const { campaignIds, adgroupIds } = getDuplicateKeywordPayloadIds(targetScope);
+    if(targetScope === 'selected_adgroups') {
+        if(!adgroupIds.length) { showToast('좌측에서 광고그룹을 1개 이상 체크해주세요.', 'error'); return; }
+    } else if(!campaignIds.length) {
+        showToast('캠페인을 1개 이상 체크해주세요.', 'error'); return;
+    }
+    try {
+        await downloadPostFile('/export_powerlink_duplicate_keywords_excel', {
+            ...c,
+            target_scope: targetScope,
+            campaign_ids: campaignIds,
+            adgroup_ids: adgroupIds,
+            duplicate_scope: getDuplicateKeywordScope()
+        }, targetScope === 'selected_adgroups' ? '선택 그룹 기준 중복 키워드 엑셀 생성 중...' : '중복 키워드 엑셀 생성 중...', 'powerlink_duplicate_keywords.xlsx');
+    } catch(err) {
+        showToast(`중복 키워드 엑셀 다운로드 실패: ${err.message}`, 'error');
     }
 }
 
