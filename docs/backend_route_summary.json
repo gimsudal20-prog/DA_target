@@ -1,0 +1,15 @@
+{
+  "app_py_lines": 10612,
+  "function_defs": 337,
+  "route_decorators": 75,
+  "by_category": {
+    "system": 5,
+    "lookup": 20,
+    "export": 5,
+    "logs": 3,
+    "create": 12,
+    "copy": 4,
+    "update": 23,
+    "delete": 3
+  }
+}

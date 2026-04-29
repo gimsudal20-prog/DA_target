@@ -14,19 +14,34 @@ import threading
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, Iterable, List, Tuple, Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlencode
 import pandas as pd
 import requests
-from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
-from openpyxl.utils import get_column_letter
 from flask import Flask, Response, jsonify, render_template, request, send_file
+from utils.excel import (
+    XLSX_MIME,
+    build_report_workbook,
+    build_table_workbook,
+    workbook_to_bytesio,
+)
 from werkzeug.exceptions import HTTPException
+from utils.labels import (
+    AD_EXTENSION_TYPE_LABELS,
+    AD_TYPE_LABELS,
+    ADGROUP_TYPE_LABELS,
+    CAMPAIGN_TYPE_COLORS,
+    CAMPAIGN_TYPE_LABELS,
+    format_asset_lookup_excel_value,
+    label_ad_type,
+    label_adgroup_type,
+    label_campaign_type,
+    label_extension_type,
+)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 SAMPLES_DIR = os.path.join(BASE_DIR, "samples")
 OPENAPI_BASE_URL = "https://api.searchad.naver.com"
-PATCH_VERSION = "search-options-campaign-scope-v6-20260428"
+PATCH_VERSION = "bulk-delete-extension-types-v20-20260429"
 app = Flask(__name__, template_folder=TEMPLATES_DIR)
 HTTP_SESSION = requests.Session()
 HTTP_ADAPTER = requests.adapters.HTTPAdapter(pool_connections=32, pool_maxsize=64, max_retries=0)
@@ -292,43 +307,8 @@ SHOPPING_AD_TYPES = {"SHOPPING_PRODUCT_AD", "CATALOG_PRODUCT_AD", "CATALOG_AD", 
 SHOPPING_TARGETABLE_ADGROUP_TYPES = {"SHOPPING", "CATALOG", "SHOPPING_BRAND"}
 SHOPPING_ITEM_BID_AD_TYPES = {"SHOPPING_PRODUCT_AD", "CATALOG_PRODUCT_AD", "CATALOG_AD"}
 SHOPPING_ADGROUP_TYPES_WITH_AD_LEVEL_BID = {"SHOPPING", "CATALOG"}
-CAMPAIGN_TYPE_LABELS = {
-    "WEB_SITE": "파워링크",
-    "SHOPPING": "쇼핑검색",
-}
-CAMPAIGN_TYPE_COLORS = {
-    "WEB_SITE": "blue",
-    "SHOPPING": "green",
-}
-ADGROUP_TYPE_LABELS = {
-    "WEB_SITE": "파워링크",
-    "SHOPPING": "쇼핑검색",
-    "SHOPPING_BRAND": "쇼핑브랜드",
-    "CATALOG": "카탈로그",
-}
-AD_TYPE_LABELS = {
-    "TEXT_45": "기본소재(제목+설명)",
-    "RSA_AD": "반응형 검색소재",
-    "SHOPPING_PRODUCT_AD": "상품소재",
-    "CATALOG_PRODUCT_AD": "카탈로그 상품소재",
-    "CATALOG_AD": "카탈로그 소재",
-    "SHOPPING_BRAND_AD": "쇼핑브랜드 소재",
-}
-AD_EXTENSION_TYPE_LABELS = {
-    "HEADLINE": "추가 제목",
-    "SUB_LINKS": "서브링크",
-    "DESCRIPTION": "추가 설명문구",
-    "DESCRIPTION_EXTRA": "설명 확장문구",
-    "SHOPPING_PROMO_TEXT": "쇼핑 추가홍보문구",
-    "SHOPPING_EXTRA": "쇼핑상품부가정보",
-    "PHONE": "전화번호",
-    "LOCATION": "위치정보",
-    "PROMOTION": "프로모션",
-    "PRICE_LINKS": "가격링크",
-    "POWER_LINK_IMAGE": "파워링크 이미지",
-    "WEBSITE_INFO": "웹사이트 정보",
-    "IMAGE_SUB_LINKS": "이미지 서브링크",
-}
+# Display labels are centralized in utils/labels.py.
+# Keep operational type sets in app.py until the route/service split is complete.
 COMMON_EXTENSION_TYPES = [
     "HEADLINE", "SUB_LINKS", "DESCRIPTION", "DESCRIPTION_EXTRA", "PHONE",
     "LOCATION", "PROMOTION", "PRICE_LINKS", "POWER_LINK_IMAGE", "WEBSITE_INFO", "IMAGE_SUB_LINKS"
@@ -463,13 +443,13 @@ def _do_req(method, api_key, secret_key, cid, uri, params=None, json_body=None, 
             time.sleep(1.25)
     return _make_fake_response(500, f"네트워크 통신 실패: {last_err or '알 수 없는 오류'}")
 def _campaign_label(value: Any) -> str:
-    return CAMPAIGN_TYPE_LABELS.get(str(value or "").strip(), str(value or "-"))
+    return str(label_campaign_type(value, default=str(value or "-")))
 def _adgroup_label(value: Any) -> str:
-    return ADGROUP_TYPE_LABELS.get(str(value or "").strip(), str(value or "-"))
+    return str(label_adgroup_type(value, default=str(value or "-")))
 def _ad_label(value: Any) -> str:
-    return AD_TYPE_LABELS.get(str(value or "").strip(), str(value or "-"))
+    return str(label_ad_type(value, default=str(value or "-")))
 def _extension_label(value: Any) -> str:
-    return AD_EXTENSION_TYPE_LABELS.get(str(value or "").strip(), str(value or "-"))
+    return str(label_extension_type(value, default=str(value or "-")))
 def _snake_to_camel(key: str) -> str:
     parts = str(key).strip().split("_")
     if len(parts) == 1:
@@ -608,6 +588,10 @@ def _normalize_campaign_tp(value: Any) -> str:
         return "WEB_SITE"
     if s in {"쇼핑검색", "쇼검", "SHOPPING"}:
         return "SHOPPING"
+    if s in {"플레이스", "PLACE", "PLACE_AD"}:
+        return "PLACE"
+    if s in {"파워컨텐츠", "파워콘텐츠", "POWER_CONTENTS", "POWER_CONTENT", "POWERCONTENTS", "POWERCONTENT"}:
+        return "POWER_CONTENTS"
     return s or "WEB_SITE"
 def _is_shopping_campaign_type(value: Any) -> bool:
     s = str(value or "").strip().upper()
@@ -1259,29 +1243,14 @@ def _build_powerlink_keyword_search_message(search_text: str, exact_match: bool,
         lines.extend(err_details[:10])
     return "\n".join(lines)
 def _build_powerlink_keyword_export_workbook(rows: List[Dict[str, Any]], search_text: str, exact_match: bool, exclude_text: str = ""):
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "키워드조회결과"
     generated_at = time.strftime("%Y-%m-%d %H:%M:%S")
     mode_label = "완전일치" if exact_match else "부분일치"
     search_groups = _parse_keyword_search_groups(search_text)
-    ws["A1"] = "파워링크 키워드 조회 결과"
-    ws["A1"].font = Font(size=14, bold=True, color="FFFFFF")
-    ws["A1"].fill = PatternFill("solid", fgColor="1D4ED8")
-    ws.merge_cells("A1:J1")
-    ws["A2"] = f"생성시각: {generated_at}"
     exclude_label = exclude_text if str(exclude_text or "").strip() else "없음"
-    ws["A3"] = f"조회조건: {mode_label} / 검색어 {len(search_groups)}개 / {search_text}"
-    ws["A4"] = f"제외어: {exclude_label}"
     headers = ["번호", "캠페인명", "광고그룹명", "키워드", "매칭 검색어", "현재 입찰가(원)", "그룹입찰가 사용", "현재 입찰가중치(%)", "키워드 ID", "조회 방식"]
-    start_row = 6
-    for col_idx, header in enumerate(headers, start=1):
-        cell = ws.cell(row=start_row, column=col_idx, value=header)
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = PatternFill("solid", fgColor="111827")
-        cell.alignment = Alignment(horizontal="center", vertical="center")
+    data_rows = []
     for idx, row in enumerate(rows, start=1):
-        values = [
+        data_rows.append([
             idx,
             str(row.get("campaign_name") or ""),
             str(row.get("adgroup_name") or ""),
@@ -1292,18 +1261,22 @@ def _build_powerlink_keyword_export_workbook(rows: List[Dict[str, Any]], search_
             int(row.get("current_bid_weight") or 100),
             str(row.get("ncc_keyword_id") or ""),
             mode_label,
-        ]
-        for col_idx, value in enumerate(values, start=1):
-            ws.cell(row=start_row + idx, column=col_idx, value=value)
+        ])
     widths = {1: 8, 2: 24, 3: 24, 4: 32, 5: 24, 6: 16, 7: 14, 8: 18, 9: 22, 10: 14}
-    for col_idx, width in widths.items():
-        ws.column_dimensions[get_column_letter(col_idx)].width = width
-    end_row = start_row + max(1, len(rows))
-    for row in ws.iter_rows(min_row=start_row + 1, max_row=end_row, min_col=1, max_col=10):
-        for cell in row:
-            cell.alignment = Alignment(vertical="top", wrap_text=True)
-    ws.freeze_panes = "A7"
-    return wb
+    return build_report_workbook(
+        title="파워링크 키워드 조회 결과",
+        sheet_title="키워드조회결과",
+        metadata=[
+            f"생성시각: {generated_at}",
+            f"조회조건: {mode_label} / 검색어 {len(search_groups)}개 / {search_text}",
+            f"제외어: {exclude_label}",
+        ],
+        headers=headers,
+        rows=data_rows,
+        start_row=6,
+        widths=widths,
+        freeze_panes="A7",
+    )
 def _find_powerlink_duplicate_keywords(api_key: str, secret_key: str, cid: str, campaign_ids: List[str], duplicate_scope: str = "selected_campaigns", adgroup_ids: List[str] | None = None, target_scope: str = "selected_campaigns"):
     selected_ids = _unique_keep_order([str(x or "").strip() for x in (campaign_ids or []) if str(x or "").strip()])
     selected_adgroup_ids = _unique_keep_order([str(x or "").strip() for x in (adgroup_ids or []) if str(x or "").strip()])
@@ -1544,35 +1517,18 @@ def _find_powerlink_duplicate_keywords(api_key: str, secret_key: str, cid: str, 
     }
 
 def _build_powerlink_duplicate_keyword_workbook(result: Dict[str, Any], scope_label: str = "선택 캠페인"):
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "중복키워드"
     generated_at = time.strftime("%Y-%m-%d %H:%M:%S")
     rows = list((result or {}).get("rows") or [])
     skipped = list((result or {}).get("skipped") or [])
     errors = list((result or {}).get("errors") or [])
     message = str((result or {}).get("message") or "")
-    ws["A1"] = "파워링크 중복키워드 조회 결과"
-    ws["A1"].font = Font(size=14, bold=True, color="FFFFFF")
-    ws["A1"].fill = PatternFill("solid", fgColor="1D4ED8")
-    ws.merge_cells("A1:I1")
-    ws["A2"] = f"생성시각: {generated_at}"
-    ws["A3"] = f"조회범위: {scope_label}"
-    ws["A4"] = f"요약: {message}"
-    ws["A5"] = f"제외 캠페인: {', '.join(skipped) if skipped else '없음'}"
-    ws["A6"] = f"오류: {' / '.join(errors) if errors else '없음'}"
     headers = ["번호", "캠페인명", "중복 캠페인 수", "키워드", "중복 광고그룹 수", "광고그룹명", "캠페인 ID", "광고그룹 ID 목록", "비고"]
-    start_row = 8
-    for col_idx, header in enumerate(headers, start=1):
-        cell = ws.cell(row=start_row, column=col_idx, value=header)
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = PatternFill("solid", fgColor="111827")
-        cell.alignment = Alignment(horizontal="center", vertical="center")
+    data_rows = []
     for idx, row in enumerate(rows, start=1):
         adgroups = list(row.get("adgroups") or [])
         adgroup_names = row.get("adgroup_names") or [str(g.get("name") or g.get("id") or "") for g in adgroups]
         adgroup_ids = [str(g.get("id") or "") for g in adgroups if str(g.get("id") or "").strip()]
-        values = [
+        data_rows.append([
             idx,
             str(row.get("campaign_name") or ""),
             int(row.get("campaign_count") or len(row.get("campaign_names") or []) or 1),
@@ -1582,18 +1538,24 @@ def _build_powerlink_duplicate_keyword_workbook(result: Dict[str, Any], scope_la
             str(row.get("campaign_id") or ""),
             ", ".join(adgroup_ids),
             str(row.get("duplicate_scope_label") or row.get("duplicate_scope") or ""),
-        ]
-        for col_idx, value in enumerate(values, start=1):
-            ws.cell(row=start_row + idx, column=col_idx, value=value)
+        ])
     widths = {1: 8, 2: 36, 3: 16, 4: 32, 5: 16, 6: 68, 7: 36, 8: 68, 9: 22}
-    for col_idx, width in widths.items():
-        ws.column_dimensions[get_column_letter(col_idx)].width = width
-    end_row = start_row + max(1, len(rows))
-    for row_cells in ws.iter_rows(min_row=1, max_row=end_row, min_col=1, max_col=len(headers)):
-        for cell in row_cells:
-            cell.alignment = Alignment(vertical="top", wrap_text=True)
-    ws.freeze_panes = "A9"
-    return wb
+    return build_report_workbook(
+        title="파워링크 중복키워드 조회 결과",
+        sheet_title="중복키워드",
+        metadata=[
+            f"생성시각: {generated_at}",
+            f"조회범위: {scope_label}",
+            f"요약: {message}",
+            f"제외 캠페인: {', '.join(skipped) if skipped else '없음'}",
+            f"오류: {' / '.join(errors) if errors else '없음'}",
+        ],
+        headers=headers,
+        rows=data_rows,
+        start_row=8,
+        widths=widths,
+        freeze_panes="A9",
+    )
 def _find_account_powerlink_duplicate_keywords(api_key: str, secret_key: str, cid: str):
     res_camp, campaign_rows = _fetch_campaigns(api_key, secret_key, cid)
     if res_camp.status_code != 200:
@@ -1836,11 +1798,78 @@ def _adgroup_name_filter_summary(filter_info: Dict[str, Any]) -> List[str]:
 
 def _adgroup_uses_ad_level_bid(adgroup_type: str) -> bool:
     return str(adgroup_type or "").upper() in SHOPPING_ADGROUP_TYPES_WITH_AD_LEVEL_BID
-def _ad_item_has_bid_attr(ad_item: Dict[str, Any] | None) -> bool:
-    return str((ad_item or {}).get("type") or "").upper() in SHOPPING_ITEM_BID_AD_TYPES
+
+def _first_non_empty(*values: Any) -> Any:
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, str) and value.strip() == "":
+            continue
+        return value
+    return None
+
+def _bool_or_none(value: Any) -> Optional[bool]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    s = str(value).strip().lower()
+    if s in {"", "none", "null", "undefined"}:
+        return None
+    if s in {"1", "true", "t", "y", "yes", "on", "사용", "예", "네"}:
+        return True
+    if s in {"0", "false", "f", "n", "no", "off", "미사용", "아니오"}:
+        return False
+    return None
+
+def _parse_json_obj_if_needed(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return copy.deepcopy(value)
+    if isinstance(value, str) and value.strip().startswith("{"):
+        try:
+            parsed = json.loads(value)
+            return copy.deepcopy(parsed) if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
 def _extract_ad_attr(ad_item: Dict[str, Any] | None) -> Dict[str, Any]:
-    ad_attr = (ad_item or {}).get("adAttr")
-    return copy.deepcopy(ad_attr) if isinstance(ad_attr, dict) else {}
+    """Return ad-level bid attrs across the response shapes used by Naver Ads.
+
+    Ads may expose bid settings as top-level adAttr, nested ad.adAttr, or as an
+    adAttrJson string. The old export checked only top-level adAttr, so bid
+    columns could be blank even when the API response had the values.
+    """
+    item = ad_item or {}
+    candidates: List[Dict[str, Any]] = []
+    for key in ("adAttr", "ad_attr", "adAttrs", "adAttrJson", "ad_attr_json"):
+        obj = _parse_json_obj_if_needed(item.get(key))
+        if obj:
+            candidates.append(obj)
+    ad_obj = item.get("ad") if isinstance(item.get("ad"), dict) else {}
+    for key in ("adAttr", "ad_attr", "adAttrs", "adAttrJson", "ad_attr_json"):
+        obj = _parse_json_obj_if_needed(ad_obj.get(key))
+        if obj:
+            candidates.append(obj)
+    merged: Dict[str, Any] = {}
+    for obj in candidates:
+        merged.update(obj)
+    direct_bid = _first_non_empty(item.get("bidAmt"), item.get("bid_amt"), item.get("adBidAmt"), item.get("ad_bid_amt"))
+    direct_use_group = _first_non_empty(item.get("useGroupBidAmt"), item.get("use_group_bid_amt"), item.get("adUseGroupBidAmt"), item.get("ad_use_group_bid_amt"))
+    if direct_bid is not None and merged.get("bidAmt") is None:
+        merged["bidAmt"] = direct_bid
+    if direct_use_group is not None and merged.get("useGroupBidAmt") is None:
+        merged["useGroupBidAmt"] = direct_use_group
+    return merged
+
+def _ad_item_has_bid_attr(ad_item: Dict[str, Any] | None) -> bool:
+    if str((ad_item or {}).get("type") or "").upper() in SHOPPING_ITEM_BID_AD_TYPES:
+        return True
+    ad_attr = _extract_ad_attr(ad_item)
+    return any(k in ad_attr for k in ("bidAmt", "useGroupBidAmt", "adBidAmt", "adUseGroupBidAmt"))
+
 def _resolve_effective_bid(raw_bid: Any, use_group_bid: bool, adgroup_bid: Any) -> Optional[int]:
     if bool(use_group_bid):
         group_bid = _normalize_bid_amt(adgroup_bid)
@@ -1951,6 +1980,114 @@ def _fetch_extensions(api_key: str, secret_key: str, cid: str, owner_id: str):
     if res.status_code != 200:
         return res, []
     return res, res.json() or []
+
+def _extract_ad_extension_id(ext_item: Dict[str, Any] | None) -> str:
+    """Return the real Naver ad-extension id from all known response shapes.
+
+    Some API responses use `adExtensionId`; others use `nccAdExtensionId`.
+    Export/delete/copy should not leave the extension ID blank because of alias differences.
+    """
+    if not isinstance(ext_item, dict):
+        return ""
+    candidates = [
+        ext_item.get("adExtensionId"),
+        ext_item.get("nccAdExtensionId"),
+        ext_item.get("nccAdExtId"),
+        ext_item.get("adExtId"),
+        ext_item.get("id"),
+    ]
+    nested = ext_item.get("adExtension")
+    if isinstance(nested, dict):
+        candidates.extend([
+            nested.get("adExtensionId"),
+            nested.get("nccAdExtensionId"),
+            nested.get("nccAdExtId"),
+            nested.get("id"),
+        ])
+    for value in candidates:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+def _extract_extension_image_ids(ext_item: Dict[str, Any] | None) -> str:
+    """Extract image identifiers from image-type ad-extension responses.
+
+    IMAGE_SUB_LINKS can return image identifiers in different nested shapes
+    depending on the response/detail shape. Scan image-related id keys inside
+    adExtension/sub-link items so the export does not leave the image ID blank.
+    """
+    if not isinstance(ext_item, dict):
+        return ""
+    raw_type = str(ext_item.get("type") or ext_item.get("adExtensionType") or "").strip()
+    normalized_type = _normalize_extension_type(raw_type)
+    if normalized_type not in {"IMAGE_SUB_LINKS", "POWER_LINK_IMAGE"} and "IMAGE" not in raw_type.upper():
+        return ""
+
+    exact_compact_keys = {
+        "imageid", "nccimageid", "imageassetid", "imagefileid", "imageresourceid",
+        "creativeimageid", "pcimageid", "mobileimageid", "imgid", "imgno",
+        "imageno", "imageuid", "fileid", "assetid", "id",
+    }
+    generic_compact_keys = {"fileid", "assetid", "id"}
+    found: List[str] = []
+    seen: set[str] = set()
+
+    def add_value(value: Any):
+        if isinstance(value, bool) or value is None:
+            return
+        if isinstance(value, (dict, list, tuple)):
+            walk(value, "")
+            return
+        text = str(value).strip()
+        if not text or text.lower() in {"none", "null", "undefined"}:
+            return
+        if text.startswith("http://") or text.startswith("https://"):
+            return
+        if len(text) > 160:
+            return
+        if text not in seen:
+            seen.add(text)
+            found.append(text)
+
+    def is_image_id_key(key: Any, path: str = "") -> bool:
+        k_raw = str(key or "").strip()
+        k = k_raw.lower()
+        compact = re.sub(r"[^a-z0-9]", "", k)
+        path_l = str(path or "").lower()
+        if compact in exact_compact_keys:
+            if compact in generic_compact_keys:
+                return "image" in path_l or "img" in path_l
+            return True
+        return (("image" in k or "img" in k) and ("id" in k or compact.endswith("no")))
+
+    def maybe_parse_json_string(value: str) -> Any:
+        text = str(value or "").strip()
+        if not text or text[0] not in "[{":
+            return None
+        try:
+            return json.loads(text)
+        except Exception:
+            return None
+
+    def walk(obj: Any, path: str = ""):
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                next_path = f"{path}.{key}" if path else str(key)
+                if is_image_id_key(key, path):
+                    add_value(value)
+                else:
+                    walk(value, next_path)
+        elif isinstance(obj, (list, tuple)):
+            for idx, item in enumerate(obj):
+                walk(item, f"{path}[{idx}]")
+        elif isinstance(obj, str):
+            parsed = maybe_parse_json_string(obj)
+            if parsed is not None:
+                walk(parsed, path)
+
+    walk(ext_item)
+    return ", ".join(found)
+
 def _normalize_lookup_scope(value: Any) -> str:
     scope = str(value or "account").strip().lower()
     if scope in {"selected_campaigns", "campaigns", "campaign_only"}:
@@ -2041,16 +2178,21 @@ def _lookup_bid_display_value(value: Any) -> Any:
 def _lookup_ad_bid_fields(ad_item: Dict[str, Any] | None, adgroup_bid: Any = None) -> Dict[str, Any]:
     ad_item = ad_item or {}
     ad_attr = _extract_ad_attr(ad_item)
-    has_ad_bid = _ad_item_has_bid_attr(ad_item) or bool(ad_attr)
-    if not has_ad_bid:
-        return {"adBidAmt": "", "adUseGroupBidAmt": "", "adgroupBidAmt": _lookup_bid_display_value(adgroup_bid), "effectiveBidAmt": ""}
-    use_group = bool(ad_attr.get("useGroupBidAmt"))
-    raw_ad_bid = ad_attr.get("bidAmt")
+    raw_ad_bid = _first_non_empty(ad_attr.get("bidAmt"), ad_attr.get("adBidAmt"), ad_attr.get("bid_amt"), ad_attr.get("ad_bid_amt"))
+    use_group_raw = _first_non_empty(ad_attr.get("useGroupBidAmt"), ad_attr.get("adUseGroupBidAmt"), ad_attr.get("use_group_bid_amt"), ad_attr.get("ad_use_group_bid_amt"))
+    parsed_use_group = _bool_or_none(use_group_raw)
+    group_bid_display = _lookup_bid_display_value(adgroup_bid)
+    has_raw_ad_bid = _normalize_bid_amt(raw_ad_bid) is not None
+    # If the ad response has no ad-level bid fields, it is effectively using the
+    # adgroup bid. Show that explicitly instead of leaving every bid column blank.
+    use_group = parsed_use_group if parsed_use_group is not None else (not has_raw_ad_bid)
     effective_bid = _resolve_effective_bid(raw_ad_bid, use_group, adgroup_bid)
+    if effective_bid is None and group_bid_display:
+        effective_bid = _normalize_bid_amt(adgroup_bid)
     return {
         "adBidAmt": _lookup_bid_display_value(raw_ad_bid),
         "adUseGroupBidAmt": "Y" if use_group else "N",
-        "adgroupBidAmt": _lookup_bid_display_value(adgroup_bid),
+        "adgroupBidAmt": group_bid_display,
         "effectiveBidAmt": _lookup_bid_display_value(effective_bid),
     }
 
@@ -2206,7 +2348,8 @@ def _collect_lookup_extensions_for_contexts(api_key: str, secret_key: str, cid: 
                     "adgroupType": str(ctx.get("adgroup_type") or ""),
                     "ownerId": owner_id,
                     "ownerScope": "소재" if owner_scope == "AD" else "광고그룹",
-                    "adExtensionId": str(ext.get("adExtensionId") or ext.get("id") or "").strip(),
+                    "adExtensionId": _extract_ad_extension_id(ext),
+                    "imageId": _extract_extension_image_ids(ext),
                     "type": str(ext.get("type") or ext.get("adExtensionType") or ""),
                     "status": "ON" if _extract_enabled_from_entity(ext) is not False else "OFF",
                     "summary": _summarize_lookup_extension(ext),
@@ -2215,72 +2358,43 @@ def _collect_lookup_extensions_for_contexts(api_key: str, secret_key: str, cid: 
     return rows, warnings
 def _build_asset_lookup_workbook(rows: List[Dict[str, Any]], title: str, scope_label: str, columns: List[Tuple[str, str]]):
     def _format_lookup_excel_value(key: str, label: str, value: Any) -> Any:
-        if key == "type" or (isinstance(label, str) and "유형" in label):
-            raw = str(value or "").strip()
-            if not raw:
-                return value
-            normalized_ad_type = _normalize_ad_type(raw)
-            ad_label = AD_TYPE_LABELS.get(normalized_ad_type)
-            if ad_label:
-                return ad_label
-            normalized_ext_type = _normalize_extension_type(raw)
-            ext_label = AD_EXTENSION_TYPE_LABELS.get(normalized_ext_type)
-            if ext_label:
-                return ext_label
-            fallback_map = {
-                "TEXT_45": "기본소재(제목+설명)",
-                "RSA_AD": "반응형 검색소재",
-                "SHOPPING_PRODUCT_AD": "상품소재",
-                "CATALOG_PRODUCT_AD": "카탈로그 상품소재",
-                "CATALOG_AD": "카탈로그 소재",
-                "SHOPPING_BRAND_AD": "쇼핑브랜드 소재",
-                "DESCRIPTION": "추가 설명문구",
-                "DESCRIPTION_EXTRA": "설명 확장문구",
-                "HEADLINE": "추가 제목",
-                "IMAGE_SUB_LINKS": "이미지 서브링크",
-                "POWER_LINK_IMAGE": "파워링크 이미지",
-                "WEBSITE_INFO": "웹사이트 정보",
-                "SUB_LINKS": "서브링크",
-                "PHONE": "전화번호",
-                "LOCATION": "위치정보",
-                "PROMOTION": "프로모션",
-                "PRICE_LINKS": "가격링크",
-                "SHOPPING_PROMO_TEXT": "쇼핑 추가홍보문구",
-                "SHOPPING_EXTRA": "쇼핑상품부가정보",
-            }
-            return fallback_map.get(raw.upper(), value)
-        return value
+        return format_asset_lookup_excel_value(
+            key,
+            label,
+            value,
+            normalize_ad_type=_normalize_ad_type,
+            normalize_extension_type=_normalize_extension_type,
+        )
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = title[:31]
     generated_at = time.strftime("%Y-%m-%d %H:%M:%S")
-    last_col = max(1, len(columns))
-    ws.cell(row=1, column=1, value=title)
-    ws.cell(row=1, column=1).font = Font(size=14, bold=True, color="FFFFFF")
-    ws.cell(row=1, column=1).fill = PatternFill("solid", fgColor="1D4ED8")
-    if last_col > 1:
-        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
-    ws.cell(row=2, column=1, value=f"생성시각: {generated_at}")
-    ws.cell(row=3, column=1, value=f"조회범위: {scope_label}")
-    start_row = 5
-    for col_idx, (_, label) in enumerate(columns, start=1):
-        cell = ws.cell(row=start_row, column=col_idx, value=label)
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = PatternFill("solid", fgColor="111827")
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-    for row_idx, row in enumerate(rows, start=1):
-        for col_idx, (key, label) in enumerate(columns, start=1):
-            value = _format_lookup_excel_value(key, label, row.get(key))
-            ws.cell(row=start_row + row_idx, column=col_idx, value=value)
-    widths = {
-        "campaignName": 22, "adgroupName": 22, "summary": 36, "type": 16, "status": 10,
-        "effectiveBidAmt": 14, "adBidAmt": 14, "adUseGroupBidAmt": 16, "adgroupBidAmt": 16, "adId": 24, "adExtensionId": 24, "ownerId": 24, "campaignId": 20, "adgroupId": 22, "ownerScope": 12,
+    headers = [label for _, label in columns]
+    data_rows = []
+    for row in rows:
+        data_rows.append([
+            _format_lookup_excel_value(key, label, row.get(key))
+            for key, label in columns
+        ])
+    width_by_key = {
+        "campaignType": 14, "campaignName": 22, "adgroupType": 16, "adgroupName": 22, "summary": 36, "type": 18, "status": 10,
+        "effectiveBidAmt": 14, "adBidAmt": 14, "adUseGroupBidAmt": 16, "adgroupBidAmt": 16, "adId": 24, "adExtensionId": 24, "imageId": 28, "ownerId": 24, "campaignId": 20, "adgroupId": 22, "ownerScope": 12,
     }
-    for col_idx, (key, label) in enumerate(columns, start=1):
-        ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(key, max(12, min(40, len(label) + 4)))
-    ws.freeze_panes = "A6"
-    return wb
+    widths = {
+        idx: width_by_key.get(key, max(12, min(40, len(label) + 4)))
+        for idx, (key, label) in enumerate(columns, start=1)
+    }
+    return build_report_workbook(
+        title=title,
+        sheet_title=title[:31],
+        metadata=[
+            f"생성시각: {generated_at}",
+            f"조회범위: {scope_label}",
+        ],
+        headers=headers,
+        rows=data_rows,
+        start_row=5,
+        widths=widths,
+        freeze_panes="A6",
+    )
 def _fetch_target_restrict_object(api_key: str, secret_key: str, cid: str, owner_id: str):
     res = _do_req("GET", api_key, secret_key, cid, "/ncc/targets", params={"ownerId": owner_id, "types": "RESTRICT_KEYWORD_TARGET"})
     if res.status_code != 200:
@@ -2413,29 +2527,29 @@ def _update_non_search_keyword_target(api_key: str, secret_key: str, cid: str, o
     if res_put.status_code in [200, 201]:
         return True, "검색어 없는 경우 광고 노출 제외 설정 완료"
     return False, res_put.text
-def _copy_target_payload_exact(api_key: str, secret_key: str, cid: str, source_owner_id: str, target_owner_id: str, target_type: str):
-    res_src, src_target_obj = _fetch_target_object(api_key, secret_key, cid, source_owner_id, target_type)
-    if res_src.status_code != 200:
-        return False, f"{target_type} 원본 조회 실패: {res_src.text}"
-    if not src_target_obj:
-        return False, f"{target_type} 원본 설정 없음"
-    src_target = copy.deepcopy(src_target_obj.get("target"))
+def _copy_target_payload_from_source_obj(api_key: str, secret_key: str, cid: str, src_target_obj: Dict[str, Any], target_owner_id: str):
+    target_type = _normalize_target_type_name((src_target_obj or {}).get("targetTp"))
+    if not target_type:
+        return False, "타겟 유형 확인 실패"
+    src_target = copy.deepcopy((src_target_obj or {}).get("target"))
     if src_target is None:
         return False, f"{target_type} 원본 target 비어 있음"
+
     res_dst, dst_target_obj = _fetch_target_object(api_key, secret_key, cid, target_owner_id, target_type)
     if res_dst.status_code == 200 and dst_target_obj and dst_target_obj.get("nccTargetId"):
         payload = {
             "customerId": int(cid),
             "nccTargetId": dst_target_obj.get("nccTargetId"),
-            "ownerId": target_owner_id,
+            "ownerId": str(target_owner_id),
             "targetTp": target_type,
             "target": src_target,
             "delFlag": False,
         }
         res_put = _do_req("PUT", api_key, secret_key, cid, f"/ncc/targets/{dst_target_obj.get('nccTargetId')}", json_body=payload)
-        if res_put.status_code in [200, 201]:
+        if res_put.status_code in [200, 201, 204]:
             return True, f"{target_type} 복사 완료"
         return False, f"{target_type} 적용 실패: {res_put.text}"
+
     if target_type == "PC_MOBILE_TARGET" and isinstance(src_target, dict):
         pc = bool(src_target.get("pc", True))
         mobile = bool(src_target.get("mobile", True))
@@ -2448,6 +2562,7 @@ def _copy_target_payload_exact(api_key: str, secret_key: str, cid: str, source_o
         else:
             return False, "PC_MOBILE_TARGET 원본이 모두 비활성화 상태입니다."
         return _update_pc_mobile_target(api_key, secret_key, cid, target_owner_id, media_type)
+
     create_payload = {
         "customerId": int(cid),
         "ownerId": str(target_owner_id),
@@ -2456,10 +2571,20 @@ def _copy_target_payload_exact(api_key: str, secret_key: str, cid: str, source_o
         "delFlag": False,
     }
     res_post = _do_req("POST", api_key, secret_key, cid, "/ncc/targets", json_body=create_payload)
-    if res_post.status_code in [200, 201]:
+    if res_post.status_code in [200, 201, 204]:
         return True, f"{target_type} 복사 완료"
     detail = res_dst.text if res_dst is not None else '알 수 없는 오류'
     return False, f"{target_type} 생성/적용 실패: {res_post.text if res_post is not None else detail}"
+
+
+def _copy_target_payload_exact(api_key: str, secret_key: str, cid: str, source_owner_id: str, target_owner_id: str, target_type: str):
+    target_type = _normalize_target_type_name(target_type)
+    res_src, src_target_obj = _fetch_target_object(api_key, secret_key, cid, source_owner_id, target_type)
+    if res_src.status_code != 200:
+        return False, f"{target_type} 원본 조회 실패: {res_src.text}"
+    if not src_target_obj:
+        return False, f"{target_type} 원본 설정 없음"
+    return _copy_target_payload_from_source_obj(api_key, secret_key, cid, src_target_obj, target_owner_id)
 def _fetch_all_target_objects(api_key: str, secret_key: str, cid: str, owner_id: str):
     res = _do_req("GET", api_key, secret_key, cid, "/ncc/targets", params={"ownerId": owner_id})
     if res.status_code != 200:
@@ -2477,6 +2602,299 @@ def _is_extra_copy_target_type(target_type: Any) -> bool:
     if tp in {"PC_MOBILE_TARGET", "MEDIA_TARGET", "RESTRICT_KEYWORD_TARGET", "NON_SEARCH_KEYWORD_TARGET"}:
         return False
     return True
+
+# 광고그룹 복사 시 누락되기 쉬운 타겟 타입을 명시적으로 재조회한다.
+# /ncc/targets?ownerId=... 전체 조회가 계정/상품/타겟 탭 상태에 따라 일부 타입을 빠뜨리는 케이스가 있어,
+# 원본 광고그룹 상세 targets와 타입별 조회를 같이 병합한다.
+ADGROUP_PROFILE_TARGET_TYPES = [
+    # v11: 타입 후보를 추측해서 /ncc/targets?types=... 로 찌르면
+    # 계정/상품에 따라 4406(The type of Target is invalid) 경고가 반복된다.
+    # 따라서 명시 타입 재조회는 하지 않고, 실제 API가 내려준
+    # 1) /ncc/targets?ownerId=... 전체 목록
+    # 2) /ncc/adgroups/{id} 상세의 targets 배열
+    # 안에 존재하는 targetTp만 복사 대상으로 삼는다.
+]
+
+TARGET_TYPE_KO_LABELS = {
+    "REGIONAL_TARGET": "지역",
+    "LOCATION_TARGET": "지역",
+    "AREA_TARGET": "지역",
+    "GENDER_TARGET": "성별",
+    "AGE_TARGET": "연령대",
+    "AGE_GROUP_TARGET": "연령대",
+    "AGE_BAND_TARGET": "연령대",
+    "DEMOGRAPHIC_TARGET": "연령/성별",
+    "AGE_GENDER_TARGET": "연령/성별",
+    "USER_SEGMENT_TARGET": "이용자 세그먼트",
+    "TIME_WEEKLY_TARGET": "요일/시간",
+    "PERIOD_TARGET": "기간",
+    "MEDIA_TARGET": "매체",
+    "PC_MOBILE_TARGET": "PC/Mobile",
+}
+
+
+def _target_type_label(target_type: Any) -> str:
+    tp = _normalize_target_type_name(target_type)
+    return TARGET_TYPE_KO_LABELS.get(tp, tp or "타겟")
+
+
+def _compact_json_for_message(value: Any, max_len: int = 260) -> str:
+    try:
+        txt = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        txt = str(value or "")
+    txt = re.sub(r"\s+", " ", txt).strip()
+    return txt[:max_len] + ("..." if len(txt) > max_len else "")
+
+
+def _normalize_attr_json_value(value: Any) -> str:
+    """Return a stable representation for adgroupAttrJson comparisons.
+
+    Some PowerLink targeting/profile settings are returned only inside
+    adgroupAttrJson on newer adgroup objects. The API may return it either as
+    a JSON string or as an object depending on account/API version, so compare
+    it in a normalized form.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return ""
+        try:
+            parsed = json.loads(raw)
+            return json.dumps(parsed, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        except Exception:
+            return raw
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    except Exception:
+        return str(value).strip()
+
+
+def _copy_adgroup_attr_json_settings(api_key: str, secret_key: str, cid: str, source_adgroup_id: str, target_adgroup_id: str):
+    """Copy adgroupAttrJson after creating/copying an adgroup.
+
+    지역/성별/연령대처럼 UI에서는 그룹 설정으로 보이지만 /ncc/targets
+    목록에 별도 target row가 내려오지 않는 값이 adgroupAttrJson에 들어오는
+    계정이 있다. 복사 직후 이 값을 보정 복사하고 재조회로 확인한다.
+    """
+    res_src, src_obj = _fetch_adgroup_detail(api_key, secret_key, cid, source_adgroup_id)
+    if res_src is not None and res_src.status_code != 200:
+        return False, f"adgroupAttrJson 원본 조회 실패: {res_src.text}"
+    if not isinstance(src_obj, dict) or src_obj.get("adgroupAttrJson") in (None, ""):
+        return True, "adgroupAttrJson 원본 설정 없음"
+    res_dst, dst_obj = _fetch_adgroup_detail(api_key, secret_key, cid, target_adgroup_id)
+    if res_dst is not None and res_dst.status_code != 200:
+        return False, f"adgroupAttrJson 대상 조회 실패: {res_dst.text}"
+    if not isinstance(dst_obj, dict):
+        return False, "adgroupAttrJson 대상 광고그룹 응답 없음"
+
+    src_attr = src_obj.get("adgroupAttrJson")
+    src_norm = _normalize_attr_json_value(src_attr)
+    if not src_norm:
+        return True, "adgroupAttrJson 원본 설정 없음"
+    if _normalize_attr_json_value(dst_obj.get("adgroupAttrJson")) == src_norm:
+        return True, "adgroupAttrJson 이미 동일"
+
+    attempts = []
+    payload = _prepare_adgroup_full_update_obj_for_search_options(dst_obj, cid, {"adgroupAttrJson": src_attr}, sanitized=True)
+    res_put = _do_req("PUT", api_key, secret_key, cid, f"/ncc/adgroups/{target_adgroup_id}", json_body=payload)
+    attempts.append(f"full/no-fields: {res_put.status_code} {str(res_put.text or '')[:160]}")
+    if res_put.status_code in [200, 201, 204]:
+        res_verify, verify_obj = _fetch_adgroup_detail(api_key, secret_key, cid, target_adgroup_id)
+        if res_verify is not None and res_verify.status_code == 200 and isinstance(verify_obj, dict):
+            if _normalize_attr_json_value(verify_obj.get("adgroupAttrJson")) == src_norm:
+                return True, "adgroupAttrJson 복사 완료"
+            attempts.append("full/no-fields: 응답 성공이나 재조회값 불일치")
+
+    minimal_payload = {"adgroupAttrJson": src_attr}
+    res_put2 = _do_req(
+        "PUT", api_key, secret_key, cid, f"/ncc/adgroups/{target_adgroup_id}",
+        params={"fields": "adgroupAttrJson"}, json_body=minimal_payload,
+    )
+    attempts.append(f"fields/adgroupAttrJson: {res_put2.status_code} {str(res_put2.text or '')[:160]}")
+    if res_put2.status_code in [200, 201, 204]:
+        res_verify, verify_obj = _fetch_adgroup_detail(api_key, secret_key, cid, target_adgroup_id)
+        if res_verify is not None and res_verify.status_code == 200 and isinstance(verify_obj, dict):
+            if _normalize_attr_json_value(verify_obj.get("adgroupAttrJson")) == src_norm:
+                return True, "adgroupAttrJson 복사 완료"
+            attempts.append("fields/adgroupAttrJson: 응답 성공이나 재조회값 불일치")
+    return False, "adgroupAttrJson 복사 실패/미반영: " + " / ".join(attempts[:4])
+
+
+def _adgroup_target_diagnostic(adgroup_obj: Dict[str, Any] | None) -> str:
+    if not isinstance(adgroup_obj, dict):
+        return "광고그룹 상세 응답 없음"
+    keys = ", ".join([str(k) for k in list(adgroup_obj.keys())[:40]])
+    target_summary = adgroup_obj.get("targetSummary")
+    targets = adgroup_obj.get("targets")
+    pieces = [f"광고그룹 응답 key: {keys}"]
+    if target_summary:
+        pieces.append("targetSummary=" + _compact_json_for_message(target_summary, 220))
+    if targets:
+        pieces.append("targets=" + _compact_json_for_message(targets, 220))
+    return " / ".join(pieces)
+
+
+def _should_surface_target_copy_message(msg: Any) -> bool:
+    s = str(msg or "").strip()
+    if not s:
+        return False
+    tokens = [
+        "복사 완료", "원본 설정 없음", "원본 타겟 없음", "원본 프로필 타겟 없음", "실패", "미반영",
+        "조회", "생성/적용", "비어", "지원", "타겟 확인", "원본 프로필 타겟 확인", "경고", "adgroupAttrJson", "Criterion",
+    ]
+    return any(tok in s for tok in tokens)
+
+
+
+def _target_type_from_obj(row: Dict[str, Any] | None) -> str:
+    if not isinstance(row, dict):
+        return ""
+    for key in ("targetTp", "targetType", "type"):
+        value = row.get(key)
+        if isinstance(value, str) and value.strip().upper().endswith("_TARGET"):
+            return value.strip().upper()
+    nested = row.get("target")
+    if isinstance(nested, dict):
+        for key in ("targetTp", "targetType"):
+            value = nested.get(key)
+            if isinstance(value, str) and value.strip().upper().endswith("_TARGET"):
+                return value.strip().upper()
+    return _normalize_target_type_name(row.get("targetTp"))
+
+
+def _detail_target_type_labels(rows: List[Dict[str, Any]]) -> List[str]:
+    labels: List[str] = []
+    for row in rows or []:
+        tp = _target_type_from_obj(row)
+        if tp:
+            labels.append(_target_type_label(tp))
+    return _unique_keep_order(labels)
+
+
+def _profile_target_absence_message(adg_obj: Dict[str, Any] | None, detail_rows: List[Dict[str, Any]] | None) -> str:
+    labels = _detail_target_type_labels(detail_rows or [])
+    diag = _adgroup_target_diagnostic(adg_obj)
+    if labels:
+        return "원본 프로필 타겟 없음: 상세 targets에는 " + ", ".join(labels) + "만 확인됨. 지역·성별·연령대 targetTp는 응답에 없습니다. " + diag
+    return "원본 프로필 타겟 없음/확인 실패: /ncc/targets와 광고그룹 상세 targets에서 지역·성별·연령대 타겟을 찾지 못했습니다. " + diag
+
+
+def _target_fetch_notice(msg: str) -> bool:
+    return "The type of Target is invalid" not in str(msg or "") and '"code":4406' not in str(msg or "")
+
+def _dedupe_target_objects_by_type(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        target_type = _target_type_from_obj(row)
+        if not _is_extra_copy_target_type(target_type):
+            continue
+        if row.get("target") is None:
+            continue
+        key = target_type
+        if key in seen:
+            continue
+        seen.add(key)
+        if not row.get("targetTp") and target_type:
+            row = dict(row)
+            row["targetTp"] = target_type
+        out.append(row)
+    return out
+
+
+def _fetch_copyable_adgroup_target_objects(api_key: str, secret_key: str, cid: str, owner_id: str):
+    rows: List[Dict[str, Any]] = []
+    detail_rows: List[Dict[str, Any]] = []
+    messages: List[str] = []
+    primary_res = _make_fake_response(200, "OK")
+    adg_obj: Dict[str, Any] | None = None
+
+    # 1) 공식 Target API 전체 조회. 타입 후보를 붙이지 않는다.
+    res_all, all_targets = _fetch_all_target_objects(api_key, secret_key, cid, owner_id)
+    primary_res = res_all
+    if res_all.status_code == 200:
+        rows.extend([row for row in (all_targets or []) if isinstance(row, dict)])
+    elif res_all.status_code != 404:
+        messages.append(f"전체 타겟 조회 실패: {res_all.text}")
+
+    # 2) 광고그룹 상세 응답의 targets 배열 fallback.
+    try:
+        res_adg, adg_obj = _fetch_adgroup_detail(api_key, secret_key, cid, owner_id)
+        if res_adg.status_code == 200 and isinstance(adg_obj, dict):
+            raw_detail_targets = adg_obj.get("targets")
+            if isinstance(raw_detail_targets, list):
+                detail_rows = [row for row in raw_detail_targets if isinstance(row, dict)]
+            elif isinstance(raw_detail_targets, dict):
+                detail_rows = [raw_detail_targets]
+            rows.extend(detail_rows)
+        elif res_adg.status_code not in {200, 404}:
+            messages.append(f"광고그룹 상세 조회 참고: {res_adg.text[:180]}")
+    except Exception as e:
+        messages.append(f"광고그룹 상세 targets 조회 예외: {e}")
+
+    # 3) 실제 응답에서 발견된 프로필 targetTp만 보강 조회한다.
+    seen_profile_types = _unique_keep_order([
+        _target_type_from_obj(row) for row in rows
+        if _is_extra_copy_target_type(_target_type_from_obj(row))
+    ])
+    for target_type in seen_profile_types:
+        try:
+            res_one, target_obj = _fetch_target_object(api_key, secret_key, cid, owner_id, target_type)
+        except Exception as e:
+            messages.append(f"{_target_type_label(target_type)} 타겟 조회 예외: {e}")
+            continue
+        if res_one.status_code == 200 and target_obj:
+            rows.append(target_obj)
+        elif res_one.status_code not in {200, 404}:
+            txt = str(res_one.text or "").strip()
+            if txt and len(messages) < 6 and _target_fetch_notice(txt):
+                messages.append(f"{_target_type_label(target_type)} 타겟 조회 참고: {txt[:180]}")
+
+    copyable = _dedupe_target_objects_by_type(rows)
+    if res_all.status_code != 200 and copyable:
+        primary_res = _make_fake_response(200, "상세 fallback으로 타겟 확인")
+    if not copyable:
+        messages.append(_profile_target_absence_message(adg_obj, detail_rows))
+    else:
+        labels = [_target_type_label(_target_type_from_obj(row)) for row in copyable]
+        messages.append("원본 프로필 타겟 확인: " + ", ".join(_unique_keep_order(labels)))
+    return primary_res, copyable, messages
+
+def _copy_profile_targets_exact(api_key: str, secret_key: str, cid: str, source_owner_id: str, target_owner_id: str):
+    messages: List[str] = []
+    overall_ok = True
+    res_src, src_targets, fetch_messages = _fetch_copyable_adgroup_target_objects(api_key, secret_key, cid, source_owner_id)
+    if fetch_messages:
+        messages.extend([m for m in fetch_messages if m][:8])
+    if res_src.status_code != 200 and not src_targets:
+        return False, messages + [f"추가 타겟 조회 실패: {res_src.text}"]
+    if not src_targets:
+        # 이전에는 여기서 True, [] 로 끝나 복사 화면에서 조용히 누락됐다.
+        # 복사/일괄적용 모두 원본 타겟을 못 잡은 사실을 반드시 표시한다.
+        return False, messages or ["추가 타겟 원본 설정 없음"]
+    copied_types: List[str] = []
+    for src_target in src_targets:
+        target_type = _target_type_from_obj(src_target)
+        if not _is_extra_copy_target_type(target_type):
+            continue
+        ok, msg = _copy_target_payload_from_source_obj(api_key, secret_key, cid, src_target, target_owner_id)
+        if ok:
+            copied_types.append(target_type)
+        else:
+            overall_ok = False
+            messages.append(msg)
+    if copied_types:
+        copied_labels = [_target_type_label(tp) for tp in copied_types]
+        messages.append("추가 타겟 복사 완료: " + ", ".join(_unique_keep_order(copied_labels)))
+    elif overall_ok:
+        overall_ok = False
+        messages.append("추가 타겟 원본 설정 없음")
+    return overall_ok, messages
 def _extract_schedule_codes_from_payload(payload: Any) -> List[str]:
     found: List[str] = []
     seen = set()
@@ -2569,20 +2987,73 @@ def _fetch_schedule_entries(api_key: str, secret_key: str, cid: str, owner_id: s
     owner_id = str(owner_id or "").strip()
     if not owner_id:
         return _make_fake_response(400, "ownerId가 없습니다."), []
-    res = _do_req("GET", api_key, secret_key, cid, f"/ncc/criterion/{owner_id}/SD")
-    if res.status_code == 200:
-        data = res.json() or []
+
+    # v14: /ncc/criterion/{ownerId}/SD 단일 GET은 계정/환경에 따라 405가 날 수 있다.
+    # AG/GN/RL 조회에 성공한 criterion fallback과 동일하게 여러 조회 경로를 순차 시도한다.
+    attempts: List[str] = []
+    request_variants = [
+        (f"/ncc/criterion/{owner_id}/SD", None),
+        (f"/ncc/criterion/{owner_id}", {"type": "SD"}),
+        ("/ncc/criterion", {"ownerId": owner_id, "type": "SD"}),
+        (f"/ncc/criteria/{owner_id}/SD", None),
+        ("/ncc/criteria", {"ownerId": owner_id, "type": "SD"}),
+    ]
+    first_res = None
+    saw_not_found = False
+    for uri, params in request_variants:
+        res = _do_req("GET", api_key, secret_key, cid, uri, params=params)
+        if first_res is None:
+            first_res = res
+        attempts.append(f"GET {uri}{'?' + urlencode(params) if params else ''} -> {res.status_code}")
+        if res.status_code in {404, 204}:
+            saw_not_found = True
+            continue
+        if res.status_code != 200:
+            continue
+        try:
+            data = res.json() or []
+        except Exception:
+            data = []
         if isinstance(data, dict):
-            data = [data]
-        return res, [item for item in data if isinstance(item, dict)]
-    if res.status_code == 405:
-        res_adg, adgroup_obj = _fetch_adgroup_detail(api_key, secret_key, cid, owner_id)
-        if res_adg.status_code == 200 and isinstance(adgroup_obj, dict):
-            fallback_codes = _extract_schedule_codes_from_payload(adgroup_obj)
-            if fallback_codes:
-                fallback_rows = [{"dictionaryCode": code, "bidWeight": 100} for code in fallback_codes]
-                return _make_fake_response(200, "SCHEDULE adgroup fallback"), fallback_rows
-    return res, []
+            for list_key in ("data", "items", "rows", "contents"):
+                if isinstance(data.get(list_key), list):
+                    data = data.get(list_key)
+                    break
+            else:
+                data = [data]
+        rows = [item for item in data if isinstance(item, dict)]
+        fake = _make_fake_response(200, "OK")
+        try:
+            setattr(fake, "debug_attempts", attempts)
+        except Exception:
+            pass
+        return fake, rows
+
+    # 마지막 fallback: 광고그룹 상세/속성 안에 SD 코드가 노출되는 경우만 보정한다.
+    res_adg, adgroup_obj = _fetch_adgroup_detail(api_key, secret_key, cid, owner_id)
+    if res_adg.status_code == 200 and isinstance(adgroup_obj, dict):
+        fallback_codes = _extract_schedule_codes_from_payload(adgroup_obj)
+        if fallback_codes:
+            fallback_rows = [{"dictionaryCode": code, "bidWeight": 100} for code in fallback_codes]
+            fake = _make_fake_response(200, "SCHEDULE adgroup fallback")
+            try:
+                setattr(fake, "debug_attempts", attempts + ["adgroup detail fallback -> codes"])
+            except Exception:
+                pass
+            return fake, fallback_rows
+
+    if saw_not_found:
+        fallback = _make_fake_response(404, "SCHEDULE 원본 설정 없음")
+    else:
+        fallback = first_res or _make_fake_response(404, "SCHEDULE criterion 조회 결과 없음")
+    try:
+        setattr(fallback, "debug_attempts", attempts)
+        if getattr(fallback, "status_code", None) not in {200, 404} and attempts:
+            fallback._content = ("SCHEDULE 조회 실패: " + " / ".join(attempts[:5])).encode("utf-8")
+    except Exception:
+        pass
+    return fallback, []
+
 def _copy_schedule_criterion_exact(api_key: str, secret_key: str, cid: str, source_owner_id: str, target_owner_id: str):
     res_src, src_rows = _fetch_schedule_entries(api_key, secret_key, cid, source_owner_id)
     if res_src.status_code == 404:
@@ -2630,34 +3101,408 @@ def _copy_schedule_criterion_exact(api_key: str, secret_key: str, cid: str, sour
             )
             if res_bw.status_code != 200:
                 return False, f"SCHEDULE 입찰가중치 적용 실패: {res_bw.text}"
-    return True, "SCHEDULE 복사 완료"
-def _copy_adgroup_extra_target_settings(api_key: str, secret_key: str, cid: str, source_adgroup_id: str, target_adgroup_id: str):
-    messages: List[str] = []
-    overall_ok = True
-    res_src, src_targets = _fetch_all_target_objects(api_key, secret_key, cid, source_adgroup_id)
-    if res_src.status_code == 200:
-        copied_types: List[str] = []
-        for src_target in (src_targets or []):
-            target_type = _normalize_target_type_name(src_target.get("targetTp"))
-            if not _is_extra_copy_target_type(target_type):
-                continue
-            ok, msg = _copy_target_payload_exact(api_key, secret_key, cid, source_adgroup_id, target_adgroup_id, target_type)
-            if ok:
-                copied_types.append(target_type)
+    # 적용 후 같은 조회 경로로 재조회해 실제 코드가 들어갔는지 확인한다.
+    res_check, check_rows = _fetch_schedule_entries(api_key, secret_key, cid, target_owner_id)
+    if res_check.status_code == 200:
+        check_codes = _unique_keep_order([str((row or {}).get("dictionaryCode") or (row or {}).get("code") or "").strip() for row in (check_rows or [])])
+        missing = [code for code in codes if code not in check_codes]
+        if missing:
+            return False, f"SCHEDULE 적용 후 미반영: 누락 {len(missing)}개 / 예: {', '.join(missing[:5])}"
+    return True, f"SCHEDULE 복사 완료: 요일/시간 {len(codes)}개"
+
+PROFILE_CRITERION_TYPE_CANDIDATES: List[Tuple[str, str]] = [
+    # 네이버 Criterion Master 실제 type 기준: SD, AG, GN, RL, RP, AD.
+    # v12에서는 지역을 RG/RT로 추측해서 원본 없음으로 빠질 수 있었다.
+    # 지역 타겟은 RL/RP, 성별은 GN, 연령은 AG를 우선 사용하고, AD는
+    # 잠재고객/이용자 세그먼트류 후보로 함께 보정 복사한다.
+    ("AG", "연령대"),
+    ("GN", "성별"),
+    ("RL", "지역"),
+    ("RP", "반경/지역"),
+    ("AD", "이용자 세그먼트"),
+]
+
+PROFILE_CRITERION_CATEGORY_TYPES: Dict[str, List[str]] = {
+    "age": ["AG"],
+    "gender": ["GN"],
+    "region": ["RL", "RP"],
+    "segment": ["AD"],
+}
+
+def _normalize_profile_criterion_types(types: Any = None) -> List[str]:
+    """Return valid profile Criterion type codes in the supported order."""
+    all_types = [tp for tp, _ in PROFILE_CRITERION_TYPE_CANDIDATES]
+    if types is None:
+        return list(all_types)
+    if isinstance(types, str):
+        raw = [types]
+    else:
+        try:
+            raw = list(types or [])
+        except Exception:
+            raw = []
+    expanded: List[str] = []
+    for item in raw:
+        token = str(item or "").strip()
+        if not token:
+            continue
+        low = token.lower()
+        if low in PROFILE_CRITERION_CATEGORY_TYPES:
+            expanded.extend(PROFILE_CRITERION_CATEGORY_TYPES[low])
+        else:
+            expanded.append(token.upper())
+    valid = set(all_types)
+    return _unique_keep_order([tp for tp in expanded if tp in valid])
+
+def _fetch_criterion_entries(api_key: str, secret_key: str, cid: str, owner_id: str, criterion_type: str):
+    owner_id = str(owner_id or "").strip()
+    criterion_type = str(criterion_type or "").strip().upper()
+    if not owner_id or not criterion_type:
+        return _make_fake_response(400, "ownerId 또는 criterion type이 없습니다."), []
+
+    attempts: List[str] = []
+    request_variants = [
+        (f"/ncc/criterion/{owner_id}/{criterion_type}", None),
+        (f"/ncc/criterion/{owner_id}", {"type": criterion_type}),
+        ("/ncc/criterion", {"ownerId": owner_id, "type": criterion_type}),
+        (f"/ncc/criteria/{owner_id}/{criterion_type}", None),
+        ("/ncc/criteria", {"ownerId": owner_id, "type": criterion_type}),
+    ]
+    first_res = None
+    for uri, params in request_variants:
+        res = _do_req("GET", api_key, secret_key, cid, uri, params=params)
+        if first_res is None:
+            first_res = res
+        attempts.append(f"GET {uri}{'?' + urlencode(params) if params else ''} -> {res.status_code}")
+        if res.status_code != 200:
+            continue
+        try:
+            data = res.json() or []
+        except Exception:
+            data = []
+        if isinstance(data, dict):
+            for list_key in ("data", "items", "rows", "contents"):
+                if isinstance(data.get(list_key), list):
+                    data = data.get(list_key)
+                    break
             else:
-                overall_ok = False
-                messages.append(msg)
-        if copied_types:
-            messages.append("추가 타겟 복사 완료: " + ", ".join(copied_types))
-    elif res_src.status_code != 404:
-        overall_ok = False
-        messages.append(f"추가 타겟 조회 실패: {res_src.text}")
+                data = [data]
+        rows = [item for item in data if isinstance(item, dict)]
+        fake = _make_fake_response(200, "OK")
+        setattr(fake, "debug_attempts", attempts)
+        return fake, rows
+    fallback = first_res or _make_fake_response(404, "criterion 조회 결과 없음")
+    try:
+        setattr(fallback, "debug_attempts", attempts)
+    except Exception:
+        pass
+    return fallback, []
+
+def _extract_criterion_codes_from_payload(payload: Any, prefixes: List[str]) -> Dict[str, List[str]]:
+    """Extract criterion dictionary codes from adgroup detail/attr JSON fallbacks.
+
+    Naver returns some targeting state in adgroup detail fields rather than as
+    /ncc/targets rows. We scan only known Criterion prefixes to avoid copying
+    unrelated ids.
+    """
+    wanted = [str(p or "").upper() for p in (prefixes or []) if str(p or "").strip()]
+    out: Dict[str, List[str]] = {p: [] for p in wanted}
+    seen = set()
+    if not wanted:
+        return out
+    pattern = re.compile(r"\b(" + "|".join(re.escape(p) for p in wanted) + r")[-_A-Z0-9]*\d{1,}\b", re.I)
+
+    def _scan_text(text: Any):
+        if text is None:
+            return
+        txt = str(text)
+        if not txt:
+            return
+        for m in pattern.finditer(txt):
+            code = m.group(0).strip().upper()
+            prefix = m.group(1).strip().upper()
+            key = (prefix, code)
+            if prefix in out and key not in seen:
+                seen.add(key)
+                out[prefix].append(code)
+
+    def visit(node: Any, depth: int = 0):
+        if depth > 8:
+            return
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k in {"dictionaryCode", "code", "criterionCode", "targetCode"}:
+                    _scan_text(v)
+                else:
+                    _scan_text(k)
+                    if isinstance(v, (str, int, float)):
+                        _scan_text(v)
+                visit(v, depth + 1)
+            return
+        if isinstance(node, list):
+            for item in node:
+                visit(item, depth + 1)
+            return
+        if isinstance(node, str):
+            raw = node.strip()
+            _scan_text(raw)
+            if raw and (raw.startswith("{") or raw.startswith("[")):
+                try:
+                    visit(json.loads(raw), depth + 1)
+                except Exception:
+                    pass
+
+    visit(payload)
+    return out
+
+
+def _criterion_rows_to_weight_map(rows: List[Dict[str, Any]]) -> Dict[str, int]:
+    out: Dict[str, int] = {}
+    for row in rows or []:
+        code = str((row or {}).get("dictionaryCode") or (row or {}).get("code") or "").strip().upper()
+        if not code:
+            continue
+        try:
+            out[code] = int((row or {}).get("bidWeight") or 100)
+        except Exception:
+            out[code] = 100
+    return out
+
+
+def _row_first_present(row: Dict[str, Any], keys: List[str], default: Any = None) -> Any:
+    for key in keys:
+        if isinstance(row, dict) and key in row and row.get(key) is not None:
+            return row.get(key)
+    return default
+
+
+def _criterion_rows_to_state_map(rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        code = str(_row_first_present(row, ["dictionaryCode", "code", "criterionCode", "targetCode"], "") or "").strip().upper()
+        if not code:
+            continue
+        try:
+            bid_weight = int(_row_first_present(row, ["bidWeight", "bid_weight", "weight"], 100) or 100)
+        except Exception:
+            bid_weight = 100
+        try:
+            negative = int(_row_first_present(row, ["negative", "negativeYn", "exclude", "excluded"], 0) or 0)
+        except Exception:
+            negative = 0
+        try:
+            onoff = int(_row_first_present(row, ["onOff", "onoff", "enabled", "enable", "on"], 1) or 1)
+        except Exception:
+            onoff = 1
+        state = {
+            "dictionaryCode": code,
+            "bidWeight": bid_weight,
+            "negative": negative,
+            "onOff": onoff,
+        }
+        add_info = _row_first_present(row, ["additionalInfo", "additional_info", "attr", "target", "value"], None)
+        if add_info not in (None, ""):
+            state["additionalInfo"] = add_info
+        out[code] = state
+    return out
+
+
+def _put_criterion_state_map(api_key: str, secret_key: str, cid: str, owner_id: str, criterion_type: str, final_map: Dict[str, Dict[str, Any]]):
+    owner_id = str(owner_id or "").strip()
+    criterion_type = str(criterion_type or "").strip().upper()
+    states = [v for _, v in sorted((final_map or {}).items()) if isinstance(v, dict) and str(v.get("dictionaryCode") or "").strip()]
+    if not states:
+        return False, "criterion_empty", "적용할 criterion code가 없습니다."
+    body = []
+    for state in states:
+        item = {
+            "customerId": int(cid),
+            "ownerId": owner_id,
+            "dictionaryCode": str(state.get("dictionaryCode") or "").strip().upper(),
+            "type": criterion_type,
+        }
+        if "negative" in state:
+            item["negative"] = int(state.get("negative") or 0)
+        if "onOff" in state:
+            item["onOff"] = int(state.get("onOff") or 1)
+        if state.get("additionalInfo") not in (None, ""):
+            item["additionalInfo"] = state.get("additionalInfo")
+        body.append(item)
+
+    put_variants = [
+        (f"/ncc/criterion/{owner_id}/{criterion_type}", None),
+        (f"/ncc/criterion/{owner_id}", {"type": criterion_type}),
+        ("/ncc/criterion", {"ownerId": owner_id, "type": criterion_type}),
+        (f"/ncc/criteria/{owner_id}/{criterion_type}", None),
+        ("/ncc/criteria", {"ownerId": owner_id, "type": criterion_type}),
+    ]
+    attempts: List[str] = []
+    put_ok = False
+    last_text = ""
+    for uri, params in put_variants:
+        put_res = _do_req("PUT", api_key, secret_key, cid, uri, params=params, json_body=body)
+        attempts.append(f"PUT {uri}{'?' + urlencode(params) if params else ''} -> {put_res.status_code}")
+        last_text = str(put_res.text or "")[:220]
+        if put_res.status_code in {200, 201, 204}:
+            put_ok = True
+            break
+    if not put_ok:
+        return False, "criterion_put", (" / ".join(attempts[:5]) + (f" | {last_text}" if last_text else ""))
+
+    weight_map: Dict[int, List[str]] = {}
+    for state in states:
+        try:
+            weight = int(state.get("bidWeight", 100) or 100)
+        except Exception:
+            weight = 100
+        weight_map.setdefault(weight, []).append(str(state.get("dictionaryCode") or "").strip().upper())
+    for weight, weight_codes in weight_map.items():
+        if int(weight) == 100 or not weight_codes:
+            continue
+        for i in range(0, len(weight_codes), 50):
+            chunk = weight_codes[i:i + 50]
+            bw_res = _do_req(
+                "PUT", api_key, secret_key, cid,
+                f"/ncc/criterion/{owner_id}/bidWeight",
+                params={"codes": ",".join(chunk), "bidWeight": int(weight)},
+            )
+            if bw_res.status_code not in {200, 201, 204}:
+                return False, "criterion_bid_weight", bw_res.text
+    return True, "", ""
+
+
+def _put_criterion_weight_map(api_key: str, secret_key: str, cid: str, owner_id: str, criterion_type: str, final_map: Dict[str, int]):
+    owner_id = str(owner_id or "").strip()
+    criterion_type = str(criterion_type or "").strip().upper()
+    codes = _unique_keep_order([str(c or "").strip().upper() for c in (final_map or {}).keys() if str(c or "").strip()])
+    if not codes:
+        return False, "criterion_empty", "적용할 criterion code가 없습니다."
+    body = [{"customerId": int(cid), "ownerId": owner_id, "dictionaryCode": c, "type": criterion_type} for c in codes]
+    put_res = _do_req("PUT", api_key, secret_key, cid, f"/ncc/criterion/{owner_id}/{criterion_type}", json_body=body)
+    if put_res.status_code not in {200, 201, 204}:
+        return False, "criterion_put", put_res.text
+    weight_map: Dict[int, List[str]] = {}
+    for code in codes:
+        try:
+            weight = int((final_map or {}).get(code, 100) or 100)
+        except Exception:
+            weight = 100
+        weight_map.setdefault(weight, []).append(code)
+    for weight, weight_codes in weight_map.items():
+        if int(weight) == 100 or not weight_codes:
+            continue
+        for i in range(0, len(weight_codes), 50):
+            chunk = weight_codes[i:i + 50]
+            bw_res = _do_req(
+                "PUT", api_key, secret_key, cid,
+                f"/ncc/criterion/{owner_id}/bidWeight",
+                params={"codes": ",".join(chunk), "bidWeight": int(weight)},
+            )
+            if bw_res.status_code not in {200, 201, 204}:
+                return False, "criterion_bid_weight", bw_res.text
+    return True, "", ""
+
+
+def _copy_profile_criteria_exact(api_key: str, secret_key: str, cid: str, source_owner_id: str, target_owner_id: str, include_types: Any = None):
+    """Copy profile targeting stored as Criterion rows (age/gender/region)."""
+    messages: List[str] = []
+    copied_labels: List[str] = []
+    failed_labels: List[str] = []
+    lookup_notes: List[str] = []
+    source_detail: Dict[str, Any] | None = None
+    fallback_codes: Dict[str, List[str]] = {}
+    selected_types = _normalize_profile_criterion_types(include_types)
+    if not selected_types:
+        return False, ["Criterion 타겟 적용 항목 없음"]
+    selected_set = set(selected_types)
+    selected_candidates = [(tp, label) for tp, label in PROFILE_CRITERION_TYPE_CANDIDATES if tp in selected_set]
+    prefixes = _unique_keep_order([tp for tp, _ in selected_candidates])
+    try:
+        res_detail, source_detail = _fetch_adgroup_detail(api_key, secret_key, cid, source_owner_id)
+        if res_detail.status_code == 200 and isinstance(source_detail, dict):
+            fallback_codes = _extract_criterion_codes_from_payload(source_detail, prefixes)
+    except Exception as e:
+        messages.append(f"Criterion 상세 fallback 조회 예외: {e}")
+
+    for criterion_type, label in selected_candidates:
+        res_src, rows = _fetch_criterion_entries(api_key, secret_key, cid, source_owner_id, criterion_type)
+        state_map = _criterion_rows_to_state_map(rows or [])
+        debug_attempts = getattr(res_src, "debug_attempts", []) or []
+        note = f"{label}({criterion_type}) status={getattr(res_src, 'status_code', '?')}, rows={len(rows or [])}"
+        if debug_attempts and (not rows):
+            note += " [" + "; ".join(debug_attempts[:2]) + "]"
+        lookup_notes.append(note)
+        if not state_map:
+            for code in fallback_codes.get(criterion_type, []) or []:
+                code = str(code).strip().upper()
+                if code:
+                    state_map[code] = {"dictionaryCode": code, "bidWeight": 100, "negative": 0, "onOff": 1}
+        if not state_map:
+            continue
+        ok_put, step, detail = _put_criterion_state_map(api_key, secret_key, cid, target_owner_id, criterion_type, state_map)
+        if ok_put:
+            copied_labels.append(f"{label}({criterion_type}) {len(state_map)}개")
+        else:
+            failed_labels.append(f"{label}({criterion_type}) {step}: {str(detail or '')[:220]}")
+
+    if copied_labels:
+        messages.append("Criterion 타겟 복사 완료: " + ", ".join(_unique_keep_order(copied_labels)))
+    if failed_labels:
+        messages.extend(["Criterion 타겟 적용 실패: " + msg for msg in failed_labels[:8]])
+    if not copied_labels and not failed_labels:
+        messages.append("Criterion 타겟 원본 없음: 연령대/성별/지역/세그먼트 코드 미확인 · " + " / ".join(lookup_notes[:5]))
+    elif failed_labels and lookup_notes:
+        messages.append("Criterion 조회 참고: " + " / ".join(lookup_notes[:5]))
+    return bool(copied_labels) and not bool(failed_labels), messages
+
+def _copy_adgroup_extra_target_settings(api_key: str, secret_key: str, cid: str, source_adgroup_id: str, target_adgroup_id: str):
+    # 캠페인/그룹 복사 후 원본 광고그룹의 프로필 타겟(지역/성별/연령대 등)을 보정 복사한다.
+    # 1) /ncc/targets 기반 타겟 복사
+    # 2) /ncc/criterion 기반 연령대/성별/지역 타겟 복사
+    # 3) 신규/숨김 그룹 속성(adgroupAttrJson) 보정 복사
+    # 4) SCHEDULE은 GET 미지원 계정이 있어 실패가 다른 타겟 복사를 가리지 않도록 별도 참고 메시지로만 처리
+    messages: List[str] = []
+    applied_any = False
+    hard_fail = False
+
+    ok_targets, target_msgs = _copy_profile_targets_exact(api_key, secret_key, cid, source_adgroup_id, target_adgroup_id)
+    if target_msgs:
+        messages.extend(target_msgs)
+    if ok_targets:
+        applied_any = True
+    elif target_msgs and not any("원본" in str(m) and ("없음" in str(m) or "미확인" in str(m)) for m in target_msgs):
+        hard_fail = True
+
+    ok_criteria, criteria_msgs = _copy_profile_criteria_exact(api_key, secret_key, cid, source_adgroup_id, target_adgroup_id)
+    if criteria_msgs:
+        messages.extend(criteria_msgs)
+    if ok_criteria:
+        applied_any = True
+    elif criteria_msgs and any("적용 실패" in str(m) for m in criteria_msgs):
+        hard_fail = True
+
+    ok_attr, msg_attr = _copy_adgroup_attr_json_settings(api_key, secret_key, cid, source_adgroup_id, target_adgroup_id)
+    if msg_attr and msg_attr != "adgroupAttrJson 원본 설정 없음":
+        messages.append(msg_attr)
+    if ok_attr and msg_attr not in {"adgroupAttrJson 원본 설정 없음", "adgroupAttrJson 이미 동일"}:
+        applied_any = True
+    elif not ok_attr:
+        hard_fail = True
+
     ok_schedule, msg_schedule = _copy_schedule_criterion_exact(api_key, secret_key, cid, source_adgroup_id, target_adgroup_id)
-    if msg_schedule and msg_schedule != "SCHEDULE 원본 설정 없음":
-        messages.append(msg_schedule)
-    if not ok_schedule and msg_schedule not in {"", "SCHEDULE 원본 설정 없음"}:
-        overall_ok = False
-    return overall_ok, messages
+    if msg_schedule and msg_schedule not in {"", "SCHEDULE 원본 설정 없음"}:
+        if "405" in str(msg_schedule) or "Method Not Allowed" in str(msg_schedule):
+            messages.append("SCHEDULE 복사 제외: API GET 미지원(405)")
+        else:
+            messages.append(msg_schedule)
+            if ok_schedule:
+                applied_any = True
+            else:
+                hard_fail = True
+    return applied_any and not hard_fail, _unique_keep_order(messages)
+
 def _resolve_bulk_target_adgroup_ids(api_key: str, secret_key: str, cid: str, target_scope: str, campaign_ids: List[str], adgroup_ids: List[str]):
     scope = str(target_scope or "adgroup").strip().lower()
     if scope == "campaign":
@@ -2671,28 +3516,57 @@ def _resolve_bulk_target_adgroup_ids(api_key: str, secret_key: str, cid: str, ta
                 warnings.append(f"[{camp_id}] 하위 광고그룹 조회 실패: {r_adgs.text}")
         return _unique_keep_order([x for x in resolved if x]), warnings
     return _unique_keep_order([str(x).strip() for x in (adgroup_ids or []) if str(x).strip()]), []
-def _copy_adgroup_extra_targets_only(api_key: str, secret_key: str, cid: str, source_adgroup_id: str, target_adgroup_id: str):
+def _copy_adgroup_extra_targets_only(
+    api_key: str,
+    secret_key: str,
+    cid: str,
+    source_adgroup_id: str,
+    target_adgroup_id: str,
+    include_criterion_types: Any = None,
+    include_target_rows: bool = False,
+    include_attr_json: bool = True,
+):
+    # 타겟 설정 일괄 적용 전용.
+    # v15부터 연령대/성별/지역/세그먼트/시간대를 각각 선택 적용할 수 있도록
+    # Criterion 타입(AG/GN/RL/RP/AD)을 명시적으로 필터링한다.
     messages: List[str] = []
-    overall_ok = True
-    res_src, src_targets = _fetch_all_target_objects(api_key, secret_key, cid, source_adgroup_id)
-    if res_src.status_code == 200:
-        copied_types: List[str] = []
-        for src_target in (src_targets or []):
-            target_type = _normalize_target_type_name(src_target.get("targetTp"))
-            if not _is_extra_copy_target_type(target_type):
-                continue
-            ok, msg = _copy_target_payload_exact(api_key, secret_key, cid, source_adgroup_id, target_adgroup_id, target_type)
-            if ok:
-                copied_types.append(target_type)
-            else:
-                overall_ok = False
-                messages.append(msg)
-        if copied_types:
-            messages.append("추가 타겟 복사 완료: " + ", ".join(copied_types))
-    elif res_src.status_code != 404:
-        overall_ok = False
-        messages.append(f"추가 타겟 조회 실패: {res_src.text}")
-    return overall_ok, messages
+    applied_any = False
+    hard_fail = False
+
+    if include_target_rows:
+        ok_targets, target_msgs = _copy_profile_targets_exact(api_key, secret_key, cid, source_adgroup_id, target_adgroup_id)
+        if target_msgs:
+            messages.extend(target_msgs)
+        if ok_targets:
+            applied_any = True
+        elif target_msgs and not any("원본" in str(m) and ("없음" in str(m) or "미확인" in str(m)) for m in target_msgs):
+            hard_fail = True
+
+    selected_types = _normalize_profile_criterion_types(include_criterion_types)
+    if selected_types:
+        ok_criteria, criteria_msgs = _copy_profile_criteria_exact(
+            api_key, secret_key, cid, source_adgroup_id, target_adgroup_id, include_types=selected_types
+        )
+        if criteria_msgs:
+            messages.extend(criteria_msgs)
+        if ok_criteria:
+            applied_any = True
+        elif criteria_msgs and any("적용 실패" in str(m) or "미반영" in str(m) for m in criteria_msgs):
+            hard_fail = True
+
+    if include_attr_json:
+        ok_attr, msg_attr = _copy_adgroup_attr_json_settings(api_key, secret_key, cid, source_adgroup_id, target_adgroup_id)
+        if msg_attr and msg_attr != "adgroupAttrJson 원본 설정 없음":
+            messages.append(msg_attr)
+        if ok_attr and msg_attr not in {"adgroupAttrJson 원본 설정 없음", "adgroupAttrJson 이미 동일"}:
+            applied_any = True
+        elif not ok_attr:
+            hard_fail = True
+
+    if not messages:
+        messages.append("선택한 프로필 타겟 원본 없음")
+    return applied_any and not hard_fail, _unique_keep_order(messages)
+
 def _copy_adgroup_search_option_settings(api_key: str, secret_key: str, cid: str, source_adgroup_id: str, target_adgroup_id: str):
     """Copy current PowerLink search options from one adgroup to another.
 
@@ -3409,7 +4283,7 @@ def _verify_headline_pin(api_key: str, secret_key: str, cid: str, owner_id: str,
     }
 def _build_headline_pin_update_candidates(ext_item: Dict[str, Any], position: int | None, customer_id: int) -> List[Dict[str, Any]]:
     owner_id = str(ext_item.get("ownerId") or "").strip()
-    ext_id = str(ext_item.get("adExtensionId") or ext_item.get("id") or "").strip()
+    ext_id = _extract_ad_extension_id(ext_item)
     headline = str(((ext_item.get("adExtension") or {}) if isinstance(ext_item.get("adExtension"), dict) else {}).get("headline") or "").strip()
     if not owner_id or not ext_id or not headline:
         return []
@@ -3450,7 +4324,7 @@ def _build_headline_pin_update_candidates(ext_item: Dict[str, Any], position: in
 def _apply_headline_pin_best_effort(api_key: str, secret_key: str, cid: str, ext_item: Dict[str, Any] | None, position: int | None):
     if position not in {None, 1, 2} or not isinstance(ext_item, dict):
         return {"ok": False, "detail": "추가제목 위치 보정 대상이 아닙니다."}
-    ext_id = str(ext_item.get("adExtensionId") or ext_item.get("id") or "").strip()
+    ext_id = _extract_ad_extension_id(ext_item)
     if not ext_id:
         return {"ok": False, "detail": "확장소재 ID를 찾지 못했습니다."}
     tried: List[Dict[str, Any]] = []
@@ -3927,7 +4801,7 @@ def _build_copy_ad_payload(api_key: str, secret_key: str, cid: str, ad_item: Dic
     return _strip_empty(payload)
 def _build_copy_extension_payload(api_key: str, secret_key: str, cid: str, ext_item: Dict[str, Any], new_owner_id: str, biz_channel_id: str | None = None) -> Dict[str, Any]:
     ext_item = ext_item if isinstance(ext_item, dict) else {}
-    ext_id = str(ext_item.get("adExtensionId") or ext_item.get("id") or "").strip()
+    ext_id = _extract_ad_extension_id(ext_item)
     detail = None
     if ext_id:
         _, detail = _fetch_entity_detail(api_key, secret_key, cid, "ad_extension", ext_id)
@@ -4265,8 +5139,8 @@ def _extract_adgroup(src, target_camp_id, cid, biz_channel_id):
             res["pcChannelId"] = str(src.get("pcChannelId"))
         if src.get("mobileChannelId"):
             res["mobileChannelId"] = str(src.get("mobileChannelId"))
-    for k in ["useStoreUrl", "nccProductGroupId", "contentsNetworkBidAmt", "keywordPlusFlag", "contractId"]:
-        if k in src:
+    for k in ["useStoreUrl", "nccProductGroupId", "contentsNetworkBidAmt", "keywordPlusFlag", "contractId", "adgroupAttrJson"]:
+        if k in src and src.get(k) is not None:
             res[k] = src[k]
     if str(src.get("adgroupType") or "").upper() == "WEB_SITE":
         # 확장검색/예산비율은 광고그룹 생성 payload에도 최대한 포함하고,
@@ -4371,7 +5245,39 @@ def get_keywords():
     d = request.json or {}
     res, rows = _fetch_keywords(d.get("api_key"), d.get("secret_key"), d.get("customer_id"), d.get("adgroup_id"))
     if res.status_code == 200:
-        return jsonify(rows)
+        base_rows = rows or []
+        search_text = str(d.get("keyword_search") or "").strip()
+        match_mode = str(d.get("keyword_match_mode") or "partial").strip().lower()
+        exact_match = match_mode == "exact"
+        if search_text:
+            filtered_rows = [
+                row for row in base_rows
+                if _keyword_matches_search(
+                    row.get("keyword") or row.get("keywordNm") or row.get("keywordName") or row.get("name") or "",
+                    search_text,
+                    exact_match=exact_match,
+                )
+            ]
+        else:
+            filtered_rows = base_rows
+        preview_limit_raw = d.get("preview_limit")
+        if preview_limit_raw is not None:
+            try:
+                preview_limit = max(0, int(preview_limit_raw))
+            except Exception:
+                preview_limit = 10
+            total_count = len(filtered_rows or [])
+            preview_rows = (filtered_rows or [])[:preview_limit]
+            return jsonify({
+                "rows": preview_rows,
+                "total_count": total_count,
+                "total_unfiltered_count": len(base_rows or []),
+                "truncated": total_count > len(preview_rows),
+                "preview_limit": preview_limit,
+                "keyword_search": search_text,
+                "keyword_match_mode": "exact" if exact_match else "partial",
+            })
+        return jsonify(filtered_rows)
     return jsonify({"error": "키워드 조회 실패", "details": res.text}), 400
 @app.route("/get_ads", methods=["POST"])
 def get_ads():
@@ -4485,11 +5391,9 @@ def export_account_keywords_excel():
         ("bidAmt", "입찰가"), ("useGroupBidAmt", "그룹입찰가사용"), ("matchType", "매치유형"),
         ("keywordId", "키워드 ID"), ("campaignId", "캠페인 ID"), ("adgroupId", "광고그룹 ID"),
     ])
-    output = io.BytesIO()
-    wb.save(output)
-    output.seek(0)
+    output = workbook_to_bytesio(wb)
     stamp = time.strftime("%Y%m%d_%H%M%S")
-    return send_file(output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name=f"account_keywords_{scope}_{stamp}.xlsx")
+    return send_file(output, mimetype=XLSX_MIME, as_attachment=True, download_name=f"account_keywords_{scope}_{stamp}.xlsx")
 
 @app.route("/export_account_ads_excel", methods=["POST"])
 def export_account_ads_excel():
@@ -4510,14 +5414,13 @@ def export_account_ads_excel():
         return jsonify({"error": "내보낼 소재가 없습니다."}), 400
     scope_label = "선택 캠페인만" if scope == "campaign" else "계정 전체"
     wb = _build_asset_lookup_workbook(rows, "계정 등록 소재 조회", scope_label, [
-        ("campaignName", "캠페인명"), ("adgroupName", "광고그룹명"), ("type", "소재유형"), ("status", "상태"),
+        ("campaignType", "캠페인유형"), ("campaignName", "캠페인명"), ("adgroupType", "광고그룹유형"), ("adgroupName", "광고그룹명"),
+        ("type", "소재유형"), ("status", "상태"),
         ("summary", "요약"), ("effectiveBidAmt", "적용입찰가"), ("adBidAmt", "소재입찰가"), ("adUseGroupBidAmt", "그룹입찰가사용"), ("adgroupBidAmt", "광고그룹입찰가"), ("adId", "소재 ID"), ("campaignId", "캠페인 ID"), ("adgroupId", "광고그룹 ID"),
     ])
-    output = io.BytesIO()
-    wb.save(output)
-    output.seek(0)
+    output = workbook_to_bytesio(wb)
     stamp = time.strftime("%Y%m%d_%H%M%S")
-    return send_file(output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name=f"account_ads_{scope}_{stamp}.xlsx")
+    return send_file(output, mimetype=XLSX_MIME, as_attachment=True, download_name=f"account_ads_{scope}_{stamp}.xlsx")
 @app.route("/export_account_extensions_excel", methods=["POST"])
 def export_account_extensions_excel():
     d = request.json or {}
@@ -4539,15 +5442,14 @@ def export_account_extensions_excel():
         return jsonify({"error": "내보낼 확장소재가 없습니다."}), 400
     scope_label = "선택 캠페인만" if scope == "campaign" else "계정 전체"
     wb = _build_asset_lookup_workbook(rows, "계정 등록 확장소재 조회", scope_label, [
-        ("campaignName", "캠페인명"), ("adgroupName", "광고그룹명"), ("ownerScope", "적용대상"), ("type", "확장소재유형"),
-        ("status", "상태"), ("summary", "요약"), ("adExtensionId", "확장소재 ID"), ("ownerId", "owner ID"),
+        ("campaignType", "캠페인유형"), ("campaignName", "캠페인명"), ("adgroupType", "광고그룹유형"), ("adgroupName", "광고그룹명"),
+        ("ownerScope", "적용대상"), ("adExtensionId", "확장소재 ID"),
+        ("imageId", "이미지 ID"), ("type", "확장소재유형"), ("status", "상태"), ("summary", "요약"), ("ownerId", "owner ID"),
         ("campaignId", "캠페인 ID"), ("adgroupId", "광고그룹 ID"),
     ])
-    output = io.BytesIO()
-    wb.save(output)
-    output.seek(0)
+    output = workbook_to_bytesio(wb)
     stamp = time.strftime("%Y%m%d_%H%M%S")
-    return send_file(output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name=f"account_extensions_{scope}_{stamp}.xlsx")
+    return send_file(output, mimetype=XLSX_MIME, as_attachment=True, download_name=f"account_extensions_{scope}_{stamp}.xlsx")
 @app.route("/get_restricted_keywords", methods=["POST"])
 def get_restricted_keywords():
     d = request.json or {}
@@ -4626,11 +5528,9 @@ def export_powerlink_duplicate_keywords_excel():
             return jsonify({"error": "내보낼 중복 키워드가 없습니다.", "details": result.get("message") or "중복 키워드가 없습니다."}), 400
         scope_label = result.get("duplicate_scope_label") or result.get("target_scope_label") or "선택 캠페인"
         wb = _build_powerlink_duplicate_keyword_workbook(result, scope_label=scope_label)
-        output = io.BytesIO()
-        wb.save(output)
-        output.seek(0)
+        output = workbook_to_bytesio(wb)
         stamp = time.strftime("%Y%m%d_%H%M%S")
-        return send_file(output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name=f"powerlink_duplicate_keywords_{stamp}.xlsx")
+        return send_file(output, mimetype=XLSX_MIME, as_attachment=True, download_name=f"powerlink_duplicate_keywords_{stamp}.xlsx")
     except Exception as e:
         return jsonify({"error": "중복 키워드 엑셀 다운로드 실패", "details": str(e)}), 400
 @app.route("/get_powerlink_keyword_stats", methods=["POST"])
@@ -4757,15 +5657,13 @@ def export_powerlink_keywords_excel():
         if not rows:
             return jsonify({"error": "내보낼 일치 키워드가 없습니다."}), 400
         wb = _build_powerlink_keyword_export_workbook(rows, search_text, exact_match, exclude_text=exclude_text)
-        output = io.BytesIO()
-        wb.save(output)
-        output.seek(0)
+        output = workbook_to_bytesio(wb)
         stamp = time.strftime("%Y%m%d_%H%M%S")
         mode_label = "exact" if exact_match else "partial"
         filename = f"powerlink_keyword_search_{mode_label}_{stamp}.xlsx"
         return send_file(
             output,
-            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            mimetype=XLSX_MIME,
             as_attachment=True,
             download_name=filename,
         )
@@ -4799,26 +5697,15 @@ def export_action_logs_excel():
         if not rows:
             return jsonify({"error": "다운로드할 작업 로그가 없습니다."}), 404
 
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "작업이력로그"
         headers = [
             "번호", "일시", "상태", "HTTP상태", "작업", "광고주ID",
             "요약", "메시지", "요청경로"
         ]
-        ws.append(headers)
-
-        header_fill = PatternFill("solid", fgColor="E8F0FE")
-        header_font = Font(bold=True)
-        for cell in ws[1]:
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-
+        data_rows = []
         for idx, row in enumerate(rows, 1):
             status_raw = str(row.get("status") or "").strip().lower()
             status_label = "실패" if status_raw == "error" else "성공"
-            ws.append([
+            data_rows.append([
                 idx,
                 row.get("ts") or "",
                 status_label,
@@ -4834,26 +5721,28 @@ def export_action_logs_excel():
             "A": 8, "B": 20, "C": 10, "D": 12, "E": 24,
             "F": 18, "G": 46, "H": 58, "I": 36,
         }
-        for col, width in widths.items():
-            ws.column_dimensions[col].width = width
-        for row_cells in ws.iter_rows(min_row=2):
-            for cell in row_cells:
-                cell.alignment = Alignment(vertical="top", wrap_text=True)
-        ws.freeze_panes = "A2"
-        ws.auto_filter.ref = ws.dimensions
+        wb = build_table_workbook(
+            sheet_title="작업이력로그",
+            headers=headers,
+            rows=data_rows,
+            widths=widths,
+            freeze_panes="A2",
+            auto_filter=True,
+            header_fill="E8F0FE",
+            header_font_color=None,
+        )
 
-        bio = io.BytesIO()
-        wb.save(bio)
-        bio.seek(0)
+        bio = workbook_to_bytesio(wb)
         filename = f"action_logs_{time.strftime('%Y%m%d_%H%M%S')}.xlsx"
         return send_file(
             bio,
-            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            mimetype=XLSX_MIME,
             as_attachment=True,
             download_name=filename,
         )
     except Exception as e:
         return jsonify({"error": "작업 로그 엑셀 다운로드 실패", "details": str(e)}), 500
+
 
 @app.route("/clear_action_logs", methods=["POST"])
 def clear_action_logs():
@@ -5800,7 +6689,7 @@ def copy_entities_to_adgroups():
                 all_errors.append(f"[원본 {src_id} → 대상 {target_id}] {summary_line}")
     msg = f"항목 복사 완료! (성공: {success}, 실패: {fail}, 동일 그룹 건너뜀: {skipped_same})"
     if all_errors:
-        msg += "\n" + "\n".join(all_errors[:10])
+        msg += "\n" + "\n".join(all_errors[:60])
     _cache_invalidate(d.get("api_key"), d.get("secret_key"), d.get("customer_id"))
     return jsonify({"ok": True, "message": msg})
 @app.route("/copy_campaigns", methods=["POST"])
@@ -5902,17 +6791,19 @@ def copy_campaigns():
                     for msg in media_msgs:
                         if msg and (("실패" in msg) or ("없음" in msg) or ("비어" in msg) or ("조회" in msg)):
                             all_errors.append(f"[{new_camp['name']} > {src_adg.get('name')}] 매체 설정: {msg}")
-                _, extra_target_msgs = _copy_adgroup_extra_target_settings(api_key, secret_key, cid, src_adg_id, new_adg_id)
+                ok_extra_targets, extra_target_msgs = _copy_adgroup_extra_target_settings(api_key, secret_key, cid, src_adg_id, new_adg_id)
                 if extra_target_msgs:
                     for msg in extra_target_msgs:
-                        if msg and (("실패" in msg) or ("없음" in msg) or ("비어" in msg) or ("조회" in msg)):
+                        if _should_surface_target_copy_message(msg):
                             all_errors.append(f"[{new_camp['name']} > {src_adg.get('name')}] 타겟 설정: {msg}")
+                if not ok_extra_targets and not extra_target_msgs:
+                    all_errors.append(f"[{new_camp['name']} > {src_adg.get('name')}] 타겟 설정: 원본 타겟 확인/복사 실패")
                 ok_search_opts, search_opts_msg = _copy_adgroup_search_option_settings(api_key, secret_key, cid, src_adg_id, new_adg_id)
                 if (not ok_search_opts) and search_opts_msg:
                     all_errors.append(f"[{new_camp['name']} > {src_adg.get('name')}] 검색옵션: {search_opts_msg}")
     msg = f"캠페인 복사 완료!\n(성공: {results['success']}개, 실패: {results['fail']}개)"
     if all_errors:
-        msg += "\n" + "\n".join(all_errors[:10])
+        msg += "\n" + "\n".join(all_errors[:60])
     _cache_invalidate(d.get("api_key"), d.get("secret_key"), d.get("customer_id"))
     return jsonify({"ok": True, "message": msg})
 @app.route("/copy_adgroups_to_target", methods=["POST"])
@@ -5995,11 +6886,13 @@ def copy_adgroups_to_target():
                             if msg and (("실패" in msg) or ("없음" in msg) or ("비어" in msg) or ("조회" in msg)):
                                 all_errors.append(f"[{new_adg['name']}] 매체 설정: {msg}")
                 if new_adg_id:
-                    _, extra_target_msgs = _copy_adgroup_extra_target_settings(api_key, secret_key, cid, str(src_id), new_adg_id)
+                    ok_extra_targets, extra_target_msgs = _copy_adgroup_extra_target_settings(api_key, secret_key, cid, str(src_id), new_adg_id)
                     if extra_target_msgs:
                         for msg in extra_target_msgs:
-                            if msg and (("실패" in msg) or ("없음" in msg) or ("비어" in msg) or ("조회" in msg)):
+                            if _should_surface_target_copy_message(msg):
                                 all_errors.append(f"[{new_adg['name']}] 타겟 설정: {msg}")
+                    if not ok_extra_targets and not extra_target_msgs:
+                        all_errors.append(f"[{new_adg['name']}] 타겟 설정: 원본 타겟 확인/복사 실패")
                 if new_adg_id:
                     ok_search_opts, search_opts_msg = _copy_adgroup_search_option_settings(api_key, secret_key, cid, str(src_id), new_adg_id)
                     if (not ok_search_opts) and search_opts_msg:
@@ -6012,7 +6905,7 @@ def copy_adgroups_to_target():
                 results["fail"] += 1
                 all_errors.append(f"[{new_adg['name']}] 생성 실패: {r_post.text}")
     _cache_invalidate(api_key, secret_key, cid)
-    return jsonify({"ok": True, "message": f"복사 완료! (성공: {results['success']}, 실패: {results['fail']})\n" + "\n".join(all_errors[:10])})
+    return jsonify({"ok": True, "message": f"복사 완료! (성공: {results['success']}, 실패: {results['fail']})\n" + "\n".join(all_errors[:60])})
 @app.route("/rename_adgroups_bulk", methods=["POST"])
 def rename_adgroups_bulk():
     d = request.json or {}
@@ -6308,38 +7201,68 @@ def apply_target_settings_bulk():
     secret_key = d.get("secret_key")
     cid = d.get("customer_id")
     source_adgroup_id = str(d.get("source_adgroup_id") or "").strip()
-    target_scope = str(d.get("target_scope") or "adgroup").strip().lower()
+
+    raw_scopes = d.get("target_scopes")
+    if isinstance(raw_scopes, list):
+        target_scopes = [str(x or "").strip().lower() for x in raw_scopes if str(x or "").strip()]
+    else:
+        target_scopes = [str(d.get("target_scope") or "adgroup").strip().lower()]
+    target_scopes = _unique_keep_order([x for x in target_scopes if x in {"campaign", "adgroup"}]) or ["adgroup"]
+
+    # Backward compatibility: older UI only sent include_extra_targets=true.
+    has_specific_profile_flags = any(k in d for k in [
+        "include_age_targets", "include_gender_targets", "include_region_targets", "include_segment_targets"
+    ])
     include_extra_targets = _boolish(d.get("include_extra_targets"), True)
+    include_age = _boolish(d.get("include_age_targets"), include_extra_targets if not has_specific_profile_flags else False)
+    include_gender = _boolish(d.get("include_gender_targets"), include_extra_targets if not has_specific_profile_flags else False)
+    include_region = _boolish(d.get("include_region_targets"), include_extra_targets if not has_specific_profile_flags else False)
+    include_segment = _boolish(d.get("include_segment_targets"), False)
     include_schedule = _boolish(d.get("include_schedule"), True)
+    # 새 UI처럼 연령/성별/지역을 개별 선택한 경우에는 adgroupAttrJson 전체 복사를
+    # 기본으로 하지 않는다. 전체 attr 복사는 선택 항목 외 설정까지 딸려갈 수 있다.
+    include_attr_json = _boolish(d.get("include_attr_json"), include_extra_targets if not has_specific_profile_flags else False)
+
     campaign_ids = [str(x).strip() for x in (d.get("campaign_ids") or []) if str(x).strip()]
     adgroup_ids = [str(x).strip() for x in (d.get("adgroup_ids") or []) if str(x).strip()]
     if not api_key or not secret_key or not cid:
         return jsonify({"error": "API Key / Secret Key / Customer ID가 필요합니다."}), 400
     if not source_adgroup_id:
         return jsonify({"error": "원본 광고그룹을 선택해주세요."}), 400
-    if not include_extra_targets and not include_schedule:
+
+    selected_criterion_types: List[str] = []
+    if include_age:
+        selected_criterion_types.extend(PROFILE_CRITERION_CATEGORY_TYPES["age"])
+    if include_gender:
+        selected_criterion_types.extend(PROFILE_CRITERION_CATEGORY_TYPES["gender"])
+    if include_region:
+        selected_criterion_types.extend(PROFILE_CRITERION_CATEGORY_TYPES["region"])
+    if include_segment:
+        selected_criterion_types.extend(PROFILE_CRITERION_CATEGORY_TYPES["segment"])
+    selected_criterion_types = _normalize_profile_criterion_types(selected_criterion_types)
+
+    if not selected_criterion_types and not include_schedule:
         return jsonify({"error": "적용할 타겟 항목을 1개 이상 선택해주세요."}), 400
-    target_adgroup_ids, warnings = _resolve_bulk_target_adgroup_ids(api_key, secret_key, cid, target_scope, campaign_ids, adgroup_ids)
-    target_adgroup_ids = [x for x in target_adgroup_ids if x and x != source_adgroup_id]
+
+    target_adgroup_ids: List[str] = []
+    warnings: List[str] = []
+    if "campaign" in target_scopes:
+        resolved, warn = _resolve_bulk_target_adgroup_ids(api_key, secret_key, cid, "campaign", campaign_ids, [])
+        target_adgroup_ids.extend(resolved)
+        warnings.extend(warn)
+    if "adgroup" in target_scopes:
+        resolved, warn = _resolve_bulk_target_adgroup_ids(api_key, secret_key, cid, "adgroup", [], adgroup_ids)
+        target_adgroup_ids.extend(resolved)
+        warnings.extend(warn)
+    target_adgroup_ids = [x for x in _unique_keep_order(target_adgroup_ids) if x and x != source_adgroup_id]
     if not target_adgroup_ids:
         msg = "적용할 대상 광고그룹이 없습니다."
         if warnings:
             msg += "\n" + "\n".join(warnings[:10])
         return jsonify({"error": msg}), 400
-    source_copyable_target_types: List[str] = []
-    source_extra_error = ""
+
     source_schedule_ready = False
     source_schedule_msg = ""
-    if include_extra_targets:
-        res_src_targets, src_targets = _fetch_all_target_objects(api_key, secret_key, cid, source_adgroup_id)
-        if res_src_targets.status_code == 200:
-            source_copyable_target_types = _unique_keep_order([
-                _normalize_target_type_name((row or {}).get("targetTp"))
-                for row in (src_targets or [])
-                if _is_extra_copy_target_type((row or {}).get("targetTp"))
-            ])
-        else:
-            source_extra_error = f"추가 타겟 원본 조회 실패: {res_src_targets.text}"
     if include_schedule:
         res_schedule_src, schedule_rows = _fetch_schedule_entries(api_key, secret_key, cid, source_adgroup_id)
         if res_schedule_src.status_code == 200 and schedule_rows:
@@ -6350,6 +7273,19 @@ def apply_target_settings_bulk():
             source_schedule_msg = f"SCHEDULE 원본 조회 미지원(405): {res_schedule_src.text}"
         else:
             source_schedule_msg = f"SCHEDULE 원본 조회 실패: {res_schedule_src.text}"
+
+    item_labels: List[str] = []
+    if include_age:
+        item_labels.append("연령대")
+    if include_gender:
+        item_labels.append("성별")
+    if include_region:
+        item_labels.append("지역")
+    if include_segment:
+        item_labels.append("이용자 세그먼트")
+    if include_schedule:
+        item_labels.append("요일/시간대")
+
     success = 0
     fail = 0
     details: List[str] = list(warnings)
@@ -6357,16 +7293,21 @@ def apply_target_settings_bulk():
         row_msgs: List[str] = []
         hard_fail = False
         applied_any = False
-        if include_extra_targets:
-            if source_copyable_target_types:
-                ok_extra, extra_msgs = _copy_adgroup_extra_targets_only(api_key, secret_key, cid, source_adgroup_id, target_adgroup_id)
-                row_msgs.extend([msg for msg in (extra_msgs or []) if msg])
-                if ok_extra:
-                    applied_any = True
-                else:
-                    hard_fail = True
+        if selected_criterion_types:
+            ok_extra, extra_msgs = _copy_adgroup_extra_targets_only(
+                api_key, secret_key, cid, source_adgroup_id, target_adgroup_id,
+                include_criterion_types=selected_criterion_types,
+                include_target_rows=False,
+                include_attr_json=include_attr_json,
+            )
+            row_msgs.extend([msg for msg in (extra_msgs or []) if msg])
+            if ok_extra:
+                applied_any = True
             else:
-                row_msgs.append(source_extra_error or "추가 타겟 원본 설정 없음")
+                if any("적용 실패" in str(m) or "복사 실패" in str(m) or "미반영" in str(m) for m in (extra_msgs or [])):
+                    hard_fail = True
+                elif not extra_msgs:
+                    row_msgs.append("선택한 프로필 타겟 원본 없음")
         if include_schedule:
             if source_schedule_ready:
                 ok_schedule, msg_schedule = _copy_schedule_criterion_exact(api_key, secret_key, cid, source_adgroup_id, target_adgroup_id)
@@ -6385,15 +7326,19 @@ def apply_target_settings_bulk():
         else:
             fail += 1
         if row_msgs:
-            details.append(f"[{target_adgroup_id}] " + " | ".join(_unique_keep_order(row_msgs)[:5]))
+            details.append(f"[{target_adgroup_id}] " + " | ".join(_unique_keep_order(row_msgs)[:8]))
     status_code = 200 if success > 0 else 400
+    scope_label = "+".join(["캠페인" if s == "campaign" else "광고그룹" for s in target_scopes])
     return jsonify({
         "ok": success > 0,
-        "message": f"타겟 설정 일괄 적용 완료 · 성공 {success}개 / 실패 {fail}개" + (("\n" + "\n".join(details[:12])) if details else ""),
+        "message": f"타겟 설정 일괄 적용 완료 · 범위 {scope_label} · 항목 {', '.join(item_labels) or '-'} · 성공 {success}개 / 실패 {fail}개"
+                   + (("\n" + "\n".join(details[:20])) if details else ""),
         "success": success,
         "fail": fail,
-        "details": details[:50],
+        "details": details[:80],
+        "patch": "bulk-target-source-select-v16-20260428",
     }), status_code
+
 @app.route("/update_budget", methods=["POST"])
 def update_budget():
     d = request.json or {}
@@ -8947,7 +9892,7 @@ def _delete_payload_rows(api_key: str, secret_key: str, cid: str, entity_type: s
                 "adgroup": ["nccAdgroupId", "광고그룹ID", "adgroup_id"],
                 "keyword": ["nccKeywordId", "키워드ID", "keyword_id"],
                 "ad": ["nccAdId", "소재ID", "ad_id"],
-                "ad_extension": ["adExtensionId", "확장소재ID", "ad_extension_id"],
+                "ad_extension": ["adExtensionId", "nccAdExtensionId", "확장소재ID", "확장소재 ID", "ad_extension_id"],
             }
             entity_id = ""
             for k in key_map[entity_type]:
@@ -9007,6 +9952,78 @@ def _bulk_extension_type_label(value: Any) -> str:
     if str(value or "").strip().upper() == "SHOPPING_PROMO_TEXT":
         return "쇼핑 추가홍보문구"
     return AD_EXTENSION_TYPE_LABELS.get(normalized, normalized or "확장소재")
+def _infer_extension_delete_type(ext_item: Dict[str, Any] | None) -> str:
+    """Best-effort extension type inference for delete/export responses.
+
+    Naver responses are not fully consistent by owner scope. Some rows expose
+    `type`, others only contain an `adExtension` payload. Bulk delete must not
+    miss HEADLINE / IMAGE_SUB_LINKS just because the type alias is blank.
+    """
+    if not isinstance(ext_item, dict):
+        return ""
+    for key in ("type", "adExtensionType", "extensionType", "adExtType"):
+        raw = str(ext_item.get(key) or "").strip()
+        if raw:
+            normalized = _normalize_bulk_extension_delete_type(raw)
+            if normalized and normalized != "ALL":
+                return normalized
+    ext = ext_item.get("adExtension")
+    if isinstance(ext, list):
+        def _has_image(obj: Any) -> bool:
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    lk = str(k or "").lower()
+                    if v and ("image" in lk or lk in {"assetid", "fileid", "nccimageid"}):
+                        return True
+                    if _has_image(v):
+                        return True
+            elif isinstance(obj, list):
+                return any(_has_image(x) for x in obj)
+            return False
+        return "IMAGE_SUB_LINKS" if _has_image(ext) else "SUB_LINKS"
+    if isinstance(ext, dict):
+        keys = {str(k or "").strip() for k in ext.keys()}
+        lower_keys = {k.lower() for k in keys}
+        if "headline" in lower_keys or "headlinePin" in keys or "headlinepin" in lower_keys:
+            return "HEADLINE"
+        if {"basictext", "additionaltext"} & lower_keys:
+            return "PROMOTION"
+        if "description" in lower_keys:
+            return "DESCRIPTION_EXTRA"
+        if any(("image" in k.lower()) for k in keys):
+            return "POWER_LINK_IMAGE"
+        if {"businessname", "siteurl", "website"} & lower_keys:
+            return "WEBSITE_INFO"
+        if {"phone", "phonenumber"} & lower_keys:
+            return "PHONE"
+        if {"address", "location"} & lower_keys:
+            return "LOCATION"
+    image_ids = _extract_extension_image_ids(ext_item)
+    if image_ids:
+        raw = str(ext_item.get("type") or "").upper()
+        if "SUB" in raw:
+            return "IMAGE_SUB_LINKS"
+        return "POWER_LINK_IMAGE"
+    return ""
+
+
+def _extension_item_matches_delete_type(ext_item: Dict[str, Any], requested_type: str) -> Tuple[bool, str]:
+    target_type = _normalize_bulk_extension_delete_type(requested_type)
+    resolved_type = _infer_extension_delete_type(ext_item)
+    if target_type == "ALL":
+        return True, resolved_type or target_type
+    if not resolved_type:
+        return False, ""
+    if target_type == resolved_type:
+        return True, resolved_type
+    # 이미지형 서브링크가 SUB_LINKS 계열 alias로 내려오는 일부 응답 보정
+    if target_type == "IMAGE_SUB_LINKS" and resolved_type == "SUB_LINKS" and _extract_extension_image_ids(ext_item):
+        return True, "IMAGE_SUB_LINKS"
+    if target_type == "SUB_LINKS" and resolved_type == "IMAGE_SUB_LINKS":
+        return False, resolved_type
+    return False, resolved_type
+
+
 def _looks_like_shopping_ad(ad_item: Dict[str, Any] | None) -> bool:
     ad_type = str((ad_item or {}).get("type") or (ad_item or {}).get("adType") or "").upper()
     return ("SHOPPING" in ad_type) or ("CATALOG" in ad_type) or ("PRODUCT" in ad_type)
@@ -9065,7 +10082,7 @@ def _collect_extension_delete_rows(api_key: str, secret_key: str, cid: str, adgr
         for item in (items or []):
             if not isinstance(item, dict):
                 continue
-            ext_id = str(item.get("adExtensionId") or item.get("id") or "").strip()
+            ext_id = _extract_ad_extension_id(item)
             if not ext_id or ext_id in seen_ext_ids:
                 continue
             matched, resolved_type = _extension_item_matches_delete_type(item, requested_type)
@@ -9131,21 +10148,58 @@ def _collect_extension_delete_rows(api_key: str, secret_key: str, cid: str, adgr
 def bulk_delete_by_parent():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
+    target_entity = str(d.get("target_entity") or "").strip()
+
+    # v20: UI can send both checked campaign ids and checked adgroup ids at once.
+    # Keep the old parent_type/parent_ids shape for backward compatibility.
     parent_type = str(d.get("parent_type") or "campaign").strip()
     parent_ids = [str(x).strip() for x in (d.get("parent_ids") or []) if str(x).strip()]
-    target_entity = str(d.get("target_entity") or "").strip()
-    ext_type = str(d.get("ext_type") or "ALL").strip() or "ALL"
+    campaign_parent_ids = [str(x).strip() for x in (d.get("campaign_ids") or []) if str(x).strip()]
+    adgroup_parent_ids = [str(x).strip() for x in (d.get("adgroup_ids") or []) if str(x).strip()]
+    if not campaign_parent_ids and not adgroup_parent_ids:
+        if parent_type == "campaign":
+            campaign_parent_ids = parent_ids
+        elif parent_type == "adgroup":
+            adgroup_parent_ids = parent_ids
+
+    raw_ext_types = d.get("ext_types")
+    if isinstance(raw_ext_types, list):
+        ext_types = [str(x or "").strip() for x in raw_ext_types if str(x or "").strip()]
+    else:
+        ext_types = [str(d.get("ext_type") or "ALL").strip() or "ALL"]
+    # ALL이 포함되면 다른 유형을 함께 보낼 필요가 없다.
+    if any(str(x).upper() == "ALL" for x in ext_types):
+        ext_types = ["ALL"]
+
     if not api_key or not secret_key or not cid:
         return jsonify({"error": "API Key / Secret Key / Customer ID가 필요합니다."}), 400
-    if parent_type not in {"campaign", "adgroup"}:
-        return jsonify({"error": "지원하지 않는 부모 범위입니다."}), 400
     if target_entity not in {"keyword", "ad", "extension"}:
         return jsonify({"error": "지원하지 않는 삭제 대상입니다."}), 400
-    if not parent_ids:
+    if not campaign_parent_ids and not adgroup_parent_ids:
         return jsonify({"error": "선택된 대상이 없습니다."}), 400
-    adgroup_ids, collect_errors = _collect_target_adgroup_ids(api_key, secret_key, cid, parent_type, parent_ids)
-    if not adgroup_ids and collect_errors:
+
+    collect_errors: List[str] = []
+    adgroup_ids: List[str] = []
+    seen_adgroups = set()
+
+    if campaign_parent_ids:
+        child_ids, errors = _collect_target_adgroup_ids(api_key, secret_key, cid, "campaign", campaign_parent_ids)
+        collect_errors.extend(errors)
+        for gid in child_ids:
+            if gid and gid not in seen_adgroups:
+                seen_adgroups.add(gid)
+                adgroup_ids.append(gid)
+    if adgroup_parent_ids:
+        child_ids, errors = _collect_target_adgroup_ids(api_key, secret_key, cid, "adgroup", adgroup_parent_ids)
+        collect_errors.extend(errors)
+        for gid in child_ids:
+            if gid and gid not in seen_adgroups:
+                seen_adgroups.add(gid)
+                adgroup_ids.append(gid)
+
+    if not adgroup_ids and collect_errors and target_entity != "extension":
         return jsonify({"error": "하위 광고그룹 조회에 실패했습니다.", "details": collect_errors[:10]}), 400
+
     rows: List[Dict[str, Any]] = []
     entity_type = {"keyword": "keyword", "ad": "ad", "extension": "ad_extension"}[target_entity]
     seen = set()
@@ -9184,31 +10238,57 @@ def bulk_delete_by_parent():
                     seen.add(ad_id)
                     rows.append({"nccAdId": ad_id})
     else:
-        campaign_ids_for_ext = parent_ids if parent_type == "campaign" else []
-        rows, ext_errors = _collect_extension_delete_rows(api_key, secret_key, cid, adgroup_ids, ext_type, campaign_ids=campaign_ids_for_ext)
-        collect_errors.extend(ext_errors)
+        seen_ext_ids = set()
+        for ext_type in ext_types:
+            part_rows, ext_errors = _collect_extension_delete_rows(
+                api_key,
+                secret_key,
+                cid,
+                adgroup_ids,
+                ext_type,
+                campaign_ids=campaign_parent_ids,
+            )
+            collect_errors.extend(ext_errors)
+            for row in part_rows:
+                ext_id = str(row.get("adExtensionId") or "").strip()
+                if ext_id and ext_id not in seen_ext_ids:
+                    seen_ext_ids.add(ext_id)
+                    rows.append(row)
+
     if not rows:
-        scope_label = "캠페인" if parent_type == "campaign" else "광고그룹"
+        scope_bits = []
+        if campaign_parent_ids:
+            scope_bits.append(f"캠페인 {len(campaign_parent_ids)}개")
+        if adgroup_parent_ids:
+            scope_bits.append(f"광고그룹 {len(adgroup_parent_ids)}개")
+        scope_label = " + ".join(scope_bits) or "선택 범위"
         target_label = {
             "keyword": "키워드",
             "ad": "소재",
-            "extension": _bulk_extension_type_label(ext_type),
+            "extension": ", ".join(_bulk_extension_type_label(x) for x in ext_types),
         }[target_entity]
         msg = f"선택한 {scope_label} 범위에서 삭제할 {target_label}가 없습니다."
-        if target_entity == "extension" and str(ext_type or "").strip().upper() == "HEADLINE":
+        if target_entity == "extension" and any(str(x or "").strip().upper() == "HEADLINE" for x in ext_types):
             msg += "\n(캠페인/광고그룹/소재 owner 기준으로 확장소재를 모두 조회했고, type 누락 응답은 headline 필드 기준으로도 다시 판별했습니다.)"
-        if str(ext_type or "").strip().upper() == "SHOPPING_PROMO_TEXT" and parent_type == "campaign":
-            msg += "\n(캠페인/광고그룹/쇼핑소재 owner 기준으로 모두 조회했지만 대상이 발견되지 않았습니다.)"
+        if target_entity == "extension" and any(str(x or "").strip().upper() == "IMAGE_SUB_LINKS" for x in ext_types):
+            msg += "\n(이미지형 서브링크는 IMAGE_SUB_LINKS 타입과 이미지 ID가 포함된 SUB_LINKS 응답까지 함께 판별했습니다.)"
         if collect_errors:
             msg += "\n" + "\n".join(collect_errors[:10])
         return jsonify({"ok": True, "total": 0, "success": 0, "fail": 0, "results": [], "message": msg})
+
     success, fail, results = _delete_payload_rows(api_key, secret_key, cid, entity_type, rows)
     msg_target = {
         "keyword": "키워드",
         "ad": "소재",
-        "extension": _bulk_extension_type_label(ext_type),
+        "extension": ", ".join(_bulk_extension_type_label(x) for x in ext_types),
     }[target_entity]
-    msg = f"{msg_target} 일괄 삭제 완료 (대상 {len(rows)}건 / 성공 {success} / 실패 {fail})"
+    scope_bits = []
+    if campaign_parent_ids:
+        scope_bits.append(f"캠페인 {len(campaign_parent_ids)}개")
+    if adgroup_parent_ids:
+        scope_bits.append(f"광고그룹 {len(adgroup_parent_ids)}개")
+    scope_label = " + ".join(scope_bits) or "선택 범위"
+    msg = f"{msg_target} 일괄 삭제 완료 ({scope_label} / 대상 {len(rows)}건 / 성공 {success} / 실패 {fail})"
     if collect_errors:
         msg += "\n" + "\n".join(collect_errors[:10])
     return jsonify({
@@ -9219,6 +10299,7 @@ def bulk_delete_by_parent():
         "fail": fail,
         "results": results,
         "message": msg,
+        "patch": "bulk-delete-extension-types-v20-20260429",
     })
 @app.route("/bulk_register", methods=["POST"])
 def bulk_register():
