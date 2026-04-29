@@ -3373,7 +3373,7 @@
         </div>
       </details>
       <div class="list-group-title" style="color: #9ca3af;">광고주 목록</div>
-      <div class="form-group" style="margin-bottom:10px;"><input id="account_search" type="text" placeholder="광고주명 / ID 검색" oninput="renderAccounts()" style="background: rgba(255,255,255,0.9); border:none;"></div>
+      <div class="form-group" style="margin-bottom:10px;"><input id="account_search" type="text" placeholder="광고주명 / ID 검색" oninput="scheduleRenderAccounts()" style="background: rgba(255,255,255,0.9); border:none;"></div>
       <div id="account_list"></div>
     </aside>
 
@@ -3384,7 +3384,7 @@
           <button type="button" class="master-toggle-btn" id="master_toggle_btn" onclick="toggleTargetPanel()" aria-label="대상 선택 패널 접기" title="대상 선택 패널 접기">‹</button>
         </div>
         <div class="master-search-row" style="display: flex; gap: 8px;">
-          <input type="text" id="master_search" placeholder="검색..." oninput="renderMasterList()" style="padding: 8px; font-size: 13px;">
+          <input type="text" id="master_search" placeholder="검색..." oninput="scheduleRenderMasterList()" style="padding: 8px; font-size: 13px;">
           <button class="btn btn-sub" style="padding: 8px;" onclick="refreshCampaigns(true)">↻</button>
         </div>
       </div>
@@ -3415,7 +3415,7 @@
           <span id="master_adg_count" class="badge green">0</span>
         </div>
         <div class="form-group" style="margin: 10px 0 8px;">
-          <input type="text" id="adgroup_search" placeholder="광고그룹명 검색" oninput="renderMasterList()" style="width:100%; padding:8px; font-size:13px;">
+          <input type="text" id="adgroup_search" placeholder="광고그룹명 검색" oninput="scheduleRenderMasterList()" style="width:100%; padding:8px; font-size:13px;">
         </div>
         <div class="quick-select-row">
           <button class="type-select-btn" type="button" onclick="selectByType('adgroup', 'WEB_SITE')">파워링크</button>
@@ -4835,6 +4835,8 @@ function syncCampaignTypeFilterUi() {
 function setCampaignTypeFilter(filter) {
     campaignTypeFilter = normalizeCampaignTypeKey(filter || 'ALL');
     localStorage.setItem('campaign_type_filter', campaignTypeFilter);
+    masterListShowAll.campaign = false;
+    masterListShowAll.adgroup = false;
     if(currentCampaignId) {
         const current = campaigns.find(x => String(x.id) === String(currentCampaignId));
         if(current && !isCampaignTypeFilterMatch(current)) {
@@ -5139,14 +5141,30 @@ function ensureReady(reqCamp=false, reqAdg=false) {
     return c; 
 }
 
+const ACTION_LOG_REFRESH_EXCLUDED_PREFIXES = ['/get_', '/query_', '/export_', '/search_', '/find_', '/preview_', '/health'];
+const ACTION_LOG_REFRESH_EXCLUDED_URLS = new Set(['/get_action_logs', '/sample_headers', '/delete_sample_headers']);
+let actionLogRefreshTimer = null;
+function shouldRefreshActionLogsAfterPost(url) {
+    const path = String(url || '').split('?')[0];
+    if (ACTION_LOG_REFRESH_EXCLUDED_URLS.has(path)) return false;
+    return !ACTION_LOG_REFRESH_EXCLUDED_PREFIXES.some(prefix => path.startsWith(prefix));
+}
+function scheduleActionLogRefresh(delay = 700) {
+    if (actionLogRefreshTimer) window.clearTimeout(actionLogRefreshTimer);
+    actionLogRefreshTimer = window.setTimeout(() => {
+        actionLogRefreshTimer = null;
+        loadActionLogs(false).catch(() => {});
+    }, delay);
+}
+
 async function postJson(url, body, txt) {
     showLoader(txt);
     try {
         const res = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
         const text = await res.text();
         let data = {}; try{ data = text ? JSON.parse(text) : {}; } catch(e){ data = {error:text||`${res.status}`}; }
-        try { await loadActionLogs(false); } catch(e) {}
         if(!res.ok) throw new Error([data.error, data.details].filter(Boolean).join(' | ') || `${res.status}`);
+        if(shouldRefreshActionLogsAfterPost(url)) scheduleActionLogRefresh();
         return data;
     } finally { hideLoader(); }
 }
@@ -5671,10 +5689,54 @@ window.onload = async function() {
     document.addEventListener('pointerup', stopScheduleDrag);
     document.addEventListener('pointercancel', stopScheduleDrag);
     loadActionLogs();
-    window.setInterval(() => { loadActionLogs(false); }, 15000);
+    window.setInterval(() => { loadActionLogs(false); }, 60000);
 };
 
 // --- 3. Accounts & Master List ---
+const MASTER_LIST_RENDER_LIMIT = 350;
+let accountRenderTimer = null;
+let masterRenderTimer = null;
+let masterListShowAll = { campaign: false, adgroup: false };
+
+function scheduleRenderAccounts() {
+    if(accountRenderTimer) window.cancelAnimationFrame(accountRenderTimer);
+    accountRenderTimer = window.requestAnimationFrame(() => {
+        accountRenderTimer = null;
+        renderAccounts();
+    });
+}
+function scheduleRenderMasterList() {
+    masterListShowAll.campaign = false;
+    masterListShowAll.adgroup = false;
+    if(masterRenderTimer) window.cancelAnimationFrame(masterRenderTimer);
+    masterRenderTimer = window.requestAnimationFrame(() => {
+        masterRenderTimer = null;
+        renderMasterList();
+    });
+}
+function getVisibleMasterItems(type, items) {
+    const list = Array.isArray(items) ? items : [];
+    const qEl = type === 'campaign' ? document.getElementById('master_search') : document.getElementById('adgroup_search');
+    const hasSearch = !!String(qEl?.value || '').trim();
+    if(masterListShowAll[type] || hasSearch || list.length <= MASTER_LIST_RENDER_LIMIT) return list;
+    return list.slice(0, MASTER_LIST_RENDER_LIMIT);
+}
+function renderMasterListNotice(type, visibleCount, totalCount) {
+    if(totalCount <= visibleCount) return '';
+    const label = type === 'campaign' ? '캠페인' : '광고그룹';
+    return `<div class="list-lite-notice" style="margin:8px 2px 4px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:12px;background:#f9fafb;color:#6b7280;font-size:12px;line-height:1.45;">${escapeHtml(label)} ${num(visibleCount)}개만 먼저 표시 중 / 전체 ${num(totalCount)}개<br><button type="button" class="btn btn-sub" style="margin-top:8px;padding:5px 9px;font-size:11px;" onclick="showAllMasterItems('${type}')">전체 목록 표시</button> <span style="color:#9ca3af;">검색어를 입력하면 전체에서 바로 찾습니다.</span></div>`;
+}
+function showAllMasterItems(type) {
+    masterListShowAll[type] = true;
+    renderMasterList();
+}
+function appendHtml(container, html) {
+    if(!container || !html) return;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = html;
+    while(wrap.firstChild) container.appendChild(wrap.firstChild);
+}
+
 function renderAccounts() {
     const wrap = document.getElementById('account_list'); wrap.innerHTML = '';
     const q = String(document.getElementById('account_search')?.value || '').trim().toLowerCase();
@@ -5730,6 +5792,7 @@ async function refreshCampaigns(force=false) {
     const c = ensureReady(); if(!c) return;
     try {
         campaigns = await postJson('/get_campaigns', { ...c, force }, '캠페인 목록 조회 중...');
+        masterListShowAll.campaign = false;
         if(currentCampaignId && !campaigns.some(x => String(x.id) === String(currentCampaignId))) {
             currentCampaignId = null;
             currentAdgroupId = null;
@@ -5745,6 +5808,7 @@ async function refreshAdgroups() {
     const c = ensureReady(true); if(!c) return;
     try {
         adgroups = await postJson('/get_adgroups', { ...c, campaign_id: currentCampaignId }, '광고그룹 목록 조회 중...');
+        masterListShowAll.adgroup = false;
         if(currentAdgroupId && !adgroups.some(x => String(x.id) === String(currentAdgroupId))) {
             currentAdgroupId = null;
             clearAdgroupDetailView();
@@ -5777,12 +5841,13 @@ function renderMasterList() {
     const campList = document.getElementById('campaign_list'); campList.innerHTML = '';
     const filteredCamps = getFilteredMasterItems('campaign');
     syncCampaignTypeFilterUi();
-    document.getElementById('master_camp_count').textContent = filteredCamps.length;
+    const visibleCamps = getVisibleMasterItems('campaign', filteredCamps);
+    document.getElementById('master_camp_count').textContent = visibleCamps.length < filteredCamps.length ? `${num(visibleCamps.length)}/${num(filteredCamps.length)}` : String(filteredCamps.length);
     syncSelectAllCheckbox('campaign', filteredCamps);
     syncCampaignToggleSelectButton(filteredCamps);
     
     if(!filteredCamps.length) campList.innerHTML = `<div style="padding:16px;text-align:center;color:#9ca3af;font-size:12px;">결과가 없습니다.</div>`;
-    else filteredCamps.forEach(c => {
+    else visibleCamps.forEach(c => {
         const div = document.createElement('div');
         div.className = 'list-item' + (c.id === currentCampaignId ? ' active' : '');
         const isChecked = checkedCampaignIds.has(c.id) ? 'checked' : '';
@@ -5794,6 +5859,7 @@ function renderMasterList() {
             </div>`;
         campList.appendChild(div);
     });
+    appendHtml(campList, renderMasterListNotice('campaign', visibleCamps.length, filteredCamps.length));
 
     // Adgroups
     const adgList = document.getElementById('adgroup_list'); adgList.innerHTML = '';
@@ -5803,9 +5869,10 @@ function renderMasterList() {
         adgList.innerHTML = `<div style="padding:16px;text-align:center;color:#9ca3af;font-size:12px;">캠페인을 선택하세요.</div>`;
     } else {
         const filteredAdg = getFilteredMasterItems('adgroup');
-        document.getElementById('master_adg_count').textContent = filteredAdg.length;
+        const visibleAdg = getVisibleMasterItems('adgroup', filteredAdg);
+        document.getElementById('master_adg_count').textContent = visibleAdg.length < filteredAdg.length ? `${num(visibleAdg.length)}/${num(filteredAdg.length)}` : String(filteredAdg.length);
         syncSelectAllCheckbox('adgroup', filteredAdg);
-        filteredAdg.forEach(a => {
+        visibleAdg.forEach(a => {
             const div = document.createElement('div');
             div.className = 'list-item' + (a.id === currentAdgroupId ? ' active' : '');
             const isChecked = checkedAdgroupIds.has(a.id) ? 'checked' : '';
@@ -5817,6 +5884,7 @@ function renderMasterList() {
                 </div>`;
             adgList.appendChild(div);
         });
+        appendHtml(adgList, renderMasterListNotice('adgroup', visibleAdg.length, filteredAdg.length));
     }
     updateBreadcrumb();
 }
@@ -5839,7 +5907,7 @@ function toggleSelectAll(type) {
 }
 
 async function selectCampaign(id) {
-    currentCampaignId = id; currentAdgroupId = null; checkedAdgroupIds.clear();
+    currentCampaignId = id; currentAdgroupId = null; checkedAdgroupIds.clear(); masterListShowAll.adgroup = false;
     const camp = campaigns.find(x => x.id === id);
     if(camp) document.getElementById('new_adgroup_type').value = isShoppingLikeType(camp?.campaignTp) ? 'SHOPPING' : 'WEB_SITE';
     syncCreateAdgroupForm();

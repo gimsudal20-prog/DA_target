@@ -24,6 +24,22 @@ from utils.excel import (
     build_table_workbook,
     workbook_to_bytesio,
 )
+from services.naver_client import (
+    build_open_headers,
+    create_naver_session,
+    make_fake_response,
+    make_signature,
+    request_naver_api,
+)
+from services.lookup_service import (
+    LookupService,
+    normalize_adgroup_item,
+    normalize_campaign_item,
+    normalize_channel_item,
+    pc_mobile_label,
+    extract_pc_mobile_flags,
+    stable_cache_key,
+)
 from werkzeug.exceptions import HTTPException
 from utils.labels import (
     AD_EXTENSION_TYPE_LABELS,
@@ -43,15 +59,25 @@ SAMPLES_DIR = os.path.join(BASE_DIR, "samples")
 OPENAPI_BASE_URL = "https://api.searchad.naver.com"
 PATCH_VERSION = "bulk-delete-extension-types-v20-20260429"
 app = Flask(__name__, template_folder=TEMPLATES_DIR)
-HTTP_SESSION = requests.Session()
-HTTP_ADAPTER = requests.adapters.HTTPAdapter(pool_connections=32, pool_maxsize=64, max_retries=0)
-HTTP_SESSION.mount("https://", HTTP_ADAPTER)
-HTTP_SESSION.mount("http://", HTTP_ADAPTER)
-_CACHE_LOCK = threading.RLock()
-_CACHE_TTL_SECONDS = 10.0
-_CAMPAIGN_CACHE: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
-_ADGROUP_CACHE: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
-_CHANNEL_CACHE: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
+HTTP_SESSION = create_naver_session(pool_connections=32, pool_maxsize=64)
+_LOOKUP_SERVICE = LookupService(lambda method, api_key, secret_key, cid, uri, params=None, json_body=None, max_retries=3: request_naver_api(
+    method,
+    api_key,
+    secret_key,
+    cid,
+    uri,
+    params=params,
+    json_body=json_body,
+    max_retries=max_retries,
+    session=HTTP_SESSION,
+    base_url=OPENAPI_BASE_URL,
+))
+# Backward-compatible aliases used by existing helper names and route code.
+_CACHE_LOCK = _LOOKUP_SERVICE.cache._lock
+_CACHE_TTL_SECONDS = _LOOKUP_SERVICE.cache.ttl_seconds
+_CAMPAIGN_CACHE = _LOOKUP_SERVICE.cache.campaigns
+_ADGROUP_CACHE = _LOOKUP_SERVICE.cache.adgroups
+_CHANNEL_CACHE = _LOOKUP_SERVICE.cache.channels
 FAST_IO_WORKERS = 8
 DELETE_IO_WORKERS = 12
 BID_IO_WORKERS = 8
@@ -61,29 +87,13 @@ ACTION_LOG_PATH = os.path.join(LOG_DIR, "action_history.jsonl")
 _ACTION_LOG_LOCK = threading.RLock()
 _ACTION_LOG_MAX_LINES = 2000
 def _stable_cache_key(api_key: str, secret_key: str, cid: str, scope: str) -> str:
-    raw = f"{scope}::{str(api_key or '').strip()}::{str(secret_key or '').strip()}::{str(cid or '').strip()}"
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return stable_cache_key(api_key, secret_key, cid, scope)
 def _cache_get(store: Dict[str, Tuple[float, Any]], key: str, ttl: float = _CACHE_TTL_SECONDS):
-    now = time.time()
-    with _CACHE_LOCK:
-        item = store.get(key)
-        if not item:
-            return None
-        ts, value = item
-        if now - ts > ttl:
-            store.pop(key, None)
-            return None
-        return copy.deepcopy(value)
+    return _LOOKUP_SERVICE.cache.get(store, key, ttl)
 def _cache_set(store: Dict[str, Tuple[float, Any]], key: str, value: Any):
-    with _CACHE_LOCK:
-        store[key] = (time.time(), copy.deepcopy(value))
+    return _LOOKUP_SERVICE.cache.set(store, key, value)
 def _cache_invalidate(api_key: str, secret_key: str, cid: str):
-    camp_key = _stable_cache_key(api_key, secret_key, cid, "campaigns")
-    ch_key = _stable_cache_key(api_key, secret_key, cid, "channels")
-    with _CACHE_LOCK:
-        _CAMPAIGN_CACHE.pop(camp_key, None)
-        _CHANNEL_CACHE.pop(ch_key, None)
-        _ADGROUP_CACHE.clear()
+    return _LOOKUP_SERVICE.cache.invalidate_account(api_key, secret_key, cid)
 LOG_ACTION_LABELS = {
     "/create_campaign": "캠페인 생성",
     "/create_adgroup_simple": "광고그룹 생성",
@@ -398,50 +408,24 @@ def _normalize_negative_type(value: Any) -> int:
         return 2
     return 1
 def _sig(ts: str, method: str, uri: str, secret_key: str) -> str:
-    msg = f"{ts}.{method.upper()}.{uri}"
-    dig = hmac.new(str(secret_key).strip().encode("utf-8"), msg.encode("utf-8"), hashlib.sha256).digest()
-    return base64.b64encode(dig).decode()
+    return make_signature(ts, method, uri, secret_key)
 def _open_headers(api_key: str, secret_key: str, customer_id: str, method: str, uri: str) -> dict:
-    ts = str(int(time.time() * 1000))
-    return {
-        "X-Timestamp": ts,
-        "X-API-KEY": str(api_key).strip(),
-        "X-Customer": str(customer_id).strip(),
-        "X-Signature": _sig(ts, method, uri, secret_key),
-        "Content-Type": "application/json; charset=UTF-8",
-    }
+    return build_open_headers(api_key, secret_key, customer_id, method, uri)
 def _make_fake_response(status_code: int, text: str):
-    class FakeResponse:
-        def __init__(self, status_code: int, text: str):
-            self.status_code = status_code
-            self.text = text
-            self.content = text.encode("utf-8", errors="ignore")
-        def json(self):
-            try:
-                return json.loads(self.text)
-            except Exception:
-                return {"error": self.text}
-    return FakeResponse(status_code, text)
+    return make_fake_response(status_code, text)
 def _do_req(method, api_key, secret_key, cid, uri, params=None, json_body=None, max_retries=3):
-    url = OPENAPI_BASE_URL + uri
-    last_err = None
-    for i in range(max_retries):
-        headers = _open_headers(api_key, secret_key, cid, method, uri)
-        try:
-            r = HTTP_SESSION.request(method, url, headers=headers, params=params, json=json_body, timeout=(5, 20))
-            if r.status_code in [200, 201, 204]:
-                return r
-            if r.status_code == 429:
-                time.sleep(1.25)
-                continue
-            if r.status_code == 404 and "1018" in r.text:
-                time.sleep(1.0)
-                continue
-            return r
-        except requests.exceptions.RequestException as e:
-            last_err = str(e)
-            time.sleep(1.25)
-    return _make_fake_response(500, f"네트워크 통신 실패: {last_err or '알 수 없는 오류'}")
+    return request_naver_api(
+        method,
+        api_key,
+        secret_key,
+        cid,
+        uri,
+        params=params,
+        json_body=json_body,
+        max_retries=max_retries,
+        session=HTTP_SESSION,
+        base_url=OPENAPI_BASE_URL,
+    )
 def _campaign_label(value: Any) -> str:
     return str(label_campaign_type(value, default=str(value or "-")))
 def _adgroup_label(value: Any) -> str:
@@ -781,155 +765,27 @@ def _prepare_payload_row(row: Dict[str, Any], entity_type: str, cid: str) -> Dic
             payload.pop(field, None)
     return _strip_empty(payload)
 def _normalize_campaign_item(item: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "id": item.get("nccCampaignId") or item.get("id") or "",
-        "name": item.get("name") or "",
-        "campaignTp": item.get("campaignTp") or "",
-        "label": _campaign_label(item.get("campaignTp")),
-        "badgeColor": CAMPAIGN_TYPE_COLORS.get(item.get("campaignTp"), "gray"),
-        "raw": item,
-    }
+    return normalize_campaign_item(item)
 def _normalize_adgroup_item(item: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "id": item.get("nccAdgroupId") or "",
-        "name": item.get("name") or "",
-        "adgroupType": item.get("adgroupType") or "",
-        "label": _adgroup_label(item.get("adgroupType")),
-        "pcChannelId": item.get("pcChannelId") or "",
-        "mobileChannelId": item.get("mobileChannelId") or "",
-        "nccCampaignId": item.get("nccCampaignId") or "",
-        "raw": item,
-    }
+    return normalize_adgroup_item(item)
 def _normalize_channel_item(item: Dict[str, Any]) -> Dict[str, Any]:
-    cid = item.get("nccBusinessChannelId") or item.get("bizChannelId") or item.get("nccChannelId") or item.get("channelId") or ""
-    name = item.get("name") or item.get("channelContents") or item.get("siteUrl") or cid
-    return {
-        "id": cid,
-        "name": name,
-        "channelTp": item.get("channelTp") or item.get("bizChannelType") or item.get("channelType") or "",
-        "siteUrl": item.get("siteUrl") or "",
-        "raw": item,
-    }
+    return normalize_channel_item(item)
 def _fetch_campaigns(api_key: str, secret_key: str, cid: str):
-    res = _do_req("GET", api_key, secret_key, cid, "/ncc/campaigns")
-    if res.status_code != 200:
-        return res, []
-    rows = [_normalize_campaign_item(x) for x in (res.json() or [])]
-    rows.sort(key=lambda x: (x["label"], x["name"]))
-    return res, rows
+    return _LOOKUP_SERVICE.fetch_campaigns(api_key, secret_key, cid)
 def _fetch_campaign_detail(api_key: str, secret_key: str, cid: str, campaign_id: str):
-    campaign_id = str(campaign_id or "").strip()
-    if not campaign_id:
-        return None
-    try:
-        res = _do_req("GET", api_key, secret_key, cid, f"/ncc/campaigns/{campaign_id}")
-        if res.status_code == 200 and isinstance(res.json(), dict):
-            return res.json()
-    except Exception:
-        pass
-    try:
-        _, rows = _fetch_campaigns(api_key, secret_key, cid)
-        for row in (rows or []):
-            if str(row.get("id") or "").strip() == campaign_id:
-                raw = row.get("raw")
-                if isinstance(raw, dict):
-                    return raw
-                return {"nccCampaignId": row.get("id"), "campaignTp": row.get("campaignTp"), "name": row.get("name")}
-    except Exception:
-        pass
-    return None
+    return _LOOKUP_SERVICE.fetch_campaign_detail(api_key, secret_key, cid, campaign_id)
 def _pc_mobile_label(pc: Any, mobile: Any) -> str:
-    if pc is True and mobile is False:
-        return "PC"
-    if pc is False and mobile is True:
-        return "MOBILE"
-    if pc is True and mobile is True:
-        return "ALL"
-    return "UNKNOWN"
+    return pc_mobile_label(pc, mobile)
 def _extract_pc_mobile_flags(detail_obj: Dict[str, Any] | None, pm_target_obj: Dict[str, Any] | None = None) -> Tuple[Optional[bool], Optional[bool]]:
-    detail_obj = detail_obj or {}
-    pc = detail_obj.get("pcDevice")
-    mobile = detail_obj.get("mobileDevice")
-    if isinstance(pc, bool) and isinstance(mobile, bool):
-        return pc, mobile
-    target = (pm_target_obj or {}).get("target") if isinstance(pm_target_obj, dict) else None
-    if isinstance(target, dict):
-        pc_t = target.get("pc")
-        mobile_t = target.get("mobile")
-        if isinstance(pc_t, bool) and isinstance(mobile_t, bool):
-            return pc_t, mobile_t
-    return None, None
+    return extract_pc_mobile_flags(detail_obj, pm_target_obj)
 def _enrich_adgroup_media_row(api_key: str, secret_key: str, cid: str, row: Dict[str, Any]) -> Dict[str, Any]:
-    row = copy.deepcopy(row)
-    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
-    adgroup_id = str(row.get("id") or raw.get("nccAdgroupId") or "").strip()
-    if not adgroup_id:
-        return row
-    detail_obj: Dict[str, Any] | None = None
-    pm_target_obj: Dict[str, Any] | None = None
-    res_detail, detail_obj = _fetch_adgroup_detail(api_key, secret_key, cid, adgroup_id)
-    if res_detail.status_code == 200 and isinstance(detail_obj, dict):
-        merged_raw = copy.deepcopy(raw)
-        merged_raw.update(detail_obj)
-        raw = merged_raw
-    if not isinstance(raw.get("pcDevice"), bool) or not isinstance(raw.get("mobileDevice"), bool):
-        try:
-            res_target, pm_target_obj = _fetch_target_object(api_key, secret_key, cid, adgroup_id, "PC_MOBILE_TARGET")
-            if res_target.status_code != 200:
-                pm_target_obj = None
-        except Exception:
-            pm_target_obj = None
-    pc, mobile = _extract_pc_mobile_flags(detail_obj if isinstance(detail_obj, dict) else raw, pm_target_obj)
-    if isinstance(pc, bool):
-        raw["pcDevice"] = pc
-    if isinstance(mobile, bool):
-        raw["mobileDevice"] = mobile
-    target_summary = raw.get("targetSummary") if isinstance(raw.get("targetSummary"), dict) else {}
-    media_label = _pc_mobile_label(raw.get("pcDevice"), raw.get("mobileDevice"))
-    if media_label != "UNKNOWN":
-        target_summary["pcMobile"] = media_label
-        raw["targetSummary"] = target_summary
-        row["mediaType"] = media_label
-    row["pcDevice"] = raw.get("pcDevice")
-    row["mobileDevice"] = raw.get("mobileDevice")
-    row["raw"] = raw
-    return row
+    return _LOOKUP_SERVICE.enrich_adgroup_media_row(api_key, secret_key, cid, row, _fetch_target_object)
 def _fetch_adgroups(api_key: str, secret_key: str, cid: str, campaign_id: str, enrich_media: bool = True):
-    res = _do_req("GET", api_key, secret_key, cid, "/ncc/adgroups", params={"nccCampaignId": campaign_id})
-    if res.status_code != 200:
-        return res, []
-    rows = [_normalize_adgroup_item(x) for x in (res.json() or [])]
-    if enrich_media and rows:
-        max_workers = min(8, max(1, len(rows)))
-        enriched_rows: List[Dict[str, Any]] = []
-        with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            future_map = {ex.submit(_enrich_adgroup_media_row, api_key, secret_key, cid, row): idx for idx, row in enumerate(rows)}
-            ordered: Dict[int, Dict[str, Any]] = {}
-            for fut in as_completed(future_map):
-                idx = future_map[fut]
-                try:
-                    ordered[idx] = fut.result()
-                except Exception:
-                    ordered[idx] = rows[idx]
-            enriched_rows = [ordered[i] for i in range(len(rows))]
-        rows = enriched_rows
-    rows.sort(key=lambda x: x["name"])
-    return res, rows
+    return _LOOKUP_SERVICE.fetch_adgroups(api_key, secret_key, cid, campaign_id, enrich_media=enrich_media, target_object_func=_fetch_target_object)
 def _fetch_adgroup_detail(api_key: str, secret_key: str, cid: str, adgroup_id: str):
-    res = _do_req("GET", api_key, secret_key, cid, f"/ncc/adgroups/{adgroup_id}")
-    if res.status_code == 200 and isinstance(res.json(), dict):
-        return res, res.json()
-    return res, None
+    return _LOOKUP_SERVICE.fetch_adgroup_detail(api_key, secret_key, cid, adgroup_id)
 def _fetch_first_biz_channel_id(api_key: str, secret_key: str, cid: str) -> str:
-    res = _do_req("GET", api_key, secret_key, cid, "/ncc/channels")
-    if res.status_code != 200:
-        return ""
-    for item in (res.json() or []):
-        norm = _normalize_channel_item(item if isinstance(item, dict) else {})
-        cid_val = str(norm.get("id") or "").strip()
-        if cid_val:
-            return cid_val
-    return ""
+    return _LOOKUP_SERVICE.fetch_first_biz_channel_id(api_key, secret_key, cid)
 def _is_shopping_adgroup(adgroup_obj: Dict[str, Any] | None) -> bool:
     adg_type = str((adgroup_obj or {}).get("adgroupType") or "").upper()
     return adg_type in {"SHOPPING", "CATALOG", "SHOPPING_BRAND"}
@@ -5192,16 +5048,10 @@ def get_campaigns():
     secret_key = d.get("secret_key")
     cid = d.get("customer_id")
     force = bool(d.get("force"))
-    cache_key = _stable_cache_key(api_key, secret_key, cid, "campaigns")
-    if not force:
-        cached = _cache_get(_CAMPAIGN_CACHE, cache_key)
-        if cached is not None:
-            return jsonify(cached)
-    res, rows = _fetch_campaigns(api_key, secret_key, cid)
-    if res.status_code == 200:
-        _cache_set(_CAMPAIGN_CACHE, cache_key, rows)
+    res, rows, cached = _LOOKUP_SERVICE.get_campaigns_cached(api_key, secret_key, cid, force=force)
+    if cached or (res is not None and res.status_code == 200):
         return jsonify(rows)
-    return jsonify({"error": "캠페인 조회 실패", "details": res.text}), 400
+    return jsonify({"error": "캠페인 조회 실패", "details": getattr(res, "text", "")}), 400
 @app.route("/get_adgroups", methods=["POST"])
 def get_adgroups():
     d = request.json or {}
@@ -5212,16 +5062,18 @@ def get_adgroups():
     force = bool(d.get("force"))
     if not campaign_id:
         return jsonify([])
-    cache_key = _stable_cache_key(api_key, secret_key, cid, f"adgroups::{campaign_id}")
-    if not force:
-        cached = _cache_get(_ADGROUP_CACHE, cache_key)
-        if cached is not None:
-            return jsonify(cached)
-    res, rows = _fetch_adgroups(api_key, secret_key, cid, campaign_id, enrich_media=False)
-    if res.status_code == 200:
-        _cache_set(_ADGROUP_CACHE, cache_key, rows)
+    res, rows, cached = _LOOKUP_SERVICE.get_adgroups_cached(
+        api_key,
+        secret_key,
+        cid,
+        campaign_id,
+        force=force,
+        enrich_media=False,
+        target_object_func=_fetch_target_object,
+    )
+    if cached or (res is not None and res.status_code == 200):
         return jsonify(rows)
-    return jsonify({"error": "광고그룹 조회 실패", "details": res.text}), 400
+    return jsonify({"error": "광고그룹 조회 실패", "details": getattr(res, "text", "")}), 400
 @app.route("/get_biz_channels", methods=["POST"])
 def get_biz_channels():
     d = request.json or {}
@@ -5229,17 +5081,10 @@ def get_biz_channels():
     secret_key = d.get("secret_key")
     cid = d.get("customer_id")
     force = bool(d.get("force"))
-    cache_key = _stable_cache_key(api_key, secret_key, cid, "channels")
-    if not force:
-        cached = _cache_get(_CHANNEL_CACHE, cache_key)
-        if cached is not None:
-            return jsonify(cached)
-    res = _do_req("GET", api_key, secret_key, cid, "/ncc/channels")
-    if res.status_code == 200:
-        normalized = [_normalize_channel_item(item) for item in (res.json() or [])]
-        _cache_set(_CHANNEL_CACHE, cache_key, normalized)
-        return jsonify(normalized)
-    return jsonify({"error": "비즈채널 조회 실패", "details": res.text}), 400
+    res, rows, cached = _LOOKUP_SERVICE.get_channels_cached(api_key, secret_key, cid, force=force)
+    if cached or (res is not None and res.status_code == 200):
+        return jsonify(rows)
+    return jsonify({"error": "비즈채널 조회 실패", "details": getattr(res, "text", "")}), 400
 @app.route("/get_keywords", methods=["POST"])
 def get_keywords():
     d = request.json or {}
