@@ -40,6 +40,17 @@ from services.lookup_service import (
     extract_pc_mobile_flags,
     stable_cache_key,
 )
+from routes.lookup_routes import create_lookup_blueprint
+from routes.detail_lookup_routes import create_detail_lookup_blueprint
+from services.detail_lookup_service import DetailLookupService
+from routes.account_lookup_routes import create_account_lookup_blueprint
+from services.account_lookup_service import AccountLookupService
+from routes.registration_routes import create_registration_blueprint
+from services.registration_service import RegistrationService
+from routes.change_routes import create_change_blueprint
+from services.change_service import ChangeService
+from routes.copy_delete_routes import create_copy_delete_blueprint
+from services.copy_delete_service import CopyDeleteService
 from werkzeug.exceptions import HTTPException
 from utils.labels import (
     AD_EXTENSION_TYPE_LABELS,
@@ -5041,51 +5052,26 @@ def index():
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"ok": True, "service": "naver-bulk-manager-refresh"})
-@app.route("/get_campaigns", methods=["POST"])
-def get_campaigns():
-    d = request.json or {}
-    api_key = d.get("api_key")
-    secret_key = d.get("secret_key")
-    cid = d.get("customer_id")
-    force = bool(d.get("force"))
-    res, rows, cached = _LOOKUP_SERVICE.get_campaigns_cached(api_key, secret_key, cid, force=force)
-    if cached or (res is not None and res.status_code == 200):
-        return jsonify(rows)
-    return jsonify({"error": "캠페인 조회 실패", "details": getattr(res, "text", "")}), 400
-@app.route("/get_adgroups", methods=["POST"])
-def get_adgroups():
-    d = request.json or {}
-    api_key = d.get("api_key")
-    secret_key = d.get("secret_key")
-    cid = d.get("customer_id")
-    campaign_id = str(d.get("campaign_id") or "").strip()
-    force = bool(d.get("force"))
-    if not campaign_id:
-        return jsonify([])
-    res, rows, cached = _LOOKUP_SERVICE.get_adgroups_cached(
-        api_key,
-        secret_key,
-        cid,
-        campaign_id,
-        force=force,
-        enrich_media=False,
-        target_object_func=_fetch_target_object,
-    )
-    if cached or (res is not None and res.status_code == 200):
-        return jsonify(rows)
-    return jsonify({"error": "광고그룹 조회 실패", "details": getattr(res, "text", "")}), 400
-@app.route("/get_biz_channels", methods=["POST"])
-def get_biz_channels():
-    d = request.json or {}
-    api_key = d.get("api_key")
-    secret_key = d.get("secret_key")
-    cid = d.get("customer_id")
-    force = bool(d.get("force"))
-    res, rows, cached = _LOOKUP_SERVICE.get_channels_cached(api_key, secret_key, cid, force=force)
-    if cached or (res is not None and res.status_code == 200):
-        return jsonify(rows)
-    return jsonify({"error": "비즈채널 조회 실패", "details": getattr(res, "text", "")}), 400
-@app.route("/get_keywords", methods=["POST"])
+app.register_blueprint(create_lookup_blueprint(lookup_service=_LOOKUP_SERVICE, target_object_func=_fetch_target_object))
+_DETAIL_LOOKUP_SERVICE = DetailLookupService(
+    fetch_keywords_func=_fetch_keywords,
+    fetch_ads_func=_fetch_ads,
+    fetch_extensions_func=_fetch_extensions,
+    fetch_restricted_keywords_func=_fetch_restricted_keywords,
+    keyword_matches_search_func=_keyword_matches_search,
+)
+app.register_blueprint(create_detail_lookup_blueprint(_DETAIL_LOOKUP_SERVICE))
+_ACCOUNT_LOOKUP_SERVICE = AccountLookupService(
+    normalize_lookup_scope_func=_normalize_lookup_scope,
+    collect_asset_scope_adgroups_func=_collect_asset_scope_adgroups,
+    collect_lookup_ads_func=_collect_lookup_ads_for_contexts,
+    collect_lookup_extensions_func=_collect_lookup_extensions_for_contexts,
+    collect_lookup_keywords_func=_collect_lookup_keywords_for_contexts,
+    build_asset_lookup_workbook_func=_build_asset_lookup_workbook,
+    workbook_to_bytesio_func=workbook_to_bytesio,
+    xlsx_mime=XLSX_MIME,
+)
+app.register_blueprint(create_account_lookup_blueprint(_ACCOUNT_LOOKUP_SERVICE))
 def get_keywords():
     d = request.json or {}
     res, rows = _fetch_keywords(d.get("api_key"), d.get("secret_key"), d.get("customer_id"), d.get("adgroup_id"))
@@ -5124,21 +5110,18 @@ def get_keywords():
             })
         return jsonify(filtered_rows)
     return jsonify({"error": "키워드 조회 실패", "details": res.text}), 400
-@app.route("/get_ads", methods=["POST"])
 def get_ads():
     d = request.json or {}
     res, rows = _fetch_ads(d.get("api_key"), d.get("secret_key"), d.get("customer_id"), d.get("adgroup_id"))
     if res.status_code == 200:
         return jsonify(rows)
     return jsonify({"error": "소재 조회 실패", "details": res.text}), 400
-@app.route("/get_ad_extensions", methods=["POST"])
 def get_ad_extensions():
     d = request.json or {}
     res, rows = _fetch_extensions(d.get("api_key"), d.get("secret_key"), d.get("customer_id"), d.get("owner_id"))
     if res.status_code == 200:
         return jsonify(rows)
     return jsonify({"error": "확장소재 조회 실패", "details": res.text}), 400
-@app.route("/query_account_ads", methods=["POST"])
 def query_account_ads():
     d = request.json or {}
     api_key = str(d.get("api_key") or "").strip()
@@ -5162,7 +5145,6 @@ def query_account_ads():
         "warnings": warnings[:20],
         "message": f"소재 {len(rows):,}건 조회 완료",
     })
-@app.route("/query_account_extensions", methods=["POST"])
 def query_account_extensions():
     d = request.json or {}
     api_key = str(d.get("api_key") or "").strip()
@@ -5188,7 +5170,6 @@ def query_account_extensions():
         "warnings": warnings[:20],
         "message": f"확장소재 {len(rows):,}건 조회 완료",
     })
-@app.route("/query_account_keywords", methods=["POST"])
 def query_account_keywords():
     d = request.json or {}
     api_key = str(d.get("api_key") or "").strip()
@@ -5213,7 +5194,6 @@ def query_account_keywords():
         "message": f"등록 키워드 {len(rows):,}건 조회 완료",
     })
 
-@app.route("/export_account_keywords_excel", methods=["POST"])
 def export_account_keywords_excel():
     d = request.json or {}
     api_key = str(d.get("api_key") or "").strip()
@@ -5240,7 +5220,6 @@ def export_account_keywords_excel():
     stamp = time.strftime("%Y%m%d_%H%M%S")
     return send_file(output, mimetype=XLSX_MIME, as_attachment=True, download_name=f"account_keywords_{scope}_{stamp}.xlsx")
 
-@app.route("/export_account_ads_excel", methods=["POST"])
 def export_account_ads_excel():
     d = request.json or {}
     api_key = str(d.get("api_key") or "").strip()
@@ -5266,7 +5245,6 @@ def export_account_ads_excel():
     output = workbook_to_bytesio(wb)
     stamp = time.strftime("%Y%m%d_%H%M%S")
     return send_file(output, mimetype=XLSX_MIME, as_attachment=True, download_name=f"account_ads_{scope}_{stamp}.xlsx")
-@app.route("/export_account_extensions_excel", methods=["POST"])
 def export_account_extensions_excel():
     d = request.json or {}
     api_key = str(d.get("api_key") or "").strip()
@@ -5295,7 +5273,6 @@ def export_account_extensions_excel():
     output = workbook_to_bytesio(wb)
     stamp = time.strftime("%Y%m%d_%H%M%S")
     return send_file(output, mimetype=XLSX_MIME, as_attachment=True, download_name=f"account_extensions_{scope}_{stamp}.xlsx")
-@app.route("/get_restricted_keywords", methods=["POST"])
 def get_restricted_keywords():
     d = request.json or {}
     res, rows = _fetch_restricted_keywords(d.get("api_key"), d.get("secret_key"), d.get("customer_id"), d.get("adgroup_id"))
@@ -5599,7 +5576,6 @@ def clear_action_logs():
         return jsonify({"ok": True, "message": "작업 로그를 비웠습니다."})
     except Exception as e:
         return jsonify({"error": "작업 로그 비우기 실패", "details": str(e)}), 500
-@app.route("/create_campaign", methods=["POST"])
 def create_campaign():
     d = request.json or {}
     payload = {
@@ -5616,7 +5592,6 @@ def create_campaign():
         _cache_invalidate(d.get("api_key"), d.get("secret_key"), d.get("customer_id"))
         return jsonify({"ok": True, "item": res.json(), "message": "캠페인 생성 완료"})
     return jsonify({"error": "캠페인 생성 실패", "details": res.text}), 400
-@app.route("/create_adgroup_simple", methods=["POST"])
 def create_adgroup_simple():
     d = request.json or {}
     campaign_id = str(d.get("campaign_id") or "").strip()
@@ -5770,7 +5745,6 @@ def create_adgroup_simple():
             "last_attempt_label": final_label,
         },
     }), 400
-@app.route("/create_keywords_simple", methods=["POST"])
 def create_keywords_simple():
     d = request.json or {}
     keyword_batches = d.get("keyword_batches") if isinstance(d.get("keyword_batches"), list) else None
@@ -5970,7 +5944,6 @@ def _bulk_upload_one_text_ad(api_key: str, secret_key: str, cid: str, row_no: in
     if result.get("ok"):
         return _result_item(row_no, True, headline or adgroup_id, "생성 완료")
     return _result_item(row_no, False, headline or adgroup_id, result.get("detail") or "소재 생성 실패")
-@app.route("/bulk_upload_text_ads", methods=["POST"])
 def bulk_upload_text_ads():
     api_key = str(request.form.get("api_key") or "").strip()
     secret_key = str(request.form.get("secret_key") or "").strip()
@@ -6045,7 +6018,6 @@ def bulk_upload_text_ads():
         "results": results,
         "message": f"소재 대량등록 완료 · 성공 {success}건 / 실패 {fail}건",
     })
-@app.route("/create_text_ad_simple", methods=["POST"])
 def create_text_ad_simple():
     d = request.json or {}
     adgroup_ids = _parse_target_ids(d, "adgroup_id", "adgroup_ids")
@@ -6098,7 +6070,6 @@ def create_text_ad_simple():
         "results": results,
         "message": f"기본소재 등록 완료 · 성공 {success}건 / 실패 {fail}건",
     })
-@app.route("/create_ad_advanced", methods=["POST"])
 def create_ad_advanced():
     d = request.json or {}
     adgroup_id = str(d.get("adgroup_id") or "").strip()
@@ -6119,7 +6090,6 @@ def create_ad_advanced():
     if res.status_code in [200, 201]:
         return jsonify({"ok": True, "item": res.json(), "message": "고급 소재 생성 완료"})
     return jsonify({"error": "고급 소재 생성 실패", "details": res.text, "payload": payload}), 400
-@app.route("/create_extension_simple", methods=["POST"])
 def create_extension_simple():
     d = request.json or {}
     owner_ids = _parse_target_ids(d, "owner_id", "owner_ids")
@@ -6292,7 +6262,6 @@ def create_extension_simple():
     if warnings:
         out["warnings"] = warnings
     return jsonify(out)
-@app.route("/bulk_upload_headlines", methods=["POST"])
 def bulk_upload_headlines():
     api_key = str(request.form.get("api_key") or "").strip()
     secret_key = str(request.form.get("secret_key") or "").strip()
@@ -6384,7 +6353,6 @@ def bulk_upload_headlines():
         "results": results,
         "message": f"추가제목 대량등록 완료 (성공 {success}건 / 실패 {fail}건)",
     })
-@app.route("/create_shopping_ad_simple", methods=["POST"])
 def create_shopping_ad_simple():
     d = request.json or {}
     adgroup_ids = _parse_target_ids(d, "adgroup_id", "adgroup_ids")
@@ -6418,7 +6386,6 @@ def create_shopping_ad_simple():
         "results": results,
         "message": f"쇼핑 소재 등록 완료 · 성공 {success}건 / 실패 {fail}건",
     })
-@app.route("/create_extension_raw", methods=["POST"])
 def create_extension_raw():
     d = request.json or {}
     owner_id = str(d.get("owner_id") or "").strip()
@@ -6437,7 +6404,6 @@ def create_extension_raw():
     if res.status_code in [200, 201]:
         return jsonify({"ok": True, "item": res.json(), "message": "확장소재 생성 완료"})
     return jsonify({"error": "확장소재 생성 실패", "details": res.text, "payload": payload}), 400
-@app.route("/create_restricted_keywords_simple", methods=["POST"])
 def create_restricted_keywords_simple():
     d = request.json or {}
     raw_adgroup_ids = d.get("adgroup_ids") or []
@@ -6492,7 +6458,6 @@ def create_restricted_keywords_simple():
         "fail": fail,
         "results": results,
     })
-@app.route("/copy_entities_to_adgroups", methods=["POST"])
 def copy_entities_to_adgroups():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
@@ -6537,7 +6502,6 @@ def copy_entities_to_adgroups():
         msg += "\n" + "\n".join(all_errors[:60])
     _cache_invalidate(d.get("api_key"), d.get("secret_key"), d.get("customer_id"))
     return jsonify({"ok": True, "message": msg})
-@app.route("/copy_campaigns", methods=["POST"])
 def copy_campaigns():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
@@ -6651,7 +6615,6 @@ def copy_campaigns():
         msg += "\n" + "\n".join(all_errors[:60])
     _cache_invalidate(d.get("api_key"), d.get("secret_key"), d.get("customer_id"))
     return jsonify({"ok": True, "message": msg})
-@app.route("/copy_adgroups_to_target", methods=["POST"])
 def copy_adgroups_to_target():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
@@ -6751,7 +6714,6 @@ def copy_adgroups_to_target():
                 all_errors.append(f"[{new_adg['name']}] 생성 실패: {r_post.text}")
     _cache_invalidate(api_key, secret_key, cid)
     return jsonify({"ok": True, "message": f"복사 완료! (성공: {results['success']}, 실패: {results['fail']})\n" + "\n".join(all_errors[:60])})
-@app.route("/rename_adgroups_bulk", methods=["POST"])
 def rename_adgroups_bulk():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
@@ -6809,7 +6771,6 @@ def rename_adgroups_bulk():
         "success": success,
         "fail": fail,
     }), (200 if success > 0 else 400)
-@app.route("/update_media", methods=["POST"])
 def update_media():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
@@ -6945,10 +6906,6 @@ def _handle_update_adgroup_options_request():
         resp["error"] = message + ("\n" + "\n".join([f"[{r.get('name') or r.get('nccAdgroupId')}] {r.get('detail')}" for r in results[:5]]) if results else "")
     return jsonify(resp), status_code
 
-@app.route("/update_adgroup_search_options", methods=["GET", "POST", "OPTIONS"])
-@app.route("/update_adgroup_search_options/", methods=["GET", "POST", "OPTIONS"])
-@app.route("/update_adgroup_options", methods=["GET", "POST", "OPTIONS"])
-@app.route("/update_adgroup_options/", methods=["GET", "POST", "OPTIONS"])
 def update_adgroup_options():
     if request.method == "OPTIONS":
         return Response(status=204)
@@ -6957,7 +6914,6 @@ def update_adgroup_options():
     return _handle_update_adgroup_options_request()
 
 
-@app.route("/update_powerlink_device_bid_weights", methods=["POST"])
 def update_powerlink_device_bid_weights():
     d = request.get_json(silent=True) or {}
     api_key = d.get("api_key")
@@ -7039,7 +6995,6 @@ def update_powerlink_device_bid_weights():
         "details": details,
     }), (200 if tone_ok else 400)
 
-@app.route("/apply_target_settings_bulk", methods=["POST"])
 def apply_target_settings_bulk():
     d = request.get_json(silent=True) or {}
     api_key = d.get("api_key")
@@ -7184,7 +7139,6 @@ def apply_target_settings_bulk():
         "patch": "bulk-target-source-select-v16-20260428",
     }), status_code
 
-@app.route("/update_budget", methods=["POST"])
 def update_budget():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
@@ -7452,7 +7406,6 @@ def _put_schedule_weight_map(api_key: str, secret_key: str, cid: str, owner_id: 
                 return False, "bid_weight_put", bw_res.text
     return True, "", ""
 
-@app.route("/update_schedule", methods=["POST"])
 def update_schedule():
     d = request.get_json(silent=True) or {}
     api_key = d.get("api_key")
@@ -7536,7 +7489,6 @@ def update_schedule():
         "results": results[:20],
     }), status_code
 
-@app.route("/update_schedule_campaign_bulk", methods=["POST"])
 def update_schedule_campaign_bulk():
     d = request.get_json(silent=True) or {}
     api_key = d.get("api_key")
@@ -8192,7 +8144,6 @@ def _apply_keyword_bid_map(api_key: str, secret_key: str, cid: str, adgroup_ids:
                         if len(err_details) < 5:
                             err_details.append(f"[{item.get('keyword', '알수없음')}] 변경 실패: {r_single.text}")
     return success_cnt, fail_cnt, skipped_cnt, err_details
-@app.route("/update_non_search_keyword_exclusion", methods=["POST"])
 def update_non_search_keyword_exclusion():
     d = request.get_json(force=True) or {}
     api_key = str(d.get("api_key") or "").strip()
@@ -8237,7 +8188,6 @@ def update_non_search_keyword_exclusion():
         "results": details,
         "message": " / ".join(message_bits),
     }), (200 if fail == 0 else 207)
-@app.route("/preview_keyword_bids_by_search", methods=["POST"])
 def preview_keyword_bids_by_search():
     d = request.json or {}
     api_key = str(d.get("api_key") or "").strip()
@@ -8295,7 +8245,6 @@ def preview_keyword_bids_by_search():
         "selected_campaign_count": len(campaign_ids) if search_scope == "selected_campaigns" else 0,
         "selected_adgroup_count": len(adgroup_ids) if search_scope == "selected_adgroups" else 0,
     })
-@app.route("/update_keyword_bids_by_search", methods=["POST"])
 def update_keyword_bids_by_search():
     d = request.json or {}
     api_key = str(d.get("api_key") or "").strip()
@@ -8437,7 +8386,6 @@ def update_keyword_bids_by_search():
         "selected_campaign_count": len(campaign_ids) if search_scope == "selected_campaigns" else 0,
         "selected_adgroup_count": len(adgroup_ids) if search_scope == "selected_adgroups" else 0,
     })
-@app.route("/preview_keyword_bid_weights_by_search", methods=["POST"])
 def preview_keyword_bid_weights_by_search():
     d = request.json or {}
     api_key = str(d.get("api_key") or "").strip()
@@ -8490,7 +8438,6 @@ def preview_keyword_bid_weights_by_search():
         "warnings": err_details[:10],
         "preview_token": preview_token,
     })
-@app.route("/update_keyword_bid_weights_by_search", methods=["POST"])
 def update_keyword_bid_weights_by_search():
     d = request.json or {}
     api_key = str(d.get("api_key") or "").strip()
@@ -8604,7 +8551,6 @@ def update_keyword_bid_weights_by_search():
         "warnings": err_details[:10],
         "updated_adgroup_ids": _unique_keep_order(updated_adgroup_ids),
     })
-@app.route("/update_keyword_bids", methods=["POST"])
 def update_keyword_bids():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
@@ -8778,7 +8724,6 @@ def update_keyword_bids():
         lines.append("\n[상세 내역]")
         lines.extend(err_details[:10])
     return jsonify({"ok": True, "message": "\n".join(lines)})
-@app.route("/update_bid_mode_by_scope", methods=["POST"])
 def update_bid_mode_by_scope():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
@@ -8959,7 +8904,6 @@ def update_bid_mode_by_scope():
         lines.extend(err_details[:10])
     return jsonify({"ok": True, "message": "\n".join(lines)})
 
-@app.route("/adjust_keyword_bids_by_threshold", methods=["POST"])
 def adjust_keyword_bids_by_threshold():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
@@ -9384,23 +9328,14 @@ def _keyword_avg_position_by_search_common(d: Dict[str, Any], preview_only: bool
     }), (200 if fail_cnt == 0 else 207)
 
 
-@app.route("/preview_keyword_avg_position_by_search", methods=["POST"])
-@app.route("/preview_keyword_avg_position_search", methods=["POST"])
-@app.route("/preview_powerlink_keyword_avg_position_by_search", methods=["POST"])
-@app.route("/preview_powerlink_keyword_avg_position_search", methods=["POST"])
 def preview_keyword_avg_position_by_search():
     return _keyword_avg_position_by_search_common(request.json or {}, preview_only=True)
 
 
-@app.route("/update_keyword_avg_position_by_search", methods=["POST"])
-@app.route("/update_keyword_avg_position_search", methods=["POST"])
-@app.route("/update_powerlink_keyword_avg_position_by_search", methods=["POST"])
-@app.route("/update_powerlink_keyword_avg_position_search", methods=["POST"])
 def update_keyword_avg_position_by_search():
     return _keyword_avg_position_by_search_common(request.json or {}, preview_only=False)
 
 
-@app.route("/update_keyword_bids_avg_position", methods=["POST"])
 def update_keyword_bids_avg_position():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
@@ -9989,7 +9924,6 @@ def _collect_extension_delete_rows(api_key: str, secret_key: str, cid: str, adgr
                 else:
                     errors.append(f"[소재 {ad_id}] 확장소재 조회 실패: {res_ad_ext.text}")
     return rows, errors
-@app.route("/bulk_delete_by_parent", methods=["POST"])
 def bulk_delete_by_parent():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
@@ -10146,7 +10080,6 @@ def bulk_delete_by_parent():
         "message": msg,
         "patch": "bulk-delete-extension-types-v20-20260429",
     })
-@app.route("/bulk_register", methods=["POST"])
 def bulk_register():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
@@ -10172,7 +10105,6 @@ def bulk_register():
         return jsonify({"error": f"지원하지 않는 entity_type: {entity_type}"}), 400
     success, fail, results = handler(api_key, secret_key, cid, rows)
     return jsonify({"ok": True, "entity_type": entity_type, "total": len(rows), "success": success, "fail": fail, "results": results})
-@app.route("/bulk_delete", methods=["POST"])
 def bulk_delete():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
@@ -10201,7 +10133,6 @@ def _set_user_lock_for_entity(api_key: str, secret_key: str, cid: str, entity_ty
     if r_put.status_code in [200, 201]:
         return True, ""
     return False, f"변경 실패: {r_put.text}"
-@app.route("/set_searched_powerlink_keyword_state", methods=["POST"])
 def set_searched_powerlink_keyword_state():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
@@ -10244,7 +10175,6 @@ def set_searched_powerlink_keyword_state():
         msg += "\n" + "\n".join(details)
     _cache_invalidate(api_key, secret_key, cid)
     return jsonify({"ok": True, "message": msg, "success": success, "fail": fail, "enabled": enabled})
-@app.route("/set_campaign_state", methods=["POST"])
 def set_campaign_state():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
@@ -10289,7 +10219,6 @@ def set_campaign_state():
         msg += "\n" + "\n".join(details)
     _cache_invalidate(d.get("api_key"), d.get("secret_key"), d.get("customer_id"))
     return jsonify({"ok": True, "message": msg})
-@app.route("/delete_selected", methods=["POST"])
 def delete_selected():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
@@ -10329,6 +10258,59 @@ def delete_sample_headers():
     if headers:
         sample_row[headers[0]] = "example-id"
     return jsonify({"headers": headers, "sample_row": sample_row})
+
+# Stage 4~6 route split: keep existing business logic but move URL bindings into blueprints.
+_REGISTRATION_SERVICE = RegistrationService({
+    "create_campaign": create_campaign,
+    "create_adgroup_simple": create_adgroup_simple,
+    "create_keywords_simple": create_keywords_simple,
+    "bulk_upload_text_ads": bulk_upload_text_ads,
+    "create_text_ad_simple": create_text_ad_simple,
+    "create_ad_advanced": create_ad_advanced,
+    "create_extension_simple": create_extension_simple,
+    "bulk_upload_headlines": bulk_upload_headlines,
+    "create_shopping_ad_simple": create_shopping_ad_simple,
+    "create_extension_raw": create_extension_raw,
+    "create_restricted_keywords_simple": create_restricted_keywords_simple,
+    "bulk_register": bulk_register,
+})
+app.register_blueprint(create_registration_blueprint(_REGISTRATION_SERVICE))
+
+_CHANGE_SERVICE = ChangeService({
+    "rename_adgroups_bulk": rename_adgroups_bulk,
+    "update_media": update_media,
+    "update_adgroup_options": update_adgroup_options,
+    "update_powerlink_device_bid_weights": update_powerlink_device_bid_weights,
+    "apply_target_settings_bulk": apply_target_settings_bulk,
+    "update_budget": update_budget,
+    "update_schedule": update_schedule,
+    "update_schedule_campaign_bulk": update_schedule_campaign_bulk,
+    "update_non_search_keyword_exclusion": update_non_search_keyword_exclusion,
+    "preview_keyword_bids_by_search": preview_keyword_bids_by_search,
+    "update_keyword_bids_by_search": update_keyword_bids_by_search,
+    "preview_keyword_bid_weights_by_search": preview_keyword_bid_weights_by_search,
+    "update_keyword_bid_weights_by_search": update_keyword_bid_weights_by_search,
+    "update_keyword_bids": update_keyword_bids,
+    "update_bid_mode_by_scope": update_bid_mode_by_scope,
+    "adjust_keyword_bids_by_threshold": adjust_keyword_bids_by_threshold,
+    "preview_keyword_avg_position_by_search": preview_keyword_avg_position_by_search,
+    "update_keyword_avg_position_by_search": update_keyword_avg_position_by_search,
+    "update_keyword_bids_avg_position": update_keyword_bids_avg_position,
+    "set_searched_powerlink_keyword_state": set_searched_powerlink_keyword_state,
+    "set_campaign_state": set_campaign_state,
+})
+app.register_blueprint(create_change_blueprint(_CHANGE_SERVICE))
+
+_COPY_DELETE_SERVICE = CopyDeleteService({
+    "copy_entities_to_adgroups": copy_entities_to_adgroups,
+    "copy_campaigns": copy_campaigns,
+    "copy_adgroups_to_target": copy_adgroups_to_target,
+    "bulk_delete_by_parent": bulk_delete_by_parent,
+    "bulk_delete": bulk_delete,
+    "delete_selected": delete_selected,
+})
+app.register_blueprint(create_copy_delete_blueprint(_COPY_DELETE_SERVICE))
+
 if __name__ == "__main__":
     os.makedirs(SAMPLES_DIR, exist_ok=True)
     app.run(debug=True, port=5000)
