@@ -4639,6 +4639,12 @@ let campaignTypeFilter = localStorage.getItem('campaign_type_filter') || 'ALL';
 let accountLookupAdsRows = [];
 let accountLookupExtRows = [];
 let accountLookupKeywordRows = [];
+let apiLookupCacheVersion = 0;
+let detailRequestSeq = 0;
+const READ_API_CACHE_TTL_MS = 45000;
+const LIST_API_CACHE_TTL_MS = 120000;
+const READ_API_INFLIGHT = new Map();
+const READ_API_CACHE = new Map();
 
 // ★ 필수 Utility 함수 (escapeAttr 포함) ★
 function formatWon(v) { return Number(v||0) > 0 ? `${Number(v).toLocaleString()}원` : '설정안됨'; }
@@ -4754,6 +4760,12 @@ function toggleFavoriteAccount(customerId, event) {
     renderAccounts();
     setAssetLookupScope('account');
     switchAccountAssetPreview('keywords', document.querySelector('#tab_data .account-asset-preview-tab.active'));
+}
+
+function selectAccountByCustomerId(customerId) {
+    const key = String(customerId || '');
+    const acc = accountsData.find(x => String(x.customer_id || '') === key);
+    if(acc) selectAccount(acc);
 }
 function normalizeCampaignTypeKey(value) {
     const s = String(value || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
@@ -5082,7 +5094,7 @@ async function fetchCurrentAdgroupKeywordsOnly({searchText='', matchMode='partia
         payload.keyword_search = cleanSearch;
         payload.keyword_match_mode = matchMode === 'exact' ? 'exact' : 'partial';
     }
-    const res = await postJson('/get_keywords', payload, loadingText);
+    const res = await fetchJsonCached('/get_keywords', payload, { loadingText, ttlMs:30000 });
     const parsed = buildKeywordMetaFromResponse(res, previewLimit, cleanSearch, payload.keyword_match_mode || 'partial');
     detailState.keywords = parsed.rows;
     detailKeywordMeta = parsed.meta;
@@ -5113,6 +5125,67 @@ async function resetCurrentAdgroupKeywordSearch() {
     } catch(err) {
         showToast(`키워드 초기화 실패: ${err.message}`, 'error');
     }
+}
+
+
+function stableJsonStringify(value) {
+    if (Array.isArray(value)) return '[' + value.map(stableJsonStringify).join(',') + ']';
+    if (value && typeof value === 'object') {
+        return '{' + Object.keys(value).sort().map(k => JSON.stringify(k) + ':' + stableJsonStringify(value[k])).join(',') + '}';
+    }
+    return JSON.stringify(value);
+}
+function buildReadApiCacheKey(url, body) {
+    const src = body || {};
+    const masked = { ...src };
+    if (masked.secret_key) masked.secret_key = `len:${String(masked.secret_key).length}`;
+    if (masked.api_key) {
+        const v = String(masked.api_key);
+        masked.api_key = `len:${v.length}:tail:${v.slice(-4)}`;
+    }
+    masked.__cache_version = apiLookupCacheVersion;
+    return `${url}|${stableJsonStringify(masked)}`;
+}
+function clearReadApiCache() {
+    READ_API_CACHE.clear();
+    READ_API_INFLIGHT.clear();
+}
+function bumpLookupCacheVersion() {
+    apiLookupCacheVersion += 1;
+    clearReadApiCache();
+}
+function parseApiErrorPayload(text, status) {
+    let data = {};
+    try { data = text ? JSON.parse(text) : {}; } catch(e) { data = { error: text || `${status}` }; }
+    return [data.error, data.details].filter(Boolean).join(' | ') || `${status}`;
+}
+async function fetchJsonCached(url, body, options = {}) {
+    const ttl = Number(options.ttlMs ?? READ_API_CACHE_TTL_MS) || READ_API_CACHE_TTL_MS;
+    const useLoader = !!options.loadingText;
+    const key = buildReadApiCacheKey(url, body || {});
+    const now = Date.now();
+    if (!options.force) {
+        const cached = READ_API_CACHE.get(key);
+        if (cached && (now - cached.ts) < ttl) return cached.data;
+        const inflight = READ_API_INFLIGHT.get(key);
+        if (inflight) return inflight;
+    }
+    if (useLoader) showLoader(options.loadingText);
+    const req = fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body || {}) })
+        .then(async res => {
+            const text = await res.text();
+            let data = {};
+            try { data = text ? JSON.parse(text) : {}; } catch(e) { data = { error: text || `${res.status}` }; }
+            if(!res.ok) throw new Error([data.error, data.details].filter(Boolean).join(' | ') || `${res.status}`);
+            READ_API_CACHE.set(key, { ts: Date.now(), data });
+            return data;
+        })
+        .finally(() => {
+            READ_API_INFLIGHT.delete(key);
+            if (useLoader) hideLoader();
+        });
+    READ_API_INFLIGHT.set(key, req);
+    return req;
 }
 
 function showToast(message, type = 'info') {
@@ -5164,7 +5237,10 @@ async function postJson(url, body, txt) {
         const text = await res.text();
         let data = {}; try{ data = text ? JSON.parse(text) : {}; } catch(e){ data = {error:text||`${res.status}`}; }
         if(!res.ok) throw new Error([data.error, data.details].filter(Boolean).join(' | ') || `${res.status}`);
-        if(shouldRefreshActionLogsAfterPost(url)) scheduleActionLogRefresh();
+        if(shouldRefreshActionLogsAfterPost(url)) {
+            bumpLookupCacheVersion();
+            scheduleActionLogRefresh();
+        }
         return data;
     } finally { hideLoader(); }
 }
@@ -5699,20 +5775,20 @@ let masterRenderTimer = null;
 let masterListShowAll = { campaign: false, adgroup: false };
 
 function scheduleRenderAccounts() {
-    if(accountRenderTimer) window.cancelAnimationFrame(accountRenderTimer);
-    accountRenderTimer = window.requestAnimationFrame(() => {
+    if(accountRenderTimer) window.clearTimeout(accountRenderTimer);
+    accountRenderTimer = window.setTimeout(() => {
         accountRenderTimer = null;
-        renderAccounts();
-    });
+        window.requestAnimationFrame(renderAccounts);
+    }, 120);
 }
 function scheduleRenderMasterList() {
     masterListShowAll.campaign = false;
     masterListShowAll.adgroup = false;
-    if(masterRenderTimer) window.cancelAnimationFrame(masterRenderTimer);
-    masterRenderTimer = window.requestAnimationFrame(() => {
+    if(masterRenderTimer) window.clearTimeout(masterRenderTimer);
+    masterRenderTimer = window.setTimeout(() => {
         masterRenderTimer = null;
-        renderMasterList();
-    });
+        window.requestAnimationFrame(renderMasterList);
+    }, 120);
 }
 function getVisibleMasterItems(type, items) {
     const list = Array.isArray(items) ? items : [];
@@ -5738,7 +5814,8 @@ function appendHtml(container, html) {
 }
 
 function renderAccounts() {
-    const wrap = document.getElementById('account_list'); wrap.innerHTML = '';
+    const wrap = document.getElementById('account_list');
+    if(!wrap) return;
     const q = String(document.getElementById('account_search')?.value || '').trim().toLowerCase();
     const sorted = [...accountsData].sort((a,b) => {
         const aFav = isFavoriteAccount(a.customer_id) ? 1 : 0;
@@ -5755,26 +5832,26 @@ function renderAccounts() {
         wrap.innerHTML = '<div class="log-empty" style="padding:12px;">검색 결과가 없습니다.</div>';
         return;
     }
-    sorted.forEach(acc => {
-        const active = String(currentCustomerId || '') === String(acc.customer_id || '');
-        const fav = isFavoriteAccount(acc.customer_id);
-        const el = document.createElement('div');
-        el.className = 'account-item' + (active ? ' active' : '');
-        el.innerHTML = `
+    wrap.innerHTML = sorted.map(acc => {
+        const cid = String(acc.customer_id || '');
+        const active = String(currentCustomerId || '') === cid;
+        const fav = isFavoriteAccount(cid);
+        return `
+        <div class="account-item${active ? ' active' : ''}" onclick="selectAccountByCustomerId('${escapeAttr(cid)}')">
             <div class="row">
                 <div class="main">
                     <div class="name">${escapeHtml(acc.account_name)}</div>
-                    <div class="sub">ID: ${escapeHtml(acc.customer_id)}</div>
+                    <div class="sub">ID: ${escapeHtml(cid)}</div>
                 </div>
-                <button type="button" class="account-pin ${fav ? 'active' : ''}" title="${fav ? '즐겨찾기 해제' : '즐겨찾기 추가'}" onclick="toggleFavoriteAccount('${escapeAttr(acc.customer_id)}', event)">${fav ? '★' : '☆'}</button>
-            </div>`;
-        el.onclick = () => selectAccount(acc);
-        wrap.appendChild(el);
-    });
+                <button type="button" class="account-pin ${fav ? 'active' : ''}" title="${fav ? '즐겨찾기 해제' : '즐겨찾기 추가'}" onclick="toggleFavoriteAccount('${escapeAttr(cid)}', event)">${fav ? '★' : '☆'}</button>
+            </div>
+        </div>`;
+    }).join('');
 }
 
 async function selectAccount(acc) {
     currentCustomerId = acc.customer_id; 
+    bumpLookupCacheVersion();
     persistAuthState(false);
     document.getElementById('bc_account').textContent = acc.account_name;
     document.getElementById('master_header_title').textContent = `${acc.account_name} 캠페인`;
@@ -5790,8 +5867,12 @@ async function selectAccount(acc) {
 
 async function refreshCampaigns(force=false) {
     const c = ensureReady(); if(!c) return;
+    if(force) clearReadApiCache();
     try {
-        campaigns = await postJson('/get_campaigns', { ...c, force }, '캠페인 목록 조회 중...');
+        const payload = { ...c, force: !!force };
+        campaigns = force
+            ? await postJson('/get_campaigns', payload, '캠페인 목록 조회 중...')
+            : await fetchJsonCached('/get_campaigns', payload, { loadingText:'캠페인 목록 조회 중...', ttlMs:LIST_API_CACHE_TTL_MS });
         masterListShowAll.campaign = false;
         if(currentCampaignId && !campaigns.some(x => String(x.id) === String(currentCampaignId))) {
             currentCampaignId = null;
@@ -5804,10 +5885,14 @@ async function refreshCampaigns(force=false) {
     } catch(err) { showToast(`캠페인 조회 실패: ${err.message}`, 'error'); }
 }
 
-async function refreshAdgroups() {
+async function refreshAdgroups(force=false) {
     const c = ensureReady(true); if(!c) return;
+    if(force) clearReadApiCache();
     try {
-        adgroups = await postJson('/get_adgroups', { ...c, campaign_id: currentCampaignId }, '광고그룹 목록 조회 중...');
+        const payload = { ...c, campaign_id: currentCampaignId, force: !!force };
+        adgroups = force
+            ? await postJson('/get_adgroups', payload, '광고그룹 목록 조회 중...')
+            : await fetchJsonCached('/get_adgroups', payload, { loadingText:'광고그룹 목록 조회 중...', ttlMs:LIST_API_CACHE_TTL_MS });
         masterListShowAll.adgroup = false;
         if(currentAdgroupId && !adgroups.some(x => String(x.id) === String(currentAdgroupId))) {
             currentAdgroupId = null;
@@ -5827,64 +5912,77 @@ async function refreshAdgroups() {
 
 async function loadChannels(force=false) {
     const c = ensureReady(); if(!c) return;
+    if(force) clearReadApiCache();
     try {
-        channels = await postJson('/get_biz_channels', { ...c, force }, '비즈채널 로딩...');
-        const html = ['<option value="">선택 안 함</option>'].concat(channels.map(x => `<option value="${x.id}">${escapeHtml(x.name)}</option>`)).join('');
-        document.getElementById('new_biz_channel').innerHTML = html;
+        const payload = { ...c, force: !!force };
+        channels = force
+            ? await postJson('/get_biz_channels', payload, '비즈채널 로딩...')
+            : await fetchJsonCached('/get_biz_channels', payload, { loadingText:'비즈채널 로딩...', ttlMs:LIST_API_CACHE_TTL_MS });
+        const html = ['<option value="">선택 안 함</option>'].concat(channels.map(x => `<option value="${escapeAttr(x.id)}">${escapeHtml(x.name)}</option>`)).join('');
+        const el = document.getElementById('new_biz_channel');
+        if(el && el.innerHTML !== html) el.innerHTML = html;
     } catch(e) {}
 }
 
 function renderMasterList() {
-    const q = document.getElementById('master_search').value.toLowerCase();
-    
-    // Campaigns
-    const campList = document.getElementById('campaign_list'); campList.innerHTML = '';
+    const campList = document.getElementById('campaign_list');
+    const adgList = document.getElementById('adgroup_list');
+    if(!campList || !adgList) return;
+
     const filteredCamps = getFilteredMasterItems('campaign');
     syncCampaignTypeFilterUi();
     const visibleCamps = getVisibleMasterItems('campaign', filteredCamps);
-    document.getElementById('master_camp_count').textContent = visibleCamps.length < filteredCamps.length ? `${num(visibleCamps.length)}/${num(filteredCamps.length)}` : String(filteredCamps.length);
+    const campCountEl = document.getElementById('master_camp_count');
+    if(campCountEl) campCountEl.textContent = visibleCamps.length < filteredCamps.length ? `${num(visibleCamps.length)}/${num(filteredCamps.length)}` : String(filteredCamps.length);
     syncSelectAllCheckbox('campaign', filteredCamps);
     syncCampaignToggleSelectButton(filteredCamps);
-    
-    if(!filteredCamps.length) campList.innerHTML = `<div style="padding:16px;text-align:center;color:#9ca3af;font-size:12px;">결과가 없습니다.</div>`;
-    else visibleCamps.forEach(c => {
-        const div = document.createElement('div');
-        div.className = 'list-item' + (c.id === currentCampaignId ? ' active' : '');
-        const isChecked = checkedCampaignIds.has(c.id) ? 'checked' : '';
-        div.innerHTML = `
-            <div><input type="checkbox" ${isChecked} onclick="event.stopPropagation(); toggleListCheck('campaign', '${c.id}')"></div>
-            <div class="main" onclick="selectCampaign('${c.id}')">
-                <div class="title">${escapeHtml(c.name)}</div>
-                <div class="meta"><span class="badge ${getCampaignTypeBadgeColor(c)}">${escapeHtml(getCampaignTypeLabel(c))}</span> 상태: ${getEntityStatusLabel(c)} · 예산: ${formatWon(c.raw?.dailyBudget)}</div>
-            </div>`;
-        campList.appendChild(div);
-    });
-    appendHtml(campList, renderMasterListNotice('campaign', visibleCamps.length, filteredCamps.length));
 
-    // Adgroups
-    const adgList = document.getElementById('adgroup_list'); adgList.innerHTML = '';
+    if(!filteredCamps.length) {
+        campList.innerHTML = `<div style="padding:16px;text-align:center;color:#9ca3af;font-size:12px;">결과가 없습니다.</div>`;
+    } else {
+        const campRows = visibleCamps.map(c => {
+            const cid = String(c.id || '');
+            const isChecked = checkedCampaignIds.has(c.id) ? 'checked' : '';
+            return `
+            <div class="list-item${c.id === currentCampaignId ? ' active' : ''}">
+                <div><input type="checkbox" ${isChecked} onclick="event.stopPropagation(); toggleListCheck('campaign', '${escapeAttr(cid)}')"></div>
+                <div class="main" onclick="selectCampaign('${escapeAttr(cid)}')">
+                    <div class="title">${escapeHtml(c.name)}</div>
+                    <div class="meta"><span class="badge ${escapeAttr(getCampaignTypeBadgeColor(c))}">${escapeHtml(getCampaignTypeLabel(c))}</span> 상태: ${getEntityStatusLabel(c)} · 예산: ${formatWon(c.raw?.dailyBudget)}</div>
+                </div>
+            </div>`;
+        }).join('');
+        campList.innerHTML = campRows + renderMasterListNotice('campaign', visibleCamps.length, filteredCamps.length);
+    }
+
     if(!currentCampaignId) {
-        document.getElementById('master_adg_count').textContent = '0';
+        const adgCountEl = document.getElementById('master_adg_count');
+        if(adgCountEl) adgCountEl.textContent = '0';
         syncSelectAllCheckbox('adgroup', []);
         adgList.innerHTML = `<div style="padding:16px;text-align:center;color:#9ca3af;font-size:12px;">캠페인을 선택하세요.</div>`;
     } else {
         const filteredAdg = getFilteredMasterItems('adgroup');
         const visibleAdg = getVisibleMasterItems('adgroup', filteredAdg);
-        document.getElementById('master_adg_count').textContent = visibleAdg.length < filteredAdg.length ? `${num(visibleAdg.length)}/${num(filteredAdg.length)}` : String(filteredAdg.length);
+        const adgCountEl = document.getElementById('master_adg_count');
+        if(adgCountEl) adgCountEl.textContent = visibleAdg.length < filteredAdg.length ? `${num(visibleAdg.length)}/${num(filteredAdg.length)}` : String(filteredAdg.length);
         syncSelectAllCheckbox('adgroup', filteredAdg);
-        visibleAdg.forEach(a => {
-            const div = document.createElement('div');
-            div.className = 'list-item' + (a.id === currentAdgroupId ? ' active' : '');
-            const isChecked = checkedAdgroupIds.has(a.id) ? 'checked' : '';
-            div.innerHTML = `
-                <div><input type="checkbox" ${isChecked} onclick="event.stopPropagation(); toggleListCheck('adgroup', '${a.id}')"></div>
-                <div class="main" onclick="selectAdgroup('${a.id}')">
-                    <div class="title">${escapeHtml(a.name)}</div>
-                    <div class="meta">상태: ${getEntityStatusLabel(a)} | 예산: ${formatBudget(a.raw?.useDailyBudget, a.raw?.dailyBudget)} | 입찰가: ${formatWon(a.raw?.bidAmt)} | 매체: ${getMediaLabel(a.raw)}</div>
+        if(!filteredAdg.length) {
+            adgList.innerHTML = `<div style="padding:16px;text-align:center;color:#9ca3af;font-size:12px;">결과가 없습니다.</div>`;
+        } else {
+            const adgRows = visibleAdg.map(a => {
+                const aid = String(a.id || '');
+                const isChecked = checkedAdgroupIds.has(a.id) ? 'checked' : '';
+                return `
+                <div class="list-item${a.id === currentAdgroupId ? ' active' : ''}">
+                    <div><input type="checkbox" ${isChecked} onclick="event.stopPropagation(); toggleListCheck('adgroup', '${escapeAttr(aid)}')"></div>
+                    <div class="main" onclick="selectAdgroup('${escapeAttr(aid)}')">
+                        <div class="title">${escapeHtml(a.name)}</div>
+                        <div class="meta">상태: ${getEntityStatusLabel(a)} | 예산: ${formatBudget(a.raw?.useDailyBudget, a.raw?.dailyBudget)} | 입찰가: ${formatWon(a.raw?.bidAmt)} | 매체: ${getMediaLabel(a.raw)}</div>
+                    </div>
                 </div>`;
-            adgList.appendChild(div);
-        });
-        appendHtml(adgList, renderMasterListNotice('adgroup', visibleAdg.length, filteredAdg.length));
+            }).join('');
+            adgList.innerHTML = adgRows + renderMasterListNotice('adgroup', visibleAdg.length, filteredAdg.length);
+        }
     }
     updateBreadcrumb();
 }
@@ -5908,6 +6006,7 @@ function toggleSelectAll(type) {
 
 async function selectCampaign(id) {
     currentCampaignId = id; currentAdgroupId = null; checkedAdgroupIds.clear(); masterListShowAll.adgroup = false;
+    clearReadApiCache();
     const camp = campaigns.find(x => x.id === id);
     if(camp) document.getElementById('new_adgroup_type').value = isShoppingLikeType(camp?.campaignTp) ? 'SHOPPING' : 'WEB_SITE';
     syncCreateAdgroupForm();
@@ -6145,33 +6244,43 @@ refreshAllKeywordTextareaCounts();
 updateKeywordBatchModeNote();
 
 function updateSelectOptions() {
-    const campHtml = campaigns.map(x => `<option value="${x.id}">${escapeHtml(x.name)}</option>`).join('');
+    const campaignIdSet = new Set(campaigns.map(x => String(x.id)));
+    const adgroupIdSet = new Set(adgroups.map(x => String(x.id)));
+    const campHtml = campaigns.map(x => `<option value="${escapeAttr(x.id)}">${escapeHtml(x.name)}</option>`).join('');
     ['create_adgroup_campaign', 'copy_adgroup_target_campaign_select', 'copy_entity_target_campaign_select'].forEach(id => {
         const el = document.getElementById(id);
         if(el) {
             const prev = el.value;
-            el.innerHTML = campHtml || '<option value="">캠페인 없음</option>';
-            el.value = (prev && campaigns.some(x => String(x.id) === String(prev))) ? prev : (currentCampaignId || '');
+            const nextHtml = campHtml || '<option value="">캠페인 없음</option>';
+            if(el.innerHTML !== nextHtml) el.innerHTML = nextHtml;
+            el.value = (prev && campaignIdSet.has(String(prev))) ? prev : (currentCampaignId || '');
         }
     });
     syncCreateAdgroupForm();
-    if(document.getElementById('copy_entity_target_campaign_select')) loadCopyEntityTargetAdgroups();
+    if(document.getElementById('copy_entity_target_campaign_select')) loadCopyEntityTargetAdgroups(false);
 
-    const adgHtml = adgroups.map(x => `<option value="${x.id}">${escapeHtml(x.name)}</option>`).join('');
+    const adgHtml = adgroups.map(x => `<option value="${escapeAttr(x.id)}">${escapeHtml(x.name)}</option>`).join('');
+    const adgEmptyHtml = '<option value="">광고그룹 없음</option>';
     ['create_ad_adgroup', 'create_shopping_adgroup', 'create_ext_adgroup', 'create_negative_adgroup'].forEach(id => {
         const el = document.getElementById(id);
-        if(el) { el.innerHTML = adgHtml || '<option value="">광고그룹 없음</option>'; el.value = currentAdgroupId; }
+        if(el) {
+            const nextHtml = adgHtml || adgEmptyHtml;
+            if(el.innerHTML !== nextHtml) el.innerHTML = nextHtml;
+            el.value = currentAdgroupId || '';
+        }
     });
     const bulkTargetSourceEl = document.getElementById('bulk_target_source_adgroup');
     if(bulkTargetSourceEl) {
         const prev = bulkTargetSourceEl.value;
-        bulkTargetSourceEl.innerHTML = adgHtml ? `<option value="">원본 광고그룹 선택</option>${adgHtml}` : '<option value="">광고그룹 없음</option>';
-        bulkTargetSourceEl.value = (prev && adgroups.some(x => String(x.id) === String(prev))) ? prev : (currentAdgroupId || '');
+        const nextHtml = adgHtml ? `<option value="">원본 광고그룹 선택</option>${adgHtml}` : adgEmptyHtml;
+        if(bulkTargetSourceEl.innerHTML !== nextHtml) bulkTargetSourceEl.innerHTML = nextHtml;
+        bulkTargetSourceEl.value = (prev && adgroupIdSet.has(String(prev))) ? prev : (currentAdgroupId || '');
     }
     document.querySelectorAll('.create-keyword-adgroup-select').forEach(el => {
         const prev = el.value;
-        el.innerHTML = adgHtml || '<option value="">광고그룹 없음</option>';
-        el.value = (prev && adgroups.some(x => String(x.id) === String(prev))) ? prev : (currentAdgroupId || '');
+        const nextHtml = adgHtml || adgEmptyHtml;
+        if(el.innerHTML !== nextHtml) el.innerHTML = nextHtml;
+        el.value = (prev && adgroupIdSet.has(String(prev))) ? prev : (currentAdgroupId || '');
     });
 }
 
@@ -6637,7 +6746,7 @@ function getAssetLookupPayload() {
         showToast('좌측 체크박스에서 캠페인을 1개 이상 선택해주세요.', 'error');
         return null;
     }
-    return { ...c, scope, campaign_ids: campaignIds };
+    return { ...c, scope, campaign_ids: campaignIds, _cache_bust: apiLookupCacheVersion };
 }
 
 function renderAccountLookupTable(targetId, cols, rows, emptyMsg) {
@@ -6707,7 +6816,7 @@ function renderAccountExtensionsPreview() {
 async function loadAccountKeywordsLookup() {
     const payload = getAssetLookupPayload(); if(!payload) return;
     try {
-        const data = await postJson('/query_account_keywords', payload, '키워드 조회 중...');
+        const data = await fetchJsonCached('/query_account_keywords', payload, { loadingText:'키워드 조회 중...', ttlMs:60000 });
         accountLookupKeywordRows = Array.isArray(data?.rows) ? data.rows : [];
         renderAccountKeywordsPreview();
         switchAccountAssetPreview('keywords', document.querySelector('#tab_data .account-asset-preview-tab'));
@@ -6719,7 +6828,7 @@ async function loadAccountKeywordsLookup() {
 async function loadAccountAdsLookup() {
     const payload = getAssetLookupPayload(); if(!payload) return;
     try {
-        const data = await postJson('/query_account_ads', payload, '소재 조회 중...');
+        const data = await fetchJsonCached('/query_account_ads', payload, { loadingText:'소재 조회 중...', ttlMs:60000 });
         accountLookupAdsRows = Array.isArray(data?.rows) ? data.rows : [];
         renderAccountAdsPreview();
         if (Array.isArray(data?.warnings) && data.warnings.length) showToast(`조회 완료 (${data.warnings.length}건 경고 있음)`, 'info');
@@ -6730,7 +6839,7 @@ async function loadAccountAdsLookup() {
 async function loadAccountExtensionsLookup() {
     const payload = getAssetLookupPayload(); if(!payload) return;
     try {
-        const data = await postJson('/query_account_extensions', payload, '확장소재 조회 중...');
+        const data = await fetchJsonCached('/query_account_extensions', payload, { loadingText:'확장소재 조회 중...', ttlMs:60000 });
         accountLookupExtRows = Array.isArray(data?.rows) ? data.rows : [];
         renderAccountExtensionsPreview();
         if (Array.isArray(data?.warnings) && data.warnings.length) showToast(`조회 완료 (${data.warnings.length}건 경고 있음)`, 'info');
@@ -6784,17 +6893,22 @@ async function downloadAccountExtensionsExcel() {
 
 async function loadAdgroupDetails() {
     const c = ensureReady(true, true); if(!c) return;
+    const requestAdgroupId = currentAdgroupId;
+    const requestSeq = ++detailRequestSeq;
+    const isStale = () => requestSeq !== detailRequestSeq || String(currentAdgroupId || '') !== String(requestAdgroupId || '');
+    showLoader('상세 데이터 로딩 중...');
     try {
         resetDetailRenderState();
         resetDetailAssetFilters(true);
         detailKeywordMeta = { totalCount: 0, totalUnfilteredCount: 0, truncated: false, previewLimit: DETAIL_KEYWORD_PREVIEW_LIMIT, searchText: '', matchMode: 'partial', searchActive: false };
+        const basePayload = { ...c };
         const [kwRes, adRes, extRes, negRes] = await Promise.all([
-            fetch('/get_keywords', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({...c, adgroup_id: currentAdgroupId, preview_limit: DETAIL_KEYWORD_PREVIEW_LIMIT})}).then(r=>r.json()),
-            fetch('/get_ads', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({...c, adgroup_id: currentAdgroupId})}).then(r=>r.json()),
-            fetch('/get_ad_extensions', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({...c, owner_id: currentAdgroupId})}).then(r=>r.json()),
-            fetch('/get_restricted_keywords', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({...c, adgroup_id: currentAdgroupId})}).then(r=>r.json()),
+            fetchJsonCached('/get_keywords', { ...basePayload, adgroup_id: requestAdgroupId, preview_limit: DETAIL_KEYWORD_PREVIEW_LIMIT }, { ttlMs:30000 }),
+            fetchJsonCached('/get_ads', { ...basePayload, adgroup_id: requestAdgroupId }, { ttlMs:30000 }),
+            fetchJsonCached('/get_ad_extensions', { ...basePayload, owner_id: requestAdgroupId }, { ttlMs:30000 }),
+            fetchJsonCached('/get_restricted_keywords', { ...basePayload, adgroup_id: requestAdgroupId }, { ttlMs:30000 }),
         ]);
-        
+        if (isStale()) return;
         const parsedKeywords = buildKeywordMetaFromResponse(kwRes, DETAIL_KEYWORD_PREVIEW_LIMIT, '', 'partial');
         detailState.keywords = parsedKeywords.rows;
         detailKeywordMeta = parsedKeywords.meta;
@@ -6814,21 +6928,22 @@ async function loadAdgroupDetails() {
         };
         pushExtRows(extRes, '광고그룹');
 
-        if (isShoppingAdgroupId(currentAdgroupId) && detailState.ads.length) {
+        if (isShoppingAdgroupId(requestAdgroupId) && detailState.ads.length) {
             const shoppingAdIds = detailState.ads.map(getAdIdentifier).filter(Boolean);
             if (shoppingAdIds.length) {
                 const adExtResponses = await Promise.all(shoppingAdIds.map(adId =>
-                    fetch('/get_ad_extensions', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({...c, owner_id: adId})})
-                        .then(r=>r.json())
-                        .catch(()=>[])
+                    fetchJsonCached('/get_ad_extensions', { ...basePayload, owner_id: adId }, { ttlMs:30000 }).catch(()=>[])
                 ));
+                if (isStale()) return;
                 adExtResponses.forEach((rows, idx) => pushExtRows(rows, `상품소재:${shoppingAdIds[idx]}`));
             }
         }
 
+        if (isStale()) return;
         detailState.exts = mergedExts;
         renderAdgroupDetailTables();
     } catch(err) { showToast(`상세 로딩 실패: ${err.message}`, 'error'); }
+    finally { if (!isStale()) hideLoader(); }
 }
 
 function renderAdgroupDetailTables() {
@@ -6894,7 +7009,7 @@ async function loadFullKeywordsForCurrentAdgroup() {
             payload.keyword_search = searchText;
             payload.keyword_match_mode = matchMode;
         }
-        const rows = await postJson('/get_keywords', payload, searchText ? '키워드 검색 결과 전체 로딩...' : '키워드 전체 로딩...');
+        const rows = await fetchJsonCached('/get_keywords', payload, { loadingText: searchText ? '키워드 검색 결과 전체 로딩...' : '키워드 전체 로딩...', ttlMs:30000 });
         detailState.keywords = Array.isArray(rows) ? rows : (Array.isArray(rows?.rows) ? rows.rows : []);
         detailKeywordMeta = { totalCount: detailState.keywords.length, totalUnfilteredCount: detailState.keywords.length, truncated: false, previewLimit: 0, searchText, matchMode, searchActive: !!searchText };
         detailRenderLimits.keywords = DETAIL_KEYWORD_RENDER_INITIAL_LIMIT;
@@ -7265,7 +7380,7 @@ async function collectExtensionAdgroupIdsByCampaigns(c, campaignIds) {
 async function collectShoppingAdOwnerIdsFromAdgroups(c, adgroupIds) {
     const ownerIds = [];
     for (const adgroupId of (adgroupIds || [])) {
-        const ads = await postJson('/get_ads', { ...c, adgroup_id: adgroupId });
+        const ads = await fetchJsonCached('/get_ads', { ...c, adgroup_id: adgroupId }, { ttlMs:30000 });
         (Array.isArray(ads) ? ads : []).forEach(ad => {
             const adId = getAdIdentifier(ad);
             const t = String(ad?.type || ad?.adType || '').toUpperCase();
@@ -7779,15 +7894,17 @@ async function renameSelectedAdgroups() {
     } catch(err) { showToast(err.message, 'error'); }
 }
 
-async function loadCopyEntityTargetAdgroups() {
-    const targetCampId = document.getElementById('copy_entity_target_campaign_select').value;
+async function loadCopyEntityTargetAdgroups(showLoading=true) {
+    const targetCampId = document.getElementById('copy_entity_target_campaign_select')?.value;
     const el = document.getElementById('copy_entity_target_adgroup_select');
     if(!el) return;
     if(!targetCampId) { el.innerHTML = ''; return; }
     const c = ensureReady(); if(!c) return;
     try {
-        const adgs = await postJson('/get_adgroups', {...c, campaign_id: targetCampId}, '목록 로딩...');
-        el.innerHTML = adgs.map(x=>`<option value="${x.id}">${escapeHtml(x.name)}</option>`).join('') || '<option value="">없음</option>';
+        const payload = {...c, campaign_id: targetCampId, force:false};
+        const adgs = await fetchJsonCached('/get_adgroups', payload, { loadingText: showLoading ? '목록 로딩...' : '', ttlMs:LIST_API_CACHE_TTL_MS });
+        const html = (Array.isArray(adgs) ? adgs : []).map(x=>`<option value="${escapeAttr(x.id)}">${escapeHtml(x.name)}</option>`).join('') || '<option value="">없음</option>';
+        if(el.innerHTML !== html) el.innerHTML = html;
     } catch(err) { showToast(err.message, 'error'); }
 }
 

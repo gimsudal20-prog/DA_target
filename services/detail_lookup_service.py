@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Tuple
 
+from services.api_response import api_error
+
 
 ResponseRows = Tuple[Any, List[Dict[str, Any]]]
 
@@ -39,7 +41,7 @@ class DetailLookupService:
             d.get("adgroup_id"),
         )
         if getattr(res, "status_code", 500) != 200:
-            return {"error": "키워드 조회 실패", "details": getattr(res, "text", "")}, 400
+            return api_error("키워드 조회 실패", getattr(res, "text", "")), 400
 
         base_rows = rows or []
         search_text = str(d.get("keyword_search") or "").strip()
@@ -87,14 +89,14 @@ class DetailLookupService:
         res, rows = self.fetch_ads(d.get("api_key"), d.get("secret_key"), d.get("customer_id"), d.get("adgroup_id"))
         if getattr(res, "status_code", 500) == 200:
             return rows, 200
-        return {"error": "소재 조회 실패", "details": getattr(res, "text", "")}, 400
+        return api_error("소재 조회 실패", getattr(res, "text", "")), 400
 
     def get_ad_extensions(self, payload: Dict[str, Any]):
         d = payload or {}
         res, rows = self.fetch_extensions(d.get("api_key"), d.get("secret_key"), d.get("customer_id"), d.get("owner_id"))
         if getattr(res, "status_code", 500) == 200:
             return rows, 200
-        return {"error": "확장소재 조회 실패", "details": getattr(res, "text", "")}, 400
+        return api_error("확장소재 조회 실패", getattr(res, "text", "")), 400
 
     def get_restricted_keywords(self, payload: Dict[str, Any]):
         d = payload or {}
@@ -106,4 +108,4 @@ class DetailLookupService:
         )
         if getattr(res, "status_code", 500) == 200:
             return rows, 200
-        return {"error": "제외키워드 조회 실패", "details": getattr(res, "text", "")}, 400
+        return api_error("제외키워드 조회 실패", getattr(res, "text", "")), 400
