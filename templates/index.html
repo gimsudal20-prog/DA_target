@@ -3922,6 +3922,169 @@
       background: transparent !important;
     }
 
+
+    /* 2026-04-30 작업 이력 로그 가독성/클리핑 방지 패치
+       - 로그 카드 내부 내용이 높이/overflow 충돌로 한 줄만 보이는 문제를 방지
+       - 다른 UI 밀도 패치가 들어와도 작업 이력 로그는 항상 본문/요약/메시지가 보이도록 최종 override */
+    .log-panel #action_log_list {
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 12px !important;
+      max-height: min(62vh, 620px) !important;
+      min-height: 180px !important;
+      overflow-y: auto !important;
+      overflow-x: hidden !important;
+      padding: 2px 4px 8px 2px !important;
+    }
+    .log-panel #action_log_list .log-item {
+      display: block !important;
+      height: auto !important;
+      min-height: 92px !important;
+      max-height: none !important;
+      overflow: visible !important;
+      padding: 14px 16px 14px 18px !important;
+      border-radius: 14px !important;
+    }
+    .log-panel #action_log_list .log-top {
+      display: flex !important;
+      align-items: flex-start !important;
+      justify-content: space-between !important;
+      gap: 12px !important;
+      min-height: 24px !important;
+      margin-bottom: 7px !important;
+    }
+    .log-panel #action_log_list .log-title {
+      display: block !important;
+      min-width: 0 !important;
+      white-space: normal !important;
+      overflow: visible !important;
+      text-overflow: clip !important;
+      line-height: 1.35 !important;
+    }
+    .log-panel #action_log_list .badge {
+      flex: 0 0 auto !important;
+      white-space: nowrap !important;
+    }
+    .log-panel #action_log_list .log-meta,
+    .log-panel #action_log_list .log-summary,
+    .log-panel #action_log_list .log-msg,
+    .log-panel #action_log_list .log-counts,
+    .log-panel #action_log_list .log-detail-fold {
+      display: block !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      height: auto !important;
+      max-height: none !important;
+      overflow: visible !important;
+    }
+    .log-panel #action_log_list .log-meta {
+      margin-top: 0 !important;
+      margin-bottom: 7px !important;
+      color: #667085 !important;
+      line-height: 1.45 !important;
+    }
+    .log-panel #action_log_list .log-summary {
+      margin-top: 7px !important;
+      line-height: 1.55 !important;
+      color: #1f2937 !important;
+      word-break: break-word !important;
+    }
+    .log-panel #action_log_list .log-msg {
+      margin-top: 8px !important;
+      padding: 9px 10px !important;
+      line-height: 1.55 !important;
+      white-space: pre-wrap !important;
+      word-break: break-word !important;
+      color: #344054 !important;
+      background: #f8fafc !important;
+      border: 1px solid rgba(226,232,240,.95) !important;
+      border-radius: 10px !important;
+    }
+    .log-panel #action_log_list .log-counts {
+      display: flex !important;
+      flex-wrap: wrap !important;
+      gap: 7px !important;
+      margin-top: 9px !important;
+    }
+    .log-panel #action_log_list .log-detail-fold {
+      margin-top: 10px !important;
+    }
+    .log-panel #action_log_list .log-detail-list {
+      max-height: 260px !important;
+      overflow: auto !important;
+    }
+
+
+    /* 2026-04-30 작업 이력 로그 겹침/중첩 재수정 패치
+       - 로그 카드 내부를 명시적 세로 레이아웃으로 고정
+       - 메시지/요약/카운트/세부사항이 카드 높이에 정상 반영되도록 조정
+       - 카드 바깥으로 새는 내용은 차단하되, 텍스트는 강제 줄바꿈으로 모두 표시 */
+    .log-panel #action_log_list .log-item {
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: stretch !important;
+      gap: 8px !important;
+      overflow: hidden !important;
+      isolation: isolate !important;
+    }
+    .log-panel #action_log_list .log-top {
+      margin-bottom: 0 !important;
+      flex: 0 0 auto !important;
+    }
+    .log-panel #action_log_list .log-meta,
+    .log-panel #action_log_list .log-summary,
+    .log-panel #action_log_list .log-counts,
+    .log-panel #action_log_list .log-msg,
+    .log-panel #action_log_list .log-detail-fold {
+      flex: 0 0 auto !important;
+      margin: 0 !important;
+      position: relative !important;
+      z-index: 1 !important;
+      min-width: 0 !important;
+      clear: both !important;
+    }
+    .log-panel #action_log_list .log-meta,
+    .log-panel #action_log_list .log-summary,
+    .log-panel #action_log_list .log-msg,
+    .log-panel #action_log_list .log-detail-list,
+    .log-panel #action_log_list .log-detail-row,
+    .log-panel #action_log_list .log-detail-row > div {
+      overflow-wrap: anywhere !important;
+      word-break: break-word !important;
+      white-space: normal !important;
+    }
+    .log-panel #action_log_list .log-meta {
+      margin-top: -2px !important;
+      margin-bottom: 0 !important;
+    }
+    .log-panel #action_log_list .log-summary {
+      margin-top: -1px !important;
+    }
+    .log-panel #action_log_list .log-counts {
+      display: flex !important;
+      flex-wrap: wrap !important;
+      align-items: center !important;
+      gap: 7px !important;
+      margin-top: -1px !important;
+    }
+    .log-panel #action_log_list .log-msg {
+      max-height: none !important;
+      overflow: auto !important;
+    }
+    .log-panel #action_log_list .log-detail-fold {
+      overflow: hidden !important;
+    }
+    .log-panel #action_log_list .log-detail-fold summary {
+      list-style: none !important;
+    }
+    .log-panel #action_log_list .log-detail-fold summary::-webkit-details-marker {
+      display: none !important;
+    }
+    .log-panel #action_log_list .log-detail-copy {
+      flex: 0 0 auto !important;
+      align-self: center !important;
+    }
+
 </style>
 </head>
 <body>
@@ -4551,10 +4714,10 @@
                             <label>광고유형</label>
                             <div style="display:flex; gap:8px; flex-wrap:wrap;">
                                 <label class="lookup-check-label" style="padding:8px 12px; border:1px solid var(--line); border-radius:10px; background:#fff;">
-                                    <input type="radio" name="avg_position_target_type" value="powerlink" checked> 파워링크
+                                    <input type="radio" name="avg_position_target_type" value="powerlink" checked onchange="syncAvgPositionLimit()"> 파워링크
                                 </label>
                                 <label class="lookup-check-label" style="padding:8px 12px; border:1px solid var(--line); border-radius:10px; background:#fff;">
-                                    <input type="radio" name="avg_position_target_type" value="shopping"> 쇼핑검색
+                                    <input type="radio" name="avg_position_target_type" value="shopping" onchange="syncAvgPositionLimit()"> 쇼핑검색
                                 </label>
                             </div>
                         </div>
@@ -4579,7 +4742,7 @@
                             <label><input type="checkbox" id="avg_position_exclude_paused" checked> 중지 키워드/소재 제외</label>
                             <label><input type="checkbox" id="avg_position_exclude_pending" checked> 비승인 제외</label>
                         </div>
-                        <div class="field-note" style="margin-bottom:12px;">선택한 광고유형만 처리합니다. 파워링크는 키워드 기준, 쇼핑검색은 소재 기준으로 목표 평균순위 입찰가를 자동 계산합니다.</div>
+                        <div class="field-note" style="margin-bottom:12px;">선택한 광고유형만 처리합니다. 파워링크는 키워드 기준, 쇼핑검색은 소재 기준으로 목표 평균순위 입찰가를 자동 계산합니다. 쇼핑검색 목표 순위는 PC 1~3위, 모바일 1~4위까지만 선택됩니다.</div>
                         <div class="btn-row">
                             <button class="btn btn-sub" style="flex:1;" onclick="previewAvgPositionBids()">예상금액 미리보기</button>
                             <button class="btn btn-primary" style="flex:1;" onclick="applyAvgPositionBids()">자동 변경 실행</button>
@@ -5859,18 +6022,44 @@ function scheduleActionLogRefresh(delay = 700) {
     }, delay);
 }
 
+function stripHtmlForErrorMessage(value) {
+    const raw = String(value || '');
+    return raw
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function makeHttpErrorFromResponse(res, data, rawText) {
+    const joined = [data?.error, data?.details, data?.message].filter(Boolean).join(' | ');
+    const fallback = stripHtmlForErrorMessage(rawText) || `HTTP ${res.status}`;
+    const err = new Error(joined || fallback);
+    err.status = res.status;
+    err.data = data || {};
+    err.rawText = rawText || '';
+    return err;
+}
+
 async function postJson(url, body, txt) {
     showLoader(txt);
     const shouldRefreshLog = shouldRefreshActionLogsAfterPost(url);
     try {
         const res = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
         const text = await res.text();
-        let data = {}; try{ data = text ? JSON.parse(text) : {}; } catch(e){ data = {error:text||`${res.status}`}; }
+        let data = {};
+        try { data = text ? JSON.parse(text) : {}; }
+        catch(e) { data = { error: stripHtmlForErrorMessage(text) || text || `${res.status}` }; }
         if(shouldRefreshLog) {
             if(res.ok) bumpLookupCacheVersion();
             scheduleActionLogRefresh(res.ok ? 500 : 250);
         }
-        if(!res.ok) throw new Error([data.error, data.details].filter(Boolean).join(' | ') || `${res.status}`);
+        if(!res.ok) throw makeHttpErrorFromResponse(res, data, text);
         return data;
     } finally { hideLoader(); }
 }
@@ -7355,10 +7544,21 @@ function syncBulkDeleteExtTypes(changed) {
     }
 }
 
+function getAvgPositionMaxRank(targetType, device) {
+    // 2026-04-30 회귀 방지: 쇼핑검색 목표 평균순위는 네이버 제공 범위만 노출한다.
+    // 쇼핑검색 PC: 1~3위, 쇼핑검색 모바일: 1~4위 / 파워링크는 기존 범위를 유지한다.
+    const t = String(targetType || 'powerlink').toLowerCase();
+    const d = String(device || 'PC').toUpperCase();
+    if (t === 'shopping') return d === 'PC' ? 3 : 4;
+    return d === 'PC' ? 10 : 5;
+}
+
 function syncAvgPositionLimit() {
-    const dev = document.getElementById('avg_position_device').value;
+    const dev = document.getElementById('avg_position_device')?.value || 'PC';
+    const targetType = document.querySelector('input[name="avg_position_target_type"]:checked')?.value || 'powerlink';
     const pos = document.getElementById('avg_position_val');
-    const max = dev === 'PC' ? 10 : 5;
+    if(!pos) return;
+    const max = getAvgPositionMaxRank(targetType, dev);
     const prev = Number(pos.value || 1);
     pos.innerHTML = Array.from({length:max}, (_,i)=>`<option value="${i+1}">${i+1}위</option>`).join('');
     pos.value = String((prev >= 1 && prev <= max) ? prev : 1);
@@ -8466,13 +8666,22 @@ async function adjustKeywordBidsByThreshold() {
 function getAvgPositionPayload(c, previewOnly=false) {
     const scope = document.getElementById('bid_scope_type_avg_position').value;
     const targetType = document.querySelector('input[name="avg_position_target_type"]:checked')?.value || 'powerlink';
+    const device = document.getElementById('avg_position_device')?.value || 'PC';
+    const position = Number(document.getElementById('avg_position_val')?.value || 1);
+    const maxRank = getAvgPositionMaxRank(targetType, device);
     const ids = scope==='campaign' ? Array.from(checkedCampaignIds) : Array.from(checkedAdgroupIds);
     if(!ids.length){ showToast('좌측 체크박스에서 대상을 선택하세요.', 'error'); return null; }
+    if(targetType === 'shopping' && (position < 1 || position > maxRank)) {
+        const deviceLabel = String(device).toUpperCase() === 'PC' ? 'PC' : '모바일';
+        showToast(`쇼핑검색 ${deviceLabel} 목표 순위는 1~${maxRank}위까지만 선택할 수 있습니다.`, 'error');
+        syncAvgPositionLimit();
+        return null;
+    }
     return {
         ...c, entity_type: scope, entity_ids: ids,
         avg_target_type: targetType,
-        device: document.getElementById('avg_position_device').value,
-        position: Number(document.getElementById('avg_position_val').value),
+        device,
+        position,
         max_bid: document.getElementById('avg_position_max_bid').value,
         exclude_paused: document.getElementById('avg_position_exclude_paused').checked,
         exclude_pending: document.getElementById('avg_position_exclude_pending').checked,
@@ -8719,6 +8928,118 @@ async function saveScheduleBySelection() {
     } catch(err) { showToast(err.message, 'error'); }
 }
 
+
+function countNonEmptyLines(value) {
+    return String(value || '').split(/\r?\n/).map(v => v.trim()).filter(Boolean).length;
+}
+
+function summarizeSelectedNamesByIds(ids, sourceList, key='id', nameKey='name', limit=6) {
+    const selected = (sourceList || []).filter(x => ids.includes(String(x[key])) || ids.includes(x[key]));
+    const names = selected.map(x => x[nameKey] || x.adgroupName || x.campaignName || x.id).filter(Boolean);
+    if(!names.length) return '-';
+    const head = names.slice(0, limit).join(', ');
+    return names.length > limit ? `${head} 외 ${names.length - limit}개` : head;
+}
+
+function formatDirectAdgroupNameCountMessage(customCount, expectedCount, copyCount, checkedAdgroupCount=0) {
+    const safeCustom = Number(customCount || 0);
+    const safeExpected = Number(expectedCount || 0);
+    const safeCopyCount = Number(copyCount || 1);
+    const diff = safeExpected - safeCustom;
+    const lines = [`복사개수가 ${safeCopyCount}개입니다.`];
+    if(diff > 0) {
+        lines.push(`${diff}개가 더 필요합니다. ${safeCustom}/${safeExpected}`);
+    } else if(diff < 0) {
+        lines.push(`${Math.abs(diff)}개가 많습니다. ${safeCustom}/${safeExpected}`);
+    } else {
+        lines.push(`직접 지정 광고그룹명 개수가 맞습니다. ${safeCustom}/${safeExpected}`);
+    }
+    if(Number(checkedAdgroupCount || 0) > 1) {
+        lines.push(`계산식: 선택 광고그룹 ${checkedAdgroupCount}개 × 복사개수 ${safeCopyCount}개 = 총 ${safeExpected}개 필요`);
+    }
+    return lines;
+}
+
+function summarizeDirectAdgroupNameCountMismatch(customCount, expectedCount, copyCount, checkedAdgroupCount=0) {
+    return formatDirectAdgroupNameCountMessage(customCount, expectedCount, copyCount, checkedAdgroupCount).slice(0, 2).join(' ');
+}
+
+function formatAdgroupCopyErrorMessage(err, context={}) {
+    const data = err?.data || {};
+    const rawMsg = stripHtmlForErrorMessage([err?.message, data?.error, data?.details, data?.message].filter(Boolean).join(' | '));
+    const customCount = countNonEmptyLines(context.customNamesText);
+    const directMode = customCount > 0;
+    const checkedAdgroupCount = context.sourceIds?.length || 0;
+    const checkedCampaignCount = context.sourceCampaignIds?.length || 0;
+    const copyCount = Number(context.copyCount || 1);
+    const knownExpected = checkedCampaignCount ? null : checkedAdgroupCount * copyCount;
+    const targetCampaignName = summarizeSelectedNamesByIds([String(context.targetCampId || '')], campaigns, 'id', 'name', 1);
+    const sourceAdgroupNames = summarizeSelectedNamesByIds((context.sourceIds || []).map(String), adgroups, 'id', 'name', 5);
+    const detailLines = [];
+    if(directMode && knownExpected !== null && customCount !== knownExpected) {
+        detailLines.push(...formatDirectAdgroupNameCountMessage(customCount, knownExpected, copyCount, checkedAdgroupCount));
+        detailLines.push('');
+    }
+    detailLines.push(
+        '광고그룹 복사 중 오류가 발생했습니다.',
+        '',
+        directMode ? '오류 위치: 직접 지정 광고그룹명 입력값 확인 단계 또는 복사 생성 단계' : '오류 위치: 광고그룹 복사 처리 단계',
+        `대상 캠페인: ${targetCampaignName || context.targetCampId || '-'}`,
+        `체크한 광고그룹: ${checkedAdgroupCount}개${sourceAdgroupNames && sourceAdgroupNames !== '-' ? ` (${sourceAdgroupNames})` : ''}`,
+        `체크한 캠페인 하위 포함: ${checkedCampaignCount}개`,
+        `복사 개수: ${copyCount}개`,
+    );
+    if(directMode) {
+        detailLines.push(`직접 지정 광고그룹명 입력: ${customCount}개`);
+        if(knownExpected !== null) {
+            detailLines.push(`필요한 이름 개수: ${knownExpected}개`);
+            if(customCount !== knownExpected) {
+                detailLines.push('');
+                detailLines.push('해결 방법: 직접 지정 광고그룹명은 “선택한 광고그룹 수 × 복사 개수”와 동일하게 입력해야 합니다.');
+                detailLines.push(`예: 광고그룹 ${checkedAdgroupCount}개를 ${copyCount}개씩 복사하면 이름 ${knownExpected}개를 한 줄에 1개씩 입력해야 합니다.`);
+            }
+        } else {
+            detailLines.push('필요한 이름 개수: 체크한 캠페인 하위 광고그룹까지 서버에서 계산됩니다.');
+            detailLines.push('확인 방법: 체크한 캠페인 하위 광고그룹 수까지 포함해 “전체 원본 광고그룹 수 × 복사 개수”만큼 이름을 입력해주세요.');
+        }
+    }
+    if(rawMsg) {
+        detailLines.push('');
+        detailLines.push(`서버 메시지: ${rawMsg}`);
+    }
+    const detailItems = Array.isArray(data?.detail_items) ? data.detail_items : [];
+    if(detailItems.length) {
+        detailLines.push('');
+        detailLines.push('실패 세부내역:');
+        detailItems.slice(0, 5).forEach((item, idx) => {
+            detailLines.push(`${idx + 1}. ${item.target || item.level || '항목'} - ${item.detail || item.message || '-'}`);
+        });
+        if(detailItems.length > 5) detailLines.push(`외 ${detailItems.length - 5}건은 작업 이력 로그에서 확인하세요.`);
+    }
+    detailLines.push('');
+    detailLines.push('추가 확인 항목:');
+    detailLines.push('- 같은 대상 캠페인 안에 동일한 광고그룹명이 이미 있는지 확인');
+    detailLines.push('- 광고그룹명에 사용할 수 없는 특수문자/길이 제한이 있는지 확인');
+    detailLines.push('- 체크한 캠페인 하위 광고그룹까지 복사하는 옵션이 켜져 있는지 확인');
+    return detailLines.join('\n');
+}
+
+function showAdgroupCopyError(err, context={}) {
+    const customCount = countNonEmptyLines(context.customNamesText);
+    const checkedAdgroupCount = context.sourceIds?.length || 0;
+    const checkedCampaignCount = context.sourceCampaignIds?.length || 0;
+    const copyCount = Number(context.copyCount || 1);
+    const knownExpected = checkedCampaignCount ? null : checkedAdgroupCount * copyCount;
+    let summary = '광고그룹 복사 실패';
+    if(customCount > 0) {
+        summary = knownExpected !== null && customCount !== knownExpected
+            ? summarizeDirectAdgroupNameCountMismatch(customCount, knownExpected, copyCount, checkedAdgroupCount)
+            : '직접 지정 광고그룹명 복사 실패: 상세 내용을 확인하세요.';
+    }
+    showToast(summary, 'error');
+    window.alert(formatAdgroupCopyErrorMessage(err, context));
+}
+
 async function copySelectedCampaigns() {
     const c = ensureReady(); if(!c) return;
     const ids = getCheckedCampaignIdsInViewOrder(); 
@@ -8746,8 +9067,18 @@ async function copySelectedAdgroups() {
     if(!sourceIds.length && !sourceCampaignIds.length) { showToast('좌측에서 복사할 광고그룹 또는 캠페인을 체크해주세요.', 'error'); return; }
     if(!targetCampId) { showToast('대상 캠페인을 선택해주세요.', 'error'); return; }
     const customNamesText = document.getElementById('adgroup_custom_names')?.value || '';
+    const customNameCount = countNonEmptyLines(customNamesText);
     const copyCount = Number(document.getElementById('adgroup_copy_count')?.value || 1);
     if(!Number.isInteger(copyCount) || copyCount <= 0) { showToast('복사 개수는 1 이상의 숫자여야 합니다.', 'error'); return; }
+
+    const errorContext = { sourceIds, sourceCampaignIds, targetCampId, customNamesText, copyCount };
+    if(customNameCount && !sourceCampaignIds.length) {
+        const expectedNameCount = sourceIds.length * copyCount;
+        if(customNameCount !== expectedNameCount) {
+            showAdgroupCopyError(new Error('직접 지정 광고그룹명 입력 개수와 실제 필요한 이름 개수가 맞지 않습니다.'), errorContext);
+            return;
+        }
+    }
 
     try {
         const data = await postJson('/copy_adgroups_to_target', {
@@ -8756,7 +9087,7 @@ async function copySelectedAdgroups() {
             source_campaign_ids: sourceCampaignIds,
             target_campaign_id: targetCampId,
             suffix: document.getElementById('adgroup_copy_suffix').value,
-            copy_count: Number(document.getElementById('adgroup_copy_count')?.value || 1),
+            copy_count: copyCount,
             custom_names_text: customNamesText,
             include_keywords: document.getElementById('copy_adgroup_include_keywords').checked,
             include_ads: document.getElementById('copy_adgroup_include_ads').checked,
@@ -8768,7 +9099,7 @@ async function copySelectedAdgroups() {
         showToast(data.message, 'success');
         if(String(currentCampaignId || '') === String(targetCampId || '')) await refreshAdgroups();
         else await refreshCampaigns(true);
-    } catch(err) { showToast(err.message, 'error'); }
+    } catch(err) { showAdgroupCopyError(err, errorContext); }
 }
 
 async function renameSelectedAdgroups() {
