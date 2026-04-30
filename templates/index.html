@@ -9027,10 +9027,6 @@ function formatAdgroupCopyErrorMessage(err, context={}) {
             detailLines.push('확인 방법: 체크한 캠페인 하위 광고그룹 수까지 포함해 “전체 원본 광고그룹 수 × 복사 개수”만큼 이름을 입력해주세요.');
         }
     }
-    if(rawMsg) {
-        detailLines.push('');
-        detailLines.push(`서버 메시지: ${rawMsg}`);
-    }
     const detailItems = Array.isArray(data?.detail_items) ? data.detail_items : [];
     if(detailItems.length) {
         detailLines.push('');
@@ -9040,11 +9036,6 @@ function formatAdgroupCopyErrorMessage(err, context={}) {
         });
         if(detailItems.length > 5) detailLines.push(`외 ${detailItems.length - 5}건은 작업 이력 로그에서 확인하세요.`);
     }
-    detailLines.push('');
-    detailLines.push('추가 확인 항목:');
-    detailLines.push('- 같은 대상 캠페인 안에 동일한 광고그룹명이 이미 있는지 확인');
-    detailLines.push('- 광고그룹명에 사용할 수 없는 특수문자/길이 제한이 있는지 확인');
-    detailLines.push('- 체크한 캠페인 하위 광고그룹까지 복사하는 옵션이 켜져 있는지 확인');
     return detailLines.join('\n');
 }
 
