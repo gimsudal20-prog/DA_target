@@ -681,7 +681,7 @@
     .account-item.active {
       background: #ffffff;
       border-color: var(--line);
-      box-shadow: inset 3px 0 0 var(--naver);
+      box-shadow: none;
     }
     .account-item .name { font-size: 12.5px; font-weight: 720; color: var(--text); }
     .account-item .sub { color: var(--muted); }
@@ -730,7 +730,7 @@
     .list-item.active {
       background: #ffffff;
       border-color: var(--line);
-      box-shadow: inset 3px 0 0 var(--naver);
+      box-shadow: none;
     }
     .list-item .title { font-size: 12.5px; font-weight: 720; }
     .list-item .meta { font-size: 10.5px; color: var(--muted); }
@@ -1430,7 +1430,7 @@
     .account-item.active {
       background: rgba(3,199,90,0.20) !important;
       border-color: rgba(3,199,90,0.58) !important;
-      box-shadow: inset 3px 0 0 var(--naver), inset 0 1px 0 rgba(255,255,255,0.05);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
     }
     .account-item .name {
       color: #f8fafc !important;
@@ -1689,7 +1689,7 @@
     .sidebar .account-item.active {
       background: rgba(3,199,90,0.22) !important;
       border-color: rgba(3,199,90,0.62) !important;
-      box-shadow: inset 3px 0 0 var(--naver), inset 0 1px 0 rgba(255,255,255,0.07) !important;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.07) !important;
     }
     .sidebar .account-item .row {
       display: flex !important;
@@ -3501,7 +3501,7 @@
       background: #f0fdf4 !important;
       border-color: rgba(3,199,90,.28) !important;
     }
-    .account-item.active::before { background: var(--naver); }
+    .account-item.active::before { background: transparent !important; }
     .account-item .name,
     .list-item .title {
       font-weight: 720 !important;
@@ -3903,6 +3903,25 @@
       .inline-export-control { width: 100%; justify-content: space-between; }
       .inline-export-control select { flex: 1; min-width: 0; }
     }
+
+    /* 2026-04-30: 업체 선택 카드의 업체명 옆 세로 작대기바 제거.
+       active 강조는 배경/테두리만 사용하고, left inset/::before 라인은 최종 override로 막습니다. */
+    .sidebar .account-item.active,
+    #account_list .account-item.active,
+    .account-item.active {
+      box-shadow: none !important;
+    }
+    .sidebar .account-item::before,
+    #account_list .account-item::before,
+    .account-item::before,
+    .sidebar .account-item.active::before,
+    #account_list .account-item.active::before,
+    .account-item.active::before {
+      display: none !important;
+      content: none !important;
+      background: transparent !important;
+    }
+
 </style>
 </head>
 <body>
