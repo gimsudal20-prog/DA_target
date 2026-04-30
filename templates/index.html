@@ -6819,6 +6819,18 @@ async function refreshAdgroups(force=false) {
     }
 }
 
+
+// 2026-04-30 삭제 후 목록 새로고침 호환 함수
+// 기존 패치에서 loadCampaigns/loadAdgroups 이름을 호출해 오류가 났기 때문에
+// 실제 구현명(refreshCampaigns/refreshAdgroups)으로 연결해 재발을 방지합니다.
+async function loadCampaigns(force=false) {
+    return refreshCampaigns(force);
+}
+
+async function loadAdgroups(_campaignId=null, force=false) {
+    return refreshAdgroups(force);
+}
+
 async function loadChannels(force=false) {
     const c = ensureReady(); if(!c) return;
     const requestCustomerId = String(c.customer_id || '');
@@ -10188,9 +10200,9 @@ async function executeBulkDelete() {
             ext_type: extTypes[0] || 'ALL'
         }, target === 'campaign' ? '캠페인 삭제 진행 중...' : target === 'adgroup' ? '광고그룹 삭제 진행 중...' : '대량 일괄 삭제 진행 중...');
         showToast(data.message || '성공적으로 일괄 삭제되었습니다.', (data.fail || 0) > 0 ? 'info' : 'success');
-        await loadCampaigns(true);
-        if(currentCampaignId) await loadAdgroups(currentCampaignId, true);
-        if(currentAdgroupId) loadAdgroupDetails();
+        await refreshCampaigns(true);
+        if(currentCampaignId) await refreshAdgroups(true);
+        if(currentAdgroupId) await loadAdgroupDetails();
     } catch(err) { showToast(err.message, 'error'); }
 }
 
