@@ -6894,11 +6894,24 @@ def copy_campaigns():
     _cache_invalidate(d.get("api_key"), d.get("secret_key"), d.get("customer_id"))
     return jsonify({"ok": True, "message": msg})
 def copy_adgroups_to_target():
+    """Copy selected adgroups into a target campaign.
+
+    배포 환경에서는 gunicorn timeout/일시적 네트워크 예외가 HTML 500으로 노출되기 쉬워서,
+    광고그룹 단위/후속 복사 단계 단위로 예외를 흡수하고 실패 내역을 JSON으로 반환한다.
+    한 그룹에서 실패해도 이미 완료된 복사 결과와 다음 그룹 처리는 유지한다.
+    """
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
     source_ids = _unique_keep_order(d.get("source_ids") or [])
     source_campaign_ids = _unique_keep_order(d.get("source_campaign_ids") or [])
-    src_ids, resolve_warnings = _resolve_copy_source_adgroup_ids(api_key, secret_key, cid, source_ids, source_campaign_ids)
+    try:
+        src_ids, resolve_warnings = _resolve_copy_source_adgroup_ids(api_key, secret_key, cid, source_ids, source_campaign_ids)
+    except Exception as exc:
+        return jsonify({
+            "ok": False,
+            "error": "복사 원본 광고그룹 확인 중 오류가 발생했습니다.",
+            "details": f"{type(exc).__name__}: {exc}",
+        }), 500
     target_camp_id = d.get("target_campaign_id")
     suffix = d.get("suffix", "_복사본")
     try:
@@ -6919,20 +6932,35 @@ def copy_adgroups_to_target():
         return jsonify({"error": "복사할 광고그룹 또는 캠페인을 선택해주세요."}), 400
     if not str(target_camp_id or "").strip():
         return jsonify({"error": "대상 캠페인을 선택해주세요."}), 400
+
+    results, all_errors = {"success": 0, "fail": 0}, list(resolve_warnings)
     source_name_map: Dict[str, str] = {}
     for src_id in src_ids:
-        r_get = _do_req("GET", api_key, secret_key, cid, f"/ncc/adgroups/{src_id}")
+        try:
+            r_get = _do_req("GET", api_key, secret_key, cid, f"/ncc/adgroups/{src_id}")
+        except Exception as exc:
+            all_errors.append(f"[원본 {src_id}] 이름 확인 중 예외: {type(exc).__name__}: {exc}")
+            continue
         if r_get.status_code != 200:
+            all_errors.append(f"[원본 {src_id}] 이름 확인 실패: {r_get.text}")
             continue
         src_obj = r_get.json() or {}
         source_name_map[str(src_id)] = str(src_obj.get("name") or "").strip()
+
     valid_src_ids = [str(src_id) for src_id in src_ids if str(src_id) in source_name_map]
     if valid_src_ids:
         try:
             planned_names = _resolve_copy_names([source_name_map[x] for x in valid_src_ids], copy_count, suffix, custom_names_raw)
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
-        adg_res, existing_target_rows = _fetch_adgroups(api_key, secret_key, cid, str(target_camp_id), enrich_media=False)
+        try:
+            adg_res, existing_target_rows = _fetch_adgroups(api_key, secret_key, cid, str(target_camp_id), enrich_media=False)
+        except Exception as exc:
+            return jsonify({
+                "ok": False,
+                "error": "대상 캠페인 광고그룹 이름 조회 중 오류가 발생했습니다.",
+                "details": f"{type(exc).__name__}: {exc}",
+            }), 500
         if adg_res.status_code != 200:
             return jsonify({"error": f"대상 캠페인 광고그룹 이름 조회 실패: {adg_res.text}"}), 400
         name_err = _validate_name_candidates(planned_names, [row.get("name") for row in (existing_target_rows or [])], "광고그룹")
@@ -6941,57 +6969,114 @@ def copy_adgroups_to_target():
         planned_iter = iter(planned_names)
     else:
         planned_iter = iter([])
-    results, all_errors = {"success": 0, "fail": 0}, list(resolve_warnings)
+
     for src_id in src_ids:
-        r_get = _do_req("GET", api_key, secret_key, cid, f"/ncc/adgroups/{src_id}")
+        try:
+            r_get = _do_req("GET", api_key, secret_key, cid, f"/ncc/adgroups/{src_id}")
+        except Exception as exc:
+            results["fail"] += copy_count
+            all_errors.append(f"[원본 {src_id}] 조회 중 예외: {type(exc).__name__}: {exc}")
+            continue
         if r_get.status_code != 200:
-            results["fail"] += 1
+            results["fail"] += copy_count
             all_errors.append(f"[원본 {src_id}] 조회 실패: {r_get.text}")
             continue
         src_obj = r_get.json() or {}
-        source_name = str(src_obj.get("name") or "").strip()
+        source_name = str(src_obj.get("name") or source_name_map.get(str(src_id)) or "").strip()
         for idx in range(1, copy_count + 1):
-            new_adg = _extract_adgroup(src_obj, target_camp_id, cid, biz_channel_id)
-            new_adg["name"] = next(planned_iter, _build_copy_name(source_name, idx, copy_count, suffix))
-            r_post = _do_req("POST", api_key, secret_key, cid, "/ncc/adgroups", json_body=new_adg)
-            if r_post.status_code in [200, 201]:
-                results["success"] += 1
-                new_adg_id = str((r_post.json() or {}).get("nccAdgroupId") or "").strip()
+            new_adg = None
+            new_name = _build_copy_name(source_name or str(src_id), idx, copy_count, suffix)
+            try:
+                new_adg = _extract_adgroup(src_obj, target_camp_id, cid, biz_channel_id)
+                new_adg["name"] = next(planned_iter, new_name)
+                new_name = str(new_adg.get("name") or new_name)
+                r_post = _do_req("POST", api_key, secret_key, cid, "/ncc/adgroups", json_body=new_adg)
+            except Exception as exc:
+                results["fail"] += 1
+                all_errors.append(f"[{new_name}] 생성 중 예외: {type(exc).__name__}: {exc}")
+                continue
+
+            if r_post.status_code not in [200, 201]:
+                results["fail"] += 1
+                all_errors.append(f"[{new_name}] 생성 실패: {r_post.text}")
+                continue
+
+            new_adg_id = str((r_post.json() or {}).get("nccAdgroupId") or "").strip()
+            if not new_adg_id:
+                results["fail"] += 1
+                all_errors.append(f"[{new_name}] 생성 응답에서 신규 광고그룹 ID를 확인하지 못했습니다.")
+                continue
+
+            results["success"] += 1
+
+            try:
                 errs, summary = _copy_adgroup_children(
                     api_key, secret_key, cid, src_id, new_adg_id, biz_channel_id,
                     include_keywords=include_keywords, include_ads=include_ads,
                     include_extensions=include_extensions, include_negatives=include_negatives,
                     return_summary=True,
                 )
-                all_errors.append(f"[{new_adg['name']}] {_format_copy_summary(summary)}")
-                all_errors.extend([f"[{new_adg['name']}] {e}" for e in errs])
-                if copy_media and new_adg_id:
+                all_errors.append(f"[{new_name}] {_format_copy_summary(summary)}")
+                all_errors.extend([f"[{new_name}] {e}" for e in errs])
+            except Exception as exc:
+                all_errors.append(f"[{new_name}] 하위 항목 복사 중 예외: {type(exc).__name__}: {exc}")
+
+            if copy_media:
+                try:
                     ok_media, media_msgs = _copy_adgroup_media_settings(api_key, secret_key, cid, str(src_id), new_adg_id)
                     if media_msgs:
                         for msg in media_msgs:
                             if msg and (("실패" in msg) or ("없음" in msg) or ("비어" in msg) or ("조회" in msg)):
-                                all_errors.append(f"[{new_adg['name']}] 매체 설정: {msg}")
-                if new_adg_id:
-                    ok_extra_targets, extra_target_msgs = _copy_adgroup_extra_target_settings(api_key, secret_key, cid, str(src_id), new_adg_id)
-                    if extra_target_msgs:
-                        for msg in extra_target_msgs:
-                            if _should_surface_target_copy_message(msg):
-                                all_errors.append(f"[{new_adg['name']}] 타겟 설정: {msg}")
-                    if not ok_extra_targets and not extra_target_msgs:
-                        all_errors.append(f"[{new_adg['name']}] 타겟 설정: 원본 타겟 확인/복사 실패")
-                if new_adg_id:
-                    ok_search_opts, search_opts_msg = _copy_adgroup_search_option_settings(api_key, secret_key, cid, str(src_id), new_adg_id)
-                    if (not ok_search_opts) and search_opts_msg:
-                        all_errors.append(f"[{new_adg['name']}] 검색옵션: {search_opts_msg}")
-                if copy_as_off and new_adg_id:
+                                all_errors.append(f"[{new_name}] 매체 설정: {msg}")
+                except Exception as exc:
+                    all_errors.append(f"[{new_name}] 매체 설정 복사 중 예외: {type(exc).__name__}: {exc}")
+
+            try:
+                ok_extra_targets, extra_target_msgs = _copy_adgroup_extra_target_settings(api_key, secret_key, cid, str(src_id), new_adg_id)
+                if extra_target_msgs:
+                    for msg in extra_target_msgs:
+                        if _should_surface_target_copy_message(msg):
+                            all_errors.append(f"[{new_name}] 타겟 설정: {msg}")
+                if not ok_extra_targets and not extra_target_msgs:
+                    all_errors.append(f"[{new_name}] 타겟 설정: 원본 타겟 확인/복사 실패")
+            except Exception as exc:
+                all_errors.append(f"[{new_name}] 타겟 설정 복사 중 예외: {type(exc).__name__}: {exc}")
+
+            try:
+                ok_search_opts, search_opts_msg = _copy_adgroup_search_option_settings(api_key, secret_key, cid, str(src_id), new_adg_id)
+                if (not ok_search_opts) and search_opts_msg:
+                    all_errors.append(f"[{new_name}] 검색옵션: {search_opts_msg}")
+            except Exception as exc:
+                all_errors.append(f"[{new_name}] 검색옵션 복사 중 예외: {type(exc).__name__}: {exc}")
+
+            if copy_as_off:
+                try:
                     ok_off, off_msg = _set_user_lock_for_entity(api_key, secret_key, cid, "adgroup", new_adg_id, False)
                     if not ok_off and off_msg:
-                        all_errors.append(f"[{new_adg['name']}] OFF 설정 실패: {off_msg}")
-            else:
-                results["fail"] += 1
-                all_errors.append(f"[{new_adg['name']}] 생성 실패: {r_post.text}")
-    _cache_invalidate(api_key, secret_key, cid)
-    return jsonify({"ok": True, "message": f"복사 완료! (성공: {results['success']}, 실패: {results['fail']})\n" + "\n".join(all_errors[:60])})
+                        all_errors.append(f"[{new_name}] OFF 설정 실패: {off_msg}")
+                except Exception as exc:
+                    all_errors.append(f"[{new_name}] OFF 설정 중 예외: {type(exc).__name__}: {exc}")
+
+    try:
+        _cache_invalidate(api_key, secret_key, cid)
+    except Exception as exc:
+        all_errors.append(f"캐시 초기화 중 예외: {type(exc).__name__}: {exc}")
+
+    detail_limit = 100
+    detail_lines = all_errors[:detail_limit]
+    if len(all_errors) > detail_limit:
+        detail_lines.append(f"… 세부내역 {len(all_errors) - detail_limit}건 생략")
+    msg = f"복사 완료! (성공: {results['success']}, 실패: {results['fail']})"
+    if detail_lines:
+        msg += "\n" + "\n".join(detail_lines[:60])
+    return jsonify({
+        "ok": True,
+        "message": msg,
+        "success": results["success"],
+        "fail": results["fail"],
+        "total": max(len(src_ids) * copy_count, results["success"] + results["fail"]),
+        "details": detail_lines,
+    })
 def rename_adgroups_bulk():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
