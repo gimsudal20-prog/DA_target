@@ -10329,10 +10329,27 @@ def bulk_delete_by_parent():
 
     if not api_key or not secret_key or not cid:
         return jsonify({"error": "API Key / Secret Key / Customer ID가 필요합니다."}), 400
-    if target_entity not in {"keyword", "ad", "extension"}:
+    if target_entity not in {"campaign", "adgroup", "keyword", "ad", "extension"}:
         return jsonify({"error": "지원하지 않는 삭제 대상입니다."}), 400
     if not campaign_parent_ids and not adgroup_parent_ids:
         return jsonify({"error": "선택된 대상이 없습니다."}), 400
+
+    # 2026-04-30: UI 삭제 메뉴에서 캠페인/광고그룹 자체 삭제를 지원한다.
+    if target_entity == "campaign":
+        rows = [{"nccCampaignId": x} for x in campaign_parent_ids]
+        if not rows:
+            return jsonify({"error": "삭제할 캠페인을 좌측에서 1개 이상 체크해주세요."}), 400
+        success, fail, results = _delete_payload_rows(api_key, secret_key, cid, "campaign", rows)
+        return jsonify({
+            "ok": True,
+            "entity_type": "campaign",
+            "total": len(rows),
+            "success": success,
+            "fail": fail,
+            "results": results,
+            "message": f"캠페인 삭제 완료 (대상 {len(rows)}건 / 성공 {success} / 실패 {fail})",
+            "patch": "delete-campaign-adgroup-v1-20260430",
+        })
 
     collect_errors: List[str] = []
     adgroup_ids: List[str] = []
@@ -10355,6 +10372,34 @@ def bulk_delete_by_parent():
 
     if not adgroup_ids and collect_errors and target_entity != "extension":
         return jsonify({"error": "하위 광고그룹 조회에 실패했습니다.", "details": collect_errors[:10]}), 400
+
+    if target_entity == "adgroup":
+        rows = [{"nccAdgroupId": gid} for gid in adgroup_ids]
+        if not rows:
+            msg = "선택한 범위에서 삭제할 광고그룹이 없습니다."
+            if collect_errors:
+                msg += "\n" + "\n".join(collect_errors[:10])
+            return jsonify({"ok": True, "total": 0, "success": 0, "fail": 0, "results": [], "message": msg})
+        success, fail, results = _delete_payload_rows(api_key, secret_key, cid, "adgroup", rows)
+        scope_bits = []
+        if campaign_parent_ids:
+            scope_bits.append(f"캠페인 {len(campaign_parent_ids)}개 하위")
+        if adgroup_parent_ids:
+            scope_bits.append(f"선택 광고그룹 {len(adgroup_parent_ids)}개")
+        scope_label = " + ".join(scope_bits) or "선택 범위"
+        msg = f"광고그룹 삭제 완료 ({scope_label} / 대상 {len(rows)}건 / 성공 {success} / 실패 {fail})"
+        if collect_errors:
+            msg += "\n" + "\n".join(collect_errors[:10])
+        return jsonify({
+            "ok": True,
+            "entity_type": "adgroup",
+            "total": len(rows),
+            "success": success,
+            "fail": fail,
+            "results": results,
+            "message": msg,
+            "patch": "delete-campaign-adgroup-v1-20260430",
+        })
 
     rows: List[Dict[str, Any]] = []
     entity_type = {"keyword": "keyword", "ad": "ad", "extension": "ad_extension"}[target_entity]

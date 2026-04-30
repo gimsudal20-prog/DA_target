@@ -5181,11 +5181,13 @@
                                 <label style="display:flex; align-items:center; gap:8px; margin:0; font-weight:500;"><input type="checkbox" id="bulk_del_scope_campaign" checked> 체크한 캠페인 하위 전체</label>
                                 <label style="display:flex; align-items:center; gap:8px; margin:0; font-weight:500;"><input type="checkbox" id="bulk_del_scope_adgroup" checked> 체크한 광고그룹 하위 전체</label>
                             </div>
-                            <div class="field-note">둘 다 체크하면 선택 캠페인 하위 그룹과 선택 광고그룹을 합쳐서 삭제 대상을 찾습니다.</div>
+                            <div class="field-note" id="bulk_del_scope_note">둘 다 체크하면 선택 캠페인 하위 그룹과 선택 광고그룹을 합쳐서 삭제 대상을 찾습니다.</div>
                         </div>
                         <div class="form-group">
                             <label>삭제할 타겟 데이터</label>
                             <select id="bulk_del_target" onchange="syncBulkDeleteTarget()">
+                                <option value="campaign">캠페인 삭제</option>
+                                <option value="adgroup">광고그룹 삭제</option>
                                 <option value="keyword">키워드 일괄 삭제</option>
                                 <option value="ad">소재 일괄 삭제</option>
                                 <option value="extension">확장소재 일괄 삭제</option>
@@ -7524,9 +7526,31 @@ function syncExtensionForm() {
 }
 
 function syncBulkDeleteTarget() {
-    const target = document.getElementById('bulk_del_target').value;
-    document.getElementById('bulk_del_ext_wrap').style.display = target === 'extension' ? 'block' : 'none';
+    const target = document.getElementById('bulk_del_target')?.value || 'keyword';
+    const extWrap = document.getElementById('bulk_del_ext_wrap');
+    if(extWrap) extWrap.style.display = target === 'extension' ? 'block' : 'none';
+
+    const campaignScope = document.getElementById('bulk_del_scope_campaign');
+    const adgroupScope = document.getElementById('bulk_del_scope_adgroup');
+    const scopeNote = document.getElementById('bulk_del_scope_note');
+
+    // 2026-04-30 회귀 방지: 캠페인/광고그룹 자체 삭제를 삭제 메뉴에 명시적으로 유지한다.
+    if(target === 'campaign') {
+        if(campaignScope) { campaignScope.checked = true; campaignScope.disabled = false; }
+        if(adgroupScope) { adgroupScope.checked = false; adgroupScope.disabled = true; }
+        if(scopeNote) scopeNote.textContent = '캠페인 삭제는 좌측에서 체크한 캠페인만 삭제합니다. 광고그룹 체크는 이 작업에서 제외됩니다.';
+    } else if(target === 'adgroup') {
+        if(campaignScope) campaignScope.disabled = false;
+        if(adgroupScope) { adgroupScope.disabled = false; if(!campaignScope?.checked) adgroupScope.checked = true; }
+        if(scopeNote) scopeNote.textContent = '광고그룹 삭제는 체크한 광고그룹과 체크한 캠페인의 하위 광고그룹을 합쳐 삭제합니다.';
+    } else {
+        if(campaignScope) campaignScope.disabled = false;
+        if(adgroupScope) adgroupScope.disabled = false;
+        if(scopeNote) scopeNote.textContent = '둘 다 체크하면 선택 캠페인 하위 그룹과 선택 광고그룹을 합쳐서 삭제 대상을 찾습니다.';
+    }
 }
+
+window.setTimeout(syncBulkDeleteTarget, 0);
 
 function syncBulkDeleteExtTypes(changed) {
     const boxes = Array.from(document.querySelectorAll('.bulk-del-ext-type'));
@@ -10134,7 +10158,7 @@ async function executeBulkDelete() {
         if(extTypes.includes('ALL')) extTypes = ['ALL'];
     }
 
-    let targetName = target === 'keyword' ? '키워드' : target === 'ad' ? '소재' : '확장소재';
+    let targetName = ({campaign:'캠페인', adgroup:'광고그룹', keyword:'키워드', ad:'소재', extension:'확장소재'}[target] || '삭제 대상');
     if(target === 'extension') {
         targetName += `(${extTypes.map(x => extTypeLabels[x] || x).join(', ')})`;
     }
@@ -10142,7 +10166,26 @@ async function executeBulkDelete() {
     const scopeParts = [];
     if(campaignIds.length) scopeParts.push(`캠페인 ${campaignIds.length}개`);
     if(adgroupIds.length) scopeParts.push(`광고그룹 ${adgroupIds.length}개`);
-    if(!confirm(`정말 선택한 ${scopeParts.join(' + ')} 범위의 [${targetName}] 데이터를 영구 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
+
+    if(target === 'campaign') {
+        if(!campaignIds.length) {
+            showToast('캠페인 삭제는 좌측에서 삭제할 캠페인을 1개 이상 체크해야 합니다.', 'error');
+            return;
+        }
+        if(!confirm(`정말 체크한 캠페인 ${campaignIds.length.toLocaleString()}개를 삭제하시겠습니까?
+캠페인 삭제는 되돌릴 수 없습니다.`)) return;
+    } else if(target === 'adgroup') {
+        if(!campaignIds.length && !adgroupIds.length) {
+            showToast('광고그룹 삭제는 좌측에서 캠페인 또는 광고그룹을 1개 이상 체크해야 합니다.', 'error');
+            return;
+        }
+        if(!confirm(`정말 선택한 ${scopeParts.join(' + ')} 범위의 광고그룹을 삭제하시겠습니까?
+체크한 캠페인은 삭제하지 않고, 해당 캠페인의 하위 광고그룹만 삭제합니다.
+이 작업은 되돌릴 수 없습니다.`)) return;
+    } else {
+        if(!confirm(`정말 선택한 ${scopeParts.join(' + ')} 범위의 [${targetName}] 데이터를 영구 삭제하시겠습니까?
+이 작업은 되돌릴 수 없습니다.`)) return;
+    }
 
     try {
         const data = await postJson('/bulk_delete_by_parent', {
@@ -10152,9 +10195,11 @@ async function executeBulkDelete() {
             target_entity: target,
             ext_types: extTypes,
             ext_type: extTypes[0] || 'ALL'
-        }, '대량 일괄 삭제 진행 중...');
+        }, target === 'campaign' ? '캠페인 삭제 진행 중...' : target === 'adgroup' ? '광고그룹 삭제 진행 중...' : '대량 일괄 삭제 진행 중...');
         showToast(data.message || '성공적으로 일괄 삭제되었습니다.', (data.fail || 0) > 0 ? 'info' : 'success');
-        if(currentAdgroupId) loadAdgroupDetails(); 
+        await loadCampaigns(true);
+        if(currentCampaignId) await loadAdgroups(currentCampaignId, true);
+        if(currentAdgroupId) loadAdgroupDetails();
     } catch(err) { showToast(err.message, 'error'); }
 }
 
