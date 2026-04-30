@@ -2229,6 +2229,65 @@
       overflow: auto;
       padding-right: 4px;
     }
+    .log-counts {
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px;
+      margin-top:7px;
+    }
+    .log-count-chip {
+      font-size:11px;
+      line-height:1;
+      border:1px solid var(--line);
+      background:#fff;
+      color:var(--muted);
+      border-radius:999px;
+      padding:5px 7px;
+    }
+    .log-count-chip.fail { color:#b91c1c; background:#fff7ed; border-color:#fed7aa; }
+    .log-count-chip.success { color:#15803d; background:#f0fdf4; border-color:#bbf7d0; }
+    .log-count-chip.skip { color:#92400e; background:#fffbeb; border-color:#fde68a; }
+    .log-detail-fold {
+      margin-top:8px;
+      border:1px solid rgba(148,163,184,.35);
+      border-radius:10px;
+      background:rgba(255,255,255,.72);
+      overflow:hidden;
+    }
+    .log-detail-fold summary {
+      cursor:pointer;
+      user-select:none;
+      padding:8px 10px;
+      font-size:12px;
+      font-weight:700;
+      color:var(--text);
+    }
+    .log-detail-list {
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      max-height:180px;
+      overflow:auto;
+      padding:0 10px 10px;
+    }
+    .log-detail-row {
+      display:grid;
+      grid-template-columns:56px minmax(90px, 180px) minmax(0, 1fr);
+      gap:8px;
+      align-items:start;
+      font-size:12px;
+      line-height:1.45;
+      color:var(--muted);
+      border-top:1px solid rgba(148,163,184,.2);
+      padding-top:6px;
+      word-break:break-word;
+    }
+    .log-detail-row .level { font-weight:800; }
+    .log-detail-row.fail .level { color:#dc2626; }
+    .log-detail-row.warning .level, .log-detail-row.skip .level { color:#d97706; }
+    .log-detail-row.success .level { color:#16a34a; }
+    .log-detail-row .target { color:var(--text); font-weight:650; }
+    .badge.yellow { background:#f59e0b; color:#fff; }
     .log-item.success {
       background: #f7fef9 !important;
       border-left-color: var(--naver) !important;
@@ -3340,7 +3399,511 @@
       .detail-keyword-search-status { white-space:normal; }
     }
 
-  </style>
+
+    /* Scroll performance guard: scrolling while sticky panels/shadows are active can stutter on large pages. */
+    .workspace-content, .master-content, .sidebar {
+      overscroll-behavior: contain;
+      scrollbar-gutter: stable;
+    }
+    #account_list .account-item {
+      contain: content;
+      will-change: auto;
+    }
+    .workspace-content.is-user-scrolling,
+    .workspace-content.is-user-scrolling * {
+      scroll-behavior: auto !important;
+    }
+    .workspace-content.is-user-scrolling .workspace-toolbar,
+    .workspace-content.is-user-scrolling > .main-tabs,
+    .workspace-content.is-user-scrolling #tab_create > .sub-tabs,
+    .workspace-content.is-user-scrolling #tab_bulk > .sub-tabs {
+      box-shadow: none !important;
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+      transition: none !important;
+    }
+    .workspace-content.is-user-scrolling .card,
+    .workspace-content.is-user-scrolling .tab-content,
+    .workspace-content.is-user-scrolling button,
+    .workspace-content.is-user-scrolling .btn {
+      transition: none !important;
+    }
+
+  
+    /* Design polish patch 2026-04-29
+       목적: 기능 로직은 유지하고 선택/작업/로그 화면의 판단 속도와 가독성만 개선 */
+    :root {
+      --design-bg: #f6f8fb;
+      --design-card: #ffffff;
+      --design-line: #e7eaf0;
+      --design-line-strong: #d7dce5;
+      --design-text: #111827;
+      --design-muted: #667085;
+      --design-soft: #f8fafc;
+      --design-blue: #2563eb;
+      --design-blue-soft: #eff6ff;
+      --design-green: #059669;
+      --design-green-soft: #ecfdf5;
+      --design-red: #dc2626;
+      --design-red-soft: #fef2f2;
+      --design-amber: #d97706;
+      --design-amber-soft: #fffbeb;
+      --design-shadow: 0 1px 2px rgba(16,24,40,.04), 0 10px 24px rgba(16,24,40,.045);
+    }
+
+    body,
+    input,
+    select,
+    textarea,
+    button,
+    table {
+      font-variant-numeric: tabular-nums;
+    }
+
+    .sidebar,
+    .master-panel,
+    .detail-panel,
+    .workspace-content,
+    .card,
+    .log-item,
+    .list-item,
+    .account-item {
+      -webkit-font-smoothing: antialiased;
+      text-rendering: geometricPrecision;
+    }
+
+    .account-item {
+      position: relative;
+      min-height: 50px;
+      padding: 11px 12px 11px 14px !important;
+      border-radius: 13px !important;
+      border-color: rgba(15,23,42,.075) !important;
+      background: rgba(255,255,255,.72) !important;
+      box-shadow: none !important;
+      transform: none !important;
+    }
+    .account-item::before {
+      content: '';
+      position: absolute;
+      left: 7px;
+      top: 10px;
+      bottom: 10px;
+      width: 3px;
+      border-radius: 999px;
+      background: transparent;
+      transition: background .12s ease;
+    }
+    .account-item:hover {
+      background: #f8fafc !important;
+      border-color: rgba(37,99,235,.20) !important;
+    }
+    .account-item.active {
+      background: #f0fdf4 !important;
+      border-color: rgba(3,199,90,.28) !important;
+    }
+    .account-item.active::before { background: var(--naver); }
+    .account-item .name,
+    .list-item .title {
+      font-weight: 720 !important;
+      letter-spacing: -0.02em;
+    }
+
+    .master-panel {
+      background: #fff !important;
+      border-right-color: var(--design-line) !important;
+    }
+    .master-header {
+      background: rgba(255,255,255,.96) !important;
+      border-bottom-color: var(--design-line) !important;
+      box-shadow: 0 1px 0 rgba(16,24,40,.025) !important;
+    }
+    .master-content {
+      padding: 12px 10px 16px !important;
+      background: linear-gradient(180deg, #fff 0%, #fbfcfe 100%) !important;
+    }
+    .list-group-title {
+      margin: 14px 8px 8px !important;
+      color: #475467 !important;
+      font-size: 11.5px !important;
+      letter-spacing: -0.01em;
+    }
+    .list-item {
+      position: relative;
+      min-height: 48px;
+      border-radius: 12px !important;
+      padding: 10px 11px !important;
+      border: 1px solid transparent !important;
+      background: transparent !important;
+      gap: 9px !important;
+    }
+    .list-item::before {
+      content: '';
+      position: absolute;
+      left: 5px;
+      top: 10px;
+      bottom: 10px;
+      width: 3px;
+      border-radius: 999px;
+      background: transparent;
+    }
+    .list-item:hover {
+      background: #f8fafc !important;
+      border-color: rgba(148,163,184,.16) !important;
+    }
+    .list-item.active {
+      background: var(--design-blue-soft) !important;
+      border-color: #bfdbfe !important;
+    }
+    .list-item.active::before { background: var(--design-blue); }
+    .list-item input[type="checkbox"],
+    .list-group-title input[type="checkbox"] {
+      width: 15px !important;
+      height: 15px !important;
+      accent-color: var(--design-blue);
+    }
+    .list-item .meta {
+      color: #7b8794 !important;
+      gap: 5px !important;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .breadcrumb-bar {
+      background: rgba(255,255,255,.96) !important;
+      border-bottom-color: var(--design-line) !important;
+      box-shadow: 0 1px 0 rgba(16,24,40,.035) !important;
+      min-height: 54px;
+    }
+    .selection-summary-pill,
+    #workspace_selection_mini {
+      font-variant-numeric: tabular-nums;
+    }
+    .selection-summary-pill {
+      background: #111827 !important;
+      color: #fff !important;
+      border: 1px solid #111827 !important;
+      box-shadow: none !important;
+    }
+    .workspace-toolbar {
+      background: rgba(255,255,255,.94) !important;
+      border: 1px solid var(--design-line) !important;
+      box-shadow: var(--design-shadow) !important;
+      border-radius: 16px !important;
+      padding: 10px 12px !important;
+      margin-bottom: 12px !important;
+    }
+    .workspace-status { gap: 8px !important; }
+    .toolbar-label {
+      color: var(--design-muted) !important;
+      font-size: 11px !important;
+      font-weight: 780 !important;
+      letter-spacing: -0.01em;
+    }
+    #workspace_selection_mini {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: #f8fafc;
+      border: 1px solid var(--design-line);
+      color: #344054;
+      font-weight: 750;
+      font-size: 12px;
+    }
+
+    .workspace-content > .main-tabs,
+    .workspace-content > .workflow-main-tabs {
+      background: rgba(255,255,255,.94) !important;
+      border: 1px solid var(--design-line) !important;
+      border-radius: 16px !important;
+      box-shadow: var(--design-shadow) !important;
+      padding: 5px !important;
+      gap: 4px !important;
+    }
+    .workspace-content > .main-tabs .tab-btn,
+    .workspace-content > .workflow-main-tabs .tab-btn {
+      border-radius: 11px !important;
+      padding: 9px 14px !important;
+      color: #667085 !important;
+      font-weight: 760 !important;
+      box-shadow: none !important;
+      margin-right: 0 !important;
+    }
+    .workspace-content > .main-tabs .tab-btn:hover,
+    .workspace-content > .workflow-main-tabs .tab-btn:hover {
+      background: #f3f6fb !important;
+      color: #111827 !important;
+    }
+    .workspace-content > .main-tabs .tab-btn.active,
+    .workspace-content > .workflow-main-tabs .tab-btn.active {
+      background: #111827 !important;
+      color: #fff !important;
+      box-shadow: none !important;
+      border-bottom-color: transparent !important;
+    }
+    .workspace-content > .main-tabs .tab-btn.danger-tab.active,
+    .workspace-content > .workflow-main-tabs .tab-btn.danger-tab.active {
+      background: var(--design-red) !important;
+      color: #fff !important;
+    }
+
+    .workspace-content .card {
+      border-color: var(--design-line) !important;
+      border-radius: 16px !important;
+      box-shadow: 0 1px 2px rgba(16,24,40,.035) !important;
+      background: #fff !important;
+    }
+    .workspace-content .card-title {
+      font-size: 14px !important;
+      font-weight: 820 !important;
+      color: #111827 !important;
+      border-bottom-color: var(--design-line) !important;
+    }
+    input[type="text"],
+    input[type="password"],
+    input[type="number"],
+    input[type="search"],
+    select,
+    textarea {
+      border-color: var(--design-line-strong) !important;
+      border-radius: 11px !important;
+      background: #fff !important;
+      box-shadow: none !important;
+    }
+    input:focus,
+    select:focus,
+    textarea:focus {
+      border-color: #93c5fd !important;
+      box-shadow: 0 0 0 3px rgba(37,99,235,.10) !important;
+    }
+    .btn {
+      min-height: 36px;
+      border-radius: 11px !important;
+      font-weight: 760 !important;
+      box-shadow: none !important;
+      transform: none !important;
+    }
+    .btn:hover:not(:disabled) { transform: none !important; }
+    .btn-sub,
+    .mini-toolbar-btn,
+    .type-select-btn {
+      background: #fff !important;
+      border: 1px solid var(--design-line-strong) !important;
+      color: #344054 !important;
+    }
+    .btn-sub:hover:not(:disabled),
+    .mini-toolbar-btn:hover,
+    .type-select-btn:hover {
+      background: #f8fafc !important;
+      border-color: #cbd5e1 !important;
+    }
+    .btn-primary,
+    .btn-purple {
+      background: var(--design-blue) !important;
+      color: #fff !important;
+    }
+    .btn-green {
+      background: var(--design-green) !important;
+      color: #fff !important;
+    }
+    .btn-red,
+    .danger-tab.active {
+      background: var(--design-red) !important;
+      color: #fff !important;
+    }
+    .workspace-content .btn.is-danger-ghost,
+    .danger-tab:not(.active) {
+      color: var(--design-red) !important;
+    }
+
+    .badge {
+      min-height: 22px;
+      border-radius: 999px !important;
+      font-weight: 780 !important;
+      border: 1px solid transparent;
+    }
+    .badge.blue { background: var(--design-blue-soft) !important; color: #1d4ed8 !important; border-color: #bfdbfe; }
+    .badge.green { background: var(--design-green-soft) !important; color: #047857 !important; border-color: #bbf7d0; }
+    .badge.red { background: var(--design-red-soft) !important; color: #b91c1c !important; border-color: #fecaca; }
+    .badge.yellow { background: var(--design-amber-soft) !important; color: #92400e !important; border-color: #fde68a; }
+
+    table {
+      border-color: var(--design-line) !important;
+      border-radius: 12px !important;
+      overflow: hidden;
+    }
+    th {
+      background: #f8fafc !important;
+      color: #475467 !important;
+      font-weight: 780 !important;
+    }
+    td { color: #1f2937; }
+    tr:hover td { background: #fbfdff !important; }
+
+    .log-empty,
+    #campaign_list > div[style*="광고주를 선택"],
+    #adgroup_list > div[style*="캠페인을 선택"],
+    .tab-content div[style*="아직 조회"] {
+      border: 1px dashed #d7dce5 !important;
+      border-radius: 14px !important;
+      background: linear-gradient(180deg, #fff 0%, #f8fafc 100%) !important;
+      color: #667085 !important;
+      font-size: 12px !important;
+    }
+
+    .log-panel { border-radius: 16px !important; }
+    .log-list {
+      gap: 10px !important;
+      max-height: 340px !important;
+    }
+    .log-item {
+      position: relative;
+      border: 1px solid var(--design-line) !important;
+      border-left: 0 !important;
+      border-radius: 15px !important;
+      background: #fff !important;
+      padding: 13px 14px 13px 16px !important;
+      box-shadow: 0 1px 2px rgba(16,24,40,.035) !important;
+      overflow: hidden;
+    }
+    .log-item::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      background: #94a3b8;
+    }
+    .log-item.success::before { background: var(--design-green); }
+    .log-item.partial::before { background: var(--design-amber); }
+    .log-item.error::before { background: var(--design-red); }
+    .log-item.success { background: linear-gradient(90deg, rgba(236,253,245,.72), #fff 22%) !important; }
+    .log-item.partial { background: linear-gradient(90deg, rgba(255,251,235,.90), #fff 24%) !important; }
+    .log-item.error { background: linear-gradient(90deg, rgba(254,242,242,.88), #fff 24%) !important; }
+    .log-top { align-items: flex-start !important; gap: 10px !important; }
+    .log-title {
+      font-size: 13px !important;
+      font-weight: 820 !important;
+      color: #111827 !important;
+    }
+    .log-meta {
+      color: #667085 !important;
+      font-size: 11.5px !important;
+    }
+    .log-summary {
+      margin-top: 7px;
+      color: #344054 !important;
+      font-weight: 650;
+    }
+    .log-msg {
+      max-height: 72px !important;
+      border-radius: 10px;
+      background: #f8fafc;
+      border: 1px solid rgba(231,234,240,.9);
+      padding: 8px 9px;
+      color: #475467 !important;
+    }
+    .log-counts { gap: 7px !important; margin-top: 8px !important; }
+    .log-count-chip {
+      border-radius: 999px !important;
+      padding: 5px 8px !important;
+      font-weight: 780 !important;
+      background: #f8fafc !important;
+      border-color: var(--design-line) !important;
+      color: #475467 !important;
+    }
+    .log-count-chip.success { background: var(--design-green-soft) !important; color: #047857 !important; border-color: #bbf7d0 !important; }
+    .log-count-chip.fail { background: var(--design-red-soft) !important; color: #b91c1c !important; border-color: #fecaca !important; }
+    .log-count-chip.skip { background: var(--design-amber-soft) !important; color: #92400e !important; border-color: #fde68a !important; }
+    .log-detail-fold {
+      border-color: var(--design-line) !important;
+      border-radius: 12px !important;
+      background: #fff !important;
+    }
+    .log-detail-fold summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 9px 11px !important;
+      color: #344054 !important;
+    }
+    .log-detail-copy {
+      border: 1px solid var(--design-line-strong);
+      background: #fff;
+      color: #344054;
+      border-radius: 999px;
+      padding: 4px 8px;
+      font-size: 11px;
+      font-weight: 780;
+      cursor: pointer;
+    }
+    .log-detail-copy:hover { background: #f8fafc; }
+    .log-detail-list {
+      max-height: 220px !important;
+      padding: 0 11px 11px !important;
+    }
+    .log-detail-row {
+      grid-template-columns: 64px minmax(120px, 220px) minmax(0,1fr) !important;
+      gap: 10px !important;
+      font-size: 12px !important;
+      color: #667085 !important;
+    }
+    .log-detail-row.fail { background: rgba(254,242,242,.38); }
+    .log-detail-row.warning,
+    .log-detail-row.skip { background: rgba(255,251,235,.45); }
+    .log-detail-row.success { background: rgba(236,253,245,.35); }
+    .log-detail-row .target {
+      color: #111827 !important;
+      font-weight: 760 !important;
+    }
+
+    @media (max-width: 980px) {
+      .workspace-toolbar { border-radius: 14px !important; }
+      .workspace-content > .main-tabs,
+      .workspace-content > .workflow-main-tabs { border-radius: 14px !important; }
+      .workspace-content > .main-tabs .tab-btn,
+      .workspace-content > .workflow-main-tabs .tab-btn { padding: 8px 11px !important; }
+      .log-detail-row { grid-template-columns: 54px minmax(80px, 1fr) !important; }
+      .log-detail-row > div:last-child { grid-column: 1 / -1; }
+    }
+
+    .inline-export-control {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      max-width: 100%;
+    }
+    .inline-export-control select {
+      width: auto;
+      min-width: 148px;
+      height: 34px;
+      padding: 6px 30px 6px 10px;
+      border: 0;
+      background-color: transparent;
+      box-shadow: none;
+      font-size: 12px;
+      color: var(--text);
+    }
+    .inline-export-control select:focus {
+      box-shadow: none;
+      border-color: transparent;
+    }
+    .inline-export-control .btn {
+      white-space: nowrap;
+    }
+    @media (max-width: 720px) {
+      .inline-export-control { width: 100%; justify-content: space-between; }
+      .inline-export-control select { flex: 1; min-width: 0; }
+    }
+</style>
 </head>
 <body>
 
@@ -3539,7 +4102,24 @@
               <button class="btn btn-sub" type="button" onclick="loadAccountExtensionsLookup()">확장소재 조회</button>
               <button class="btn btn-green" type="button" onclick="downloadAccountKeywordsExcel()">키워드 엑셀</button>
               <button class="btn btn-green" type="button" onclick="downloadAccountAdsExcel()">소재 엑셀</button>
-              <button class="btn btn-green" type="button" onclick="downloadAccountExtensionsExcel()">확장소재 엑셀</button>
+              <div class="inline-export-control" title="확장소재 엑셀에 포함할 유형을 선택합니다. 전체가 기본입니다.">
+                <select id="account_ext_export_type" aria-label="확장소재 엑셀 유형">
+                  <option value="ALL" selected>확장소재 전체</option>
+                  <option value="HEADLINE">추가 제목</option>
+                  <option value="SUB_LINKS">서브링크</option>
+                  <option value="IMAGE_SUB_LINKS">이미지 서브링크</option>
+                  <option value="DESCRIPTION">추가 설명문구</option>
+                  <option value="DESCRIPTION_EXTRA">설명 확장문구</option>
+                  <option value="WEBSITE_INFO">웹사이트 정보</option>
+                  <option value="POWER_LINK_IMAGE">파워링크 이미지</option>
+                  <option value="PHONE">전화번호</option>
+                  <option value="LOCATION">위치정보</option>
+                  <option value="PROMOTION">프로모션</option>
+                  <option value="PRICE_LINKS">가격링크</option>
+                  <option value="SHOPPING_EXTRA">쇼핑상품부가정보</option>
+                </select>
+                <button class="btn btn-green" type="button" onclick="downloadAccountExtensionsExcel()">확장소재 엑셀</button>
+              </div>
               <button class="btn btn-sub" type="button" onclick="openWorkflowUtility('keyword')">키워드 진단</button>
             </div>
             <div class="tabs sub-tabs" style="margin-top:12px; margin-bottom:0; border:none;">
@@ -4018,15 +4598,16 @@
                         <div class="field-note" style="margin-top:8px;">구간에 요일을 따로 지정하면 그 구간은 지정한 요일에만 적용됩니다. 지정하지 않으면 위 공통 요일을 사용합니다. 연속 시간은 하나의 구간으로 병합되어 적용됩니다. 예: 14~16시는 14:00~16:00 한 구간으로 저장됩니다.</div>
                     </div>
                     <div class="form-group">
-                        <label>단일 시간 선택 (연속 시간 자동 병합)</label>
+                        <label>빠른 시간대 선택 (종료 시각 기준 자동 병합)</label>
                         <div class="hours-grid schedule-grid" id="schedule_hours"></div>
                         <div class="btn-row" style="margin-top:8px;">
                             <button class="btn btn-sub" style="padding:4px 8px; font-size:12px;" onclick="selectAllScheduleHours(true)">시간 전체선택</button>
                             <button class="btn btn-sub" style="padding:4px 8px; font-size:12px;" onclick="selectAllScheduleHours(false)">초기화</button>
                         </div>
+                        <div class="field-note" style="margin-top:8px;">마지막으로 선택한 시각은 종료 시각으로 처리합니다. 예: 00·01·02·03 선택 → 00~03, 07~23 선택 → 07~24</div>
                     </div>
                     <div class="form-group" style="max-width:200px;"><label>입찰 가중치 (%)</label><input type="number" id="schedule_bid_weight" value="100" min="10" max="500"></div>
-                    <button class="btn btn-primary" onclick="saveScheduleBySelection()">선택한 시간대/가중치 적용 실행</button>
+                    <button class="btn btn-primary" onclick="saveScheduleBySelection()">선택한 시간대로 변경</button>
                 </div>
             </div>
 
@@ -4486,6 +5067,7 @@
 // --- 1. Global State & Core Utils ---
 const accountsData = {{ accounts | tojson }};
 let currentCustomerId = null; let currentCampaignId = null; let currentAdgroupId = null;
+let accountSelectionSeq = 0;
 let campaigns = []; let adgroups = []; let channels = [];
 let detailState = { keywords:[], ads:[], exts:[], negatives:[] };
 const DETAIL_KEYWORD_PREVIEW_LIMIT = 10;
@@ -4762,9 +5344,37 @@ function toggleFavoriteAccount(customerId, event) {
     switchAccountAssetPreview('keywords', document.querySelector('#tab_data .account-asset-preview-tab.active'));
 }
 
+function getUniqueAccountsData() {
+    const seen = new Set();
+    const unique = [];
+    (Array.isArray(accountsData) ? accountsData : []).forEach(acc => {
+        const cid = String(acc?.customer_id || '');
+        if(!cid || seen.has(cid)) return;
+        seen.add(cid);
+        unique.push(acc);
+    });
+    return unique;
+}
+
+function syncActiveAccountDom() {
+    const key = String(currentCustomerId || '');
+    let activated = false;
+    document.querySelectorAll('#account_list .account-item').forEach(item => {
+        const matched = !!key && String(item.dataset.customerId || '') === key && !activated;
+        item.classList.toggle('active', matched);
+        item.setAttribute('aria-selected', matched ? 'true' : 'false');
+        if(matched) activated = true;
+    });
+}
+
 function selectAccountByCustomerId(customerId) {
     const key = String(customerId || '');
-    const acc = accountsData.find(x => String(x.customer_id || '') === key);
+    if(!key) return;
+    if(String(currentCustomerId || '') === key) {
+        syncActiveAccountDom();
+        return;
+    }
+    const acc = getUniqueAccountsData().find(x => String(x.customer_id || '') === key);
     if(acc) selectAccount(acc);
 }
 function normalizeCampaignTypeKey(value) {
@@ -5232,15 +5842,16 @@ function scheduleActionLogRefresh(delay = 700) {
 
 async function postJson(url, body, txt) {
     showLoader(txt);
+    const shouldRefreshLog = shouldRefreshActionLogsAfterPost(url);
     try {
         const res = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
         const text = await res.text();
         let data = {}; try{ data = text ? JSON.parse(text) : {}; } catch(e){ data = {error:text||`${res.status}`}; }
-        if(!res.ok) throw new Error([data.error, data.details].filter(Boolean).join(' | ') || `${res.status}`);
-        if(shouldRefreshActionLogsAfterPost(url)) {
-            bumpLookupCacheVersion();
-            scheduleActionLogRefresh();
+        if(shouldRefreshLog) {
+            if(res.ok) bumpLookupCacheVersion();
+            scheduleActionLogRefresh(res.ok ? 500 : 250);
         }
+        if(!res.ok) throw new Error([data.error, data.details].filter(Boolean).join(' | ') || `${res.status}`);
         return data;
     } finally { hideLoader(); }
 }
@@ -5254,6 +5865,37 @@ function escapeMaybe(value) {
     return escapeHtml(value == null ? '' : String(value));
 }
 
+
+function copyActionLogDetail(event, button) {
+    if(event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    const fold = button ? button.closest('.log-detail-fold') : null;
+    const list = fold ? fold.querySelector('.log-detail-list') : null;
+    const text = list ? list.innerText.trim() : '';
+    if(!text) {
+        showToast('복사할 세부사항이 없습니다.', 'info');
+        return;
+    }
+    if(navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => showToast('세부사항을 복사했습니다.', 'success')).catch(() => showToast('클립보드 복사에 실패했습니다.', 'error'));
+    } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+            document.execCommand('copy');
+            showToast('세부사항을 복사했습니다.', 'success');
+        } catch(e) {
+            showToast('클립보드 복사에 실패했습니다.', 'error');
+        } finally {
+            ta.remove();
+        }
+    }
+}
+
 async function loadActionLogs(showNotice=false) {
     try {
         const res = await fetch('/get_action_logs?limit=120');
@@ -5265,6 +5907,40 @@ async function loadActionLogs(showNotice=false) {
     }
 }
 
+function renderActionLogCounts(row) {
+    const chips = [];
+    const addChip = (label, value, cls='') => {
+        if(value === null || value === undefined || value === '') return;
+        const numValue = Number(value);
+        const text = Number.isFinite(numValue) ? num(numValue) : String(value);
+        chips.push(`<span class="log-count-chip ${cls}">${label} ${escapeMaybe(text)}</span>`);
+    };
+    addChip('대상', row.total, '');
+    addChip('성공', row.success, 'success');
+    addChip('실패', row.fail, 'fail');
+    addChip('건너뜀', row.skipped, 'skip');
+    return chips.length ? `<div class="log-counts">${chips.join('')}</div>` : '';
+}
+
+function renderActionLogDetails(row) {
+    const items = Array.isArray(row.detail_items) ? row.detail_items : [];
+    if(!items.length) return '';
+    const levelLabel = { fail:'실패', warning:'경고', skip:'건너뜀', success:'성공', info:'정보' };
+    const rows = items.slice(0, 80).map(item => {
+        const level = String(item.level || 'info');
+        const label = levelLabel[level] || '정보';
+        const target = item.target ? `<div class="target">${escapeMaybe(item.target)}</div>` : '<div class="target muted">-</div>';
+        const detail = item.detail ? escapeMaybe(item.detail) : '-';
+        return `<div class="log-detail-row ${escapeMaybe(level)}"><div class="level">${label}</div>${target}<div>${detail}</div></div>`;
+    }).join('');
+    const more = row.detail_truncated ? '<div class="log-detail-row info"><div class="level">정보</div><div class="target">생략</div><div>세부내역이 많아 일부만 표시했습니다. 전체는 엑셀 다운로드에서 확인하세요.</div></div>' : '';
+    return `
+        <details class="log-detail-fold">
+          <summary><span>세부사항 ${escapeMaybe(row.detail_count || items.length)}건 보기</span><button type="button" class="log-detail-copy" onclick="copyActionLogDetail(event, this)">복사</button></summary>
+          <div class="log-detail-list">${rows}${more}</div>
+        </details>`;
+}
+
 function renderActionLogs(rows) {
     const wrap = document.getElementById('action_log_list');
     if(!wrap) return;
@@ -5273,12 +5949,15 @@ function renderActionLogs(rows) {
         return;
     }
     wrap.innerHTML = rows.map(row => {
-        const status = String(row.status || '').toLowerCase() === 'error' ? 'error' : 'success';
-        const badgeClass = status === 'error' ? 'red' : 'green';
-        const badgeText = status === 'error' ? '실패' : '성공';
+        const rawStatus = String(row.status || '').toLowerCase();
+        const status = rawStatus === 'error' ? 'error' : (rawStatus === 'partial' ? 'partial' : 'success');
+        const badgeClass = status === 'error' ? 'red' : (status === 'partial' ? 'yellow' : 'green');
+        const badgeText = status === 'error' ? '실패' : (status === 'partial' ? '부분성공' : '성공');
         const summary = row.summary ? `<div class="log-summary">${escapeMaybe(row.summary)}</div>` : '';
         const msg = row.message ? `<div class="log-msg">${escapeMaybe(row.message)}</div>` : '';
         const cid = row.customer_id ? `광고주 ID: ${escapeMaybe(row.customer_id)}` : '광고주 ID: -';
+        const countHtml = renderActionLogCounts(row);
+        const detailHtml = renderActionLogDetails(row);
         return `
             <div class="log-item ${status}">
               <div class="log-top">
@@ -5287,7 +5966,9 @@ function renderActionLogs(rows) {
               </div>
               <div class="log-meta">${escapeMaybe(formatActionLogTime(row.ts))} · ${cid}</div>
               ${summary}
+              ${countHtml}
               ${msg}
+              ${detailHtml}
             </div>`;
     }).join('');
 }
@@ -5748,7 +6429,7 @@ window.onload = async function() {
     restoreWorkflowAssistMode();
     renderAccounts();
     if(restoredAuth.customerId) {
-        const matched = accountsData.find(acc => String(acc.customer_id || '') === String(restoredAuth.customerId || ''));
+        const matched = getUniqueAccountsData().find(acc => String(acc.customer_id || '') === String(restoredAuth.customerId || ''));
         if(matched) {
             await selectAccount(matched);
         }
@@ -5817,7 +6498,7 @@ function renderAccounts() {
     const wrap = document.getElementById('account_list');
     if(!wrap) return;
     const q = String(document.getElementById('account_search')?.value || '').trim().toLowerCase();
-    const sorted = [...accountsData].sort((a,b) => {
+    const sorted = getUniqueAccountsData().sort((a,b) => {
         const aFav = isFavoriteAccount(a.customer_id) ? 1 : 0;
         const bFav = isFavoriteAccount(b.customer_id) ? 1 : 0;
         if(aFav !== bFav) return bFav - aFav;
@@ -5837,7 +6518,7 @@ function renderAccounts() {
         const active = String(currentCustomerId || '') === cid;
         const fav = isFavoriteAccount(cid);
         return `
-        <div class="account-item${active ? ' active' : ''}" onclick="selectAccountByCustomerId('${escapeAttr(cid)}')">
+        <div class="account-item${active ? ' active' : ''}" data-customer-id="${escapeAttr(cid)}" aria-selected="${active ? 'true' : 'false'}" onclick="selectAccountByCustomerId('${escapeAttr(cid)}')">
             <div class="row">
                 <div class="main">
                     <div class="name">${escapeHtml(acc.account_name)}</div>
@@ -5847,32 +6528,42 @@ function renderAccounts() {
             </div>
         </div>`;
     }).join('');
+    syncActiveAccountDom();
 }
 
 async function selectAccount(acc) {
-    currentCustomerId = acc.customer_id; 
+    const nextCustomerId = String(acc?.customer_id || '');
+    if(!nextCustomerId) return;
+    const selectionSeq = ++accountSelectionSeq;
+    currentCustomerId = nextCustomerId;
     bumpLookupCacheVersion();
     persistAuthState(false);
-    document.getElementById('bc_account').textContent = acc.account_name;
-    document.getElementById('master_header_title').textContent = `${acc.account_name} 캠페인`;
-    
+    document.getElementById('bc_account').textContent = acc.account_name || nextCustomerId;
+    document.getElementById('master_header_title').textContent = `${acc.account_name || nextCustomerId} 캠페인`;
+
     currentCampaignId = null; currentAdgroupId = null; 
     checkedCampaignIds.clear(); checkedAdgroupIds.clear();
-    campaigns = []; adgroups = [];
-    
+    campaigns = []; adgroups = []; channels = [];
+
     renderAccounts();
+    syncActiveAccountDom();
     updateBreadcrumb();
     await Promise.all([refreshCampaigns(), loadChannels()]);
+    if(selectionSeq !== accountSelectionSeq) return;
+    syncActiveAccountDom();
 }
 
 async function refreshCampaigns(force=false) {
     const c = ensureReady(); if(!c) return;
+    const requestCustomerId = String(c.customer_id || '');
     if(force) clearReadApiCache();
     try {
         const payload = { ...c, force: !!force };
-        campaigns = force
+        const nextCampaigns = force
             ? await postJson('/get_campaigns', payload, '캠페인 목록 조회 중...')
             : await fetchJsonCached('/get_campaigns', payload, { loadingText:'캠페인 목록 조회 중...', ttlMs:LIST_API_CACHE_TTL_MS });
+        if(String(currentCustomerId || '') !== requestCustomerId) return;
+        campaigns = Array.isArray(nextCampaigns) ? nextCampaigns : [];
         masterListShowAll.campaign = false;
         if(currentCampaignId && !campaigns.some(x => String(x.id) === String(currentCampaignId))) {
             currentCampaignId = null;
@@ -5882,17 +6573,23 @@ async function refreshCampaigns(force=false) {
         }
         checkedCampaignIds.clear(); checkedAdgroupIds.clear();
         renderMasterList(); updateSelectOptions();
-    } catch(err) { showToast(`캠페인 조회 실패: ${err.message}`, 'error'); }
+    } catch(err) {
+        if(String(currentCustomerId || '') === requestCustomerId) showToast(`캠페인 조회 실패: ${err.message}`, 'error');
+    }
 }
 
 async function refreshAdgroups(force=false) {
     const c = ensureReady(true); if(!c) return;
+    const requestCustomerId = String(c.customer_id || '');
+    const requestCampaignId = String(currentCampaignId || '');
     if(force) clearReadApiCache();
     try {
         const payload = { ...c, campaign_id: currentCampaignId, force: !!force };
-        adgroups = force
+        const nextAdgroups = force
             ? await postJson('/get_adgroups', payload, '광고그룹 목록 조회 중...')
             : await fetchJsonCached('/get_adgroups', payload, { loadingText:'광고그룹 목록 조회 중...', ttlMs:LIST_API_CACHE_TTL_MS });
+        if(String(currentCustomerId || '') !== requestCustomerId || String(currentCampaignId || '') !== requestCampaignId) return;
+        adgroups = Array.isArray(nextAdgroups) ? nextAdgroups : [];
         masterListShowAll.adgroup = false;
         if(currentAdgroupId && !adgroups.some(x => String(x.id) === String(currentAdgroupId))) {
             currentAdgroupId = null;
@@ -5901,6 +6598,7 @@ async function refreshAdgroups(force=false) {
         checkedAdgroupIds.clear();
         renderMasterList(); updateSelectOptions();
     } catch(err) {
+        if(String(currentCustomerId || '') !== requestCustomerId || String(currentCampaignId || '') !== requestCampaignId) return;
         adgroups = [];
         currentAdgroupId = null;
         checkedAdgroupIds.clear();
@@ -5912,12 +6610,15 @@ async function refreshAdgroups(force=false) {
 
 async function loadChannels(force=false) {
     const c = ensureReady(); if(!c) return;
+    const requestCustomerId = String(c.customer_id || '');
     if(force) clearReadApiCache();
     try {
         const payload = { ...c, force: !!force };
-        channels = force
+        const nextChannels = force
             ? await postJson('/get_biz_channels', payload, '비즈채널 로딩...')
             : await fetchJsonCached('/get_biz_channels', payload, { loadingText:'비즈채널 로딩...', ttlMs:LIST_API_CACHE_TTL_MS });
+        if(String(currentCustomerId || '') !== requestCustomerId) return;
+        channels = Array.isArray(nextChannels) ? nextChannels : [];
         const html = ['<option value="">선택 안 함</option>'].concat(channels.map(x => `<option value="${escapeAttr(x.id)}">${escapeHtml(x.name)}</option>`)).join('');
         const el = document.getElementById('new_biz_channel');
         if(el && el.innerHTML !== html) el.innerHTML = html;
@@ -6654,6 +7355,75 @@ function getAdIdentifier(ad) {
     return String(ad?.nccAdId || ad?.id || ad?.ownerId || '').trim();
 }
 
+function getAdBody(ad) {
+    const body = ad?.ad;
+    if (body && typeof body === 'object' && !Array.isArray(body)) return body;
+    if (typeof body === 'string' && body.trim().startsWith('{')) {
+        try {
+            const parsed = JSON.parse(body);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+        } catch(e) {}
+    }
+    return {};
+}
+
+function firstTextValue(...values) {
+    for (const value of values) {
+        const text = String(value ?? '').trim();
+        if (text) return text;
+    }
+    return '';
+}
+
+function getAdHeadline(ad) {
+    const body = getAdBody(ad);
+    return firstTextValue(
+        ad?.headline,
+        body?.headline,
+        ad?.title,
+        body?.title,
+        ad?.productName,
+        body?.productName,
+        ad?.name,
+        body?.name,
+        ad?.adName
+    );
+}
+
+function getAdDescription(ad) {
+    const body = getAdBody(ad);
+    return firstTextValue(
+        ad?.description,
+        body?.description,
+        ad?.desc,
+        body?.desc,
+        ad?.description1,
+        body?.description1,
+        ad?.description2,
+        body?.description2,
+        body?.longDescription
+    );
+}
+
+function getAdFinalUrl(ad, device='pc') {
+    const body = getAdBody(ad);
+    const nested = device === 'mobile' ? body?.mobile : body?.pc;
+    return firstTextValue(
+        device === 'mobile' ? ad?.mobileFinalUrl : ad?.pcFinalUrl,
+        nested?.final,
+        nested?.finalUrl,
+        device === 'mobile' ? ad?.mobileUrl : '',
+        ad?.finalUrl
+    );
+}
+
+function summarizeAd(ad) {
+    const headline = getAdHeadline(ad);
+    const description = getAdDescription(ad);
+    if (headline && description) return `${headline} / ${description}`;
+    return headline || description || firstTextValue(ad?.summary, JSON.stringify(getAdBody(ad)).slice(0, 60));
+}
+
 function summarizeExtension(ext) {
     const v = ext?.adExtension;
     if (Array.isArray(v)) return v.map(x => x?.name).filter(Boolean).join(', ');
@@ -6787,13 +7557,56 @@ function renderAccountAdsPreview() {
         {k:'adgroupName', l:'광고그룹명'},
         {k:'type', l:'소재유형'},
         {k:'status', l:'상태'},
-        {k:'summary', l:'요약'},
+        {k:'headline', l:'소재 제목', f:(v,r)=>firstTextValue(v, getAdHeadline(r))},
+        {k:'description', l:'소재 설명', f:(v,r)=>firstTextValue(v, getAdDescription(r))},
+        {k:'pcFinalUrl', l:'PC URL', f:(v,r)=>firstTextValue(v, getAdFinalUrl(r, 'pc'))},
+        {k:'mobileFinalUrl', l:'MO URL', f:(v,r)=>firstTextValue(v, getAdFinalUrl(r, 'mobile'))},
         {k:'effectiveBidAmt', l:'적용입찰가', f:(v)=>v ? num(v) : ''},
         {k:'adBidAmt', l:'소재입찰가', f:(v)=>v ? num(v) : ''},
         {k:'adUseGroupBidAmt', l:'그룹입찰가사용'},
         {k:'adgroupBidAmt', l:'광고그룹입찰가', f:(v)=>v ? num(v) : ''},
         {k:'adId', l:'소재 ID'},
     ], rows, '아직 조회된 소재가 없습니다.');
+}
+
+function getExtensionTypeLabelForExport(value) {
+    const raw = String(value || '').trim();
+    const labels = {
+        ALL: '전체',
+        HEADLINE: '추가 제목',
+        SUB_LINKS: '서브링크',
+        IMAGE_SUB_LINKS: '이미지 서브링크',
+        DESCRIPTION: '추가 설명문구',
+        DESCRIPTION_EXTRA: '설명 확장문구',
+        WEBSITE_INFO: '웹사이트 정보',
+        POWER_LINK_IMAGE: '파워링크 이미지',
+        PHONE: '전화번호',
+        LOCATION: '위치정보',
+        PROMOTION: '프로모션',
+        PRICE_LINKS: '가격링크',
+        SHOPPING_EXTRA: '쇼핑상품부가정보',
+    };
+    return labels[raw.toUpperCase()] || raw || '전체';
+}
+
+function getAccountExtensionExportType() {
+    const el = document.getElementById('account_ext_export_type');
+    return String(el?.value || 'ALL').trim() || 'ALL';
+}
+
+function splitImageIdsForDisplay(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return [];
+    const seen = new Set();
+    const ids = [];
+    raw.replace(/\n/g, ',').replace(/;/g, ',').split(',').forEach(part => {
+        const text = String(part || '').trim();
+        if (text && !seen.has(text)) {
+            seen.add(text);
+            ids.push(text);
+        }
+    });
+    return ids;
 }
 
 function renderAccountExtensionsPreview() {
@@ -6804,11 +7617,15 @@ function renderAccountExtensionsPreview() {
         {k:'campaignName', l:'캠페인명'},
         {k:'adgroupName', l:'광고그룹명'},
         {k:'ownerScope', l:'적용대상'},
-        {k:'type', l:'확장유형'},
+        {k:'type', l:'확장유형', f:(v)=>getExtensionTypeLabelForExport(v)},
         {k:'status', l:'상태'},
         {k:'summary', l:'요약'},
         {k:'adExtensionId', l:'확장소재 ID', f:(v,r)=>v || r?.nccAdExtensionId || r?.id || ''},
-        {k:'imageId', l:'이미지 ID'},
+        {k:'imageId', l:'이미지 ID 수', f:(v)=> {
+            const ids = splitImageIdsForDisplay(v);
+            return ids.length ? `${ids.length}개` : '';
+        }},
+        {k:'imageId', l:'이미지 ID', f:(v)=>splitImageIdsForDisplay(v).join(', ')},
         {k:'ownerId', l:'owner ID'},
     ], rows, '아직 조회된 확장소재가 없습니다.');
 }
@@ -6887,7 +7704,11 @@ async function downloadAccountAdsExcel() {
 
 async function downloadAccountExtensionsExcel() {
     const payload = getAssetLookupPayload(); if(!payload) return;
-    try { await downloadPostFile('/export_account_extensions_excel', payload, '확장소재 엑셀 생성 중...', 'account_extensions.xlsx'); }
+    const extensionType = getAccountExtensionExportType();
+    payload.extension_type = extensionType;
+    const label = getExtensionTypeLabelForExport(extensionType);
+    const fallback = extensionType === 'ALL' ? 'account_extensions.xlsx' : `account_extensions_${extensionType.toLowerCase()}.xlsx`;
+    try { await downloadPostFile('/export_account_extensions_excel', payload, `확장소재 엑셀 생성 중... (${label})`, fallback); }
     catch(err) { showToast(`확장소재 엑셀 실패: ${err.message}`, 'error'); }
 }
 
@@ -6968,7 +7789,13 @@ function renderAdgroupDetailTables() {
         truncated: detailKeywordMeta.truncated,
         showLoadFull: detailKeywordMeta.truncated
     });
-    renderTable('table_ads', [{k:'type', l:'유형', f:v=>(v==='TEXT_45'?'기본소재':String(v||'').includes('SHOPPING')?'쇼핑소재':v)}, {k:'status', l:'상태', f:(v,r)=>getEntityStatusLabel(r)}, {k:'ad', l:'요약', f:v=>v?.headline || v?.productName || JSON.stringify(v).slice(0,30)}], getFilteredDetailAssetRows('ads'), 'ad', 'nccAdId', {stateKey:'ads', label:'소재'});
+    renderTable('table_ads', [
+        {k:'type', l:'유형', f:v=>(v==='TEXT_45'?'기본소재':String(v||'').includes('SHOPPING')?'쇼핑소재':v)},
+        {k:'status', l:'상태', f:(v,r)=>getEntityStatusLabel(r)},
+        {k:'ad', l:'소재 제목', f:(v,r)=>getAdHeadline(r)},
+        {k:'ad', l:'소재 설명', f:(v,r)=>getAdDescription(r)},
+        {k:'ad', l:'요약', f:(v,r)=>summarizeAd(r)}
+    ], getFilteredDetailAssetRows('ads'), 'ad', 'nccAdId', {stateKey:'ads', label:'소재'});
     renderExtensionTable();
     renderTable('table_negatives', [{k:'keyword', l:'제외키워드', f:(v,r)=>v||r.restrictedKeyword}, {k:'matchType', l:'유형', f:(v,r)=>v||r.type||r.restrictType}], getFilteredDetailAssetRows('negatives'), 'restricted_keyword', 'keyword', {stateKey:'negatives', label:'제외키워드'});
     updateAllDetailAssetSearchStatuses();
@@ -7751,6 +8578,45 @@ function getValidScheduleBlocks() {
         days: Array.isArray(block.days) ? block.days.map(Number).filter(v => Number.isInteger(v) && v >= 1 && v <= 7) : [],
     })).filter(block => Number.isInteger(block.startHour) && Number.isInteger(block.endHour) && Number.isInteger(block.bidWeight) && block.startHour >= 0 && block.startHour <= 23 && block.endHour >= 1 && block.endHour <= 24 && block.endHour > block.startHour && block.bidWeight >= 10 && block.bidWeight <= 500);
 }
+function getSelectedScheduleHourRanges() {
+    const selected = Array.from(selectedScheduleHours || [])
+        .map(Number)
+        .filter(v => Number.isInteger(v) && v >= 0 && v <= 23)
+        .sort((a,b)=>a-b);
+    if(!selected.length) return [];
+    const ranges = [];
+    let start = selected[0];
+    let prev = selected[0];
+    const pushRange = (s, p) => {
+        // 회귀 방지: 빠른 선택 칩은 "마지막 선택 시각 = 종료 시각"으로 해석한다.
+        // 예) 00·01·02·03 선택 => 00~03, 07~23 선택 => 07~24.
+        let end = p === 23 ? 24 : p;
+        if(s === p || end <= s) end = Math.min(24, s + 1);
+        if(end > s) ranges.push({ startHour: s, endHour: end });
+    };
+    for(const h of selected.slice(1)) {
+        if(h === prev + 1) {
+            prev = h;
+            continue;
+        }
+        pushRange(start, prev);
+        start = prev = h;
+    }
+    pushRange(start, prev);
+    return ranges;
+}
+function getSchedulePayloadBlocks() {
+    const explicitBlocks = getValidScheduleBlocks();
+    if(explicitBlocks.length) return explicitBlocks;
+    const bidWeight = Number(document.getElementById('schedule_bid_weight')?.value || 100);
+    return getSelectedScheduleHourRanges().map(range => ({
+        startHour: range.startHour,
+        endHour: range.endHour,
+        bidWeight,
+        days: [],
+    })).filter(block => block.endHour > block.startHour && block.bidWeight >= 10 && block.bidWeight <= 500);
+}
+
 function setScheduleActionMode(mode) {
     const hidden = document.getElementById('schedule_action_mode');
     if(hidden) hidden.value = mode;
@@ -7809,11 +8675,11 @@ async function saveScheduleBySelection() {
     const targetType = document.getElementById('schedule_target_type').value;
     const actionMode = document.getElementById('schedule_action_mode')?.value || 'overwrite';
     const days = Array.from(selectedScheduleDays);
-    const hours = Array.from(selectedScheduleHours).sort((a,b)=>a-b);
-    const scheduleBlocksPayload = getValidScheduleBlocks();
+    const selectedHoursRaw = Array.from(selectedScheduleHours).sort((a,b)=>a-b);
+    const scheduleBlocksPayload = getSchedulePayloadBlocks();
     const hasBlockDays = scheduleBlocksPayload.some(block => Array.isArray(block.days) && block.days.length);
     if(!days.length && !hasBlockDays) { showToast('공통 요일이나 구간별 요일을 1개 이상 선택해주세요.', 'error'); return; }
-    if(!scheduleBlocksPayload.length && !hours.length) { showToast('시간을 1개 이상 선택하거나 구간을 추가해주세요.', 'error'); return; }
+    if(!scheduleBlocksPayload.length) { showToast('시간을 1개 이상 선택하거나 구간을 추가해주세요.', 'error'); return; }
 
     const ids = targetType === 'campaign' ? Array.from(checkedCampaignIds) : Array.from(checkedAdgroupIds);
     if(!ids.length) { showToast(`좌측 체크박스에서 ${targetType==='campaign'?'캠페인':'광고그룹'}을 선택해주세요.`, 'error'); return; }
@@ -7822,7 +8688,7 @@ async function saveScheduleBySelection() {
     const bodyKey = targetType === 'campaign' ? 'campaign_ids' : 'adgroup_ids';
 
     try {
-        const data = await postJson(url, { ...c, [bodyKey]: ids, days, hours, bidWeight: Number(document.getElementById('schedule_bid_weight').value), scheduleBlocks: scheduleBlocksPayload, actionMode }, '시간대 설정 중...');
+        const data = await postJson(url, { ...c, [bodyKey]: ids, days, hours: selectedHoursRaw, bidWeight: Number(document.getElementById('schedule_bid_weight').value), scheduleBlocks: scheduleBlocksPayload, actionMode }, '시간대 설정 중...');
         showToast(data.message, 'success');
     } catch(err) { showToast(err.message, 'error'); }
 }
@@ -9002,6 +9868,11 @@ async function executeBulkDelete() {
         const candidates = Array.from(document.querySelectorAll('#tab_create > .sub-tabs, #tab_bulk > .sub-tabs'));
         return candidates.find(visible) || candidates[0] || null;
     }
+    let stickyRefreshTimer = null;
+    let stickyRefreshRaf = null;
+    let workspaceScrollStopTimer = null;
+    let lastWorkspaceScrolled = null;
+
     function calibrateStickyOffsets() {
         const workspace = document.querySelector('.workspace-content');
         if (!workspace) return;
@@ -9023,7 +9894,22 @@ async function executeBulkDelete() {
         const workspace = document.querySelector('.workspace-content');
         if (!workspace || workspace.dataset.stickyScrollBound === '1') return;
         workspace.dataset.stickyScrollBound = '1';
-        const onScroll = () => workspace.classList.toggle('is-scrolled', workspace.scrollTop > 6);
+        const onScroll = () => {
+            if (stickyRefreshRaf) return;
+            stickyRefreshRaf = requestAnimationFrame(() => {
+                stickyRefreshRaf = null;
+                const scrolled = workspace.scrollTop > 6;
+                if (lastWorkspaceScrolled !== scrolled) {
+                    workspace.classList.toggle('is-scrolled', scrolled);
+                    lastWorkspaceScrolled = scrolled;
+                }
+                workspace.classList.add('is-user-scrolling');
+                if (workspaceScrollStopTimer) window.clearTimeout(workspaceScrollStopTimer);
+                workspaceScrollStopTimer = window.setTimeout(() => {
+                    workspace.classList.remove('is-user-scrolling');
+                }, 180);
+            });
+        };
         workspace.addEventListener('scroll', onScroll, { passive: true });
         onScroll();
         if (typeof syncWorkspaceSelectionMini === 'function') syncWorkspaceSelectionMini();
@@ -9034,20 +9920,30 @@ async function executeBulkDelete() {
         if (typeof window.enhanceOperationUiPolish === 'function') {
             try { window.enhanceOperationUiPolish(); } catch(e) {}
         }
+        if (typeof syncActiveAccountDom === 'function') {
+            try { syncActiveAccountDom(); } catch(e) {}
+        }
+    }
+    function scheduleRefreshUiPolish(delay = 120) {
+        if (stickyRefreshTimer) window.clearTimeout(stickyRefreshTimer);
+        stickyRefreshTimer = window.setTimeout(() => {
+            stickyRefreshTimer = null;
+            requestAnimationFrame(refreshUiPolish);
+        }, delay);
     }
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', refreshUiPolish);
     } else {
         refreshUiPolish();
     }
-    window.addEventListener('resize', () => requestAnimationFrame(refreshUiPolish));
+    window.addEventListener('resize', () => scheduleRefreshUiPolish(120));
     document.addEventListener('click', (event) => {
         if (event.target.closest('.tab-btn, .sidebar-toggle-btn, .master-toggle-btn, .mini-toolbar-btn')) {
-            setTimeout(refreshUiPolish, 40);
-            setTimeout(refreshUiPolish, 280);
+            scheduleRefreshUiPolish(60);
+            scheduleRefreshUiPolish(260);
         }
     }, true);
-    const observer = new MutationObserver(() => requestAnimationFrame(refreshUiPolish));
+    const observer = new MutationObserver(() => scheduleRefreshUiPolish(160));
     if (document.body) observer.observe(document.body, { attributes: true, childList: true, subtree: true, attributeFilter: ['class', 'style'] });
     window.refreshStickyUiStabilizer = refreshUiPolish;
 })();

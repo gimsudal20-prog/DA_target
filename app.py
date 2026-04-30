@@ -97,6 +97,8 @@ os.makedirs(LOG_DIR, exist_ok=True)
 ACTION_LOG_PATH = os.path.join(LOG_DIR, "action_history.jsonl")
 _ACTION_LOG_LOCK = threading.RLock()
 _ACTION_LOG_MAX_LINES = 2000
+_ACTION_LOG_DETAIL_LIMIT = 80
+_ACTION_LOG_DETAIL_TEXT_LIMIT = 260
 def _stable_cache_key(api_key: str, secret_key: str, cid: str, scope: str) -> str:
     return stable_cache_key(api_key, secret_key, cid, scope)
 def _cache_get(store: Dict[str, Tuple[float, Any]], key: str, ttl: float = _CACHE_TTL_SECONDS):
@@ -257,15 +259,265 @@ def _action_summary(path: str, payload: Dict[str, Any]) -> str:
         if isinstance(val, list) and val:
             return f"건수={len(val)}"
     return ""
-def _extract_response_message(response: Response) -> str:
+def _short_log_text(value: Any, limit: int = _ACTION_LOG_DETAIL_TEXT_LIMIT) -> str:
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    text = re.sub(r"\s+\n", "\n", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    if len(text) > limit:
+        return text[: max(0, limit - 1)].rstrip() + "…"
+    return text
+
+
+def _response_json_dict(response: Response) -> Dict[str, Any]:
     try:
         if response.is_json:
             data = response.get_json(silent=True) or {}
             if isinstance(data, dict):
-                return str(data.get('message') or data.get('error') or data.get('details') or '').strip()
+                return data
+    except Exception:
+        pass
+    return {}
+
+
+def _extract_response_message(response: Response, data: Dict[str, Any] | None = None) -> str:
+    try:
+        payload = data if isinstance(data, dict) else _response_json_dict(response)
+        if isinstance(payload, dict):
+            value = payload.get("message")
+            if value is None:
+                value = payload.get("error")
+            if value is None:
+                value = payload.get("details")
+            if isinstance(value, list):
+                return "\n".join(_short_log_text(x, 180) for x in value[:10] if str(x or "").strip())
+            return _short_log_text(value, 1200)
     except Exception:
         pass
     return ""
+
+
+def _log_detail_level(ok_value: Any, text: str = "") -> str:
+    if isinstance(ok_value, bool):
+        return "success" if ok_value else "fail"
+    lower = str(text or "").lower()
+    if any(token in lower for token in ("실패", "error", "exception", "오류", "불일치", "not support", "invalid", "fail")):
+        return "fail"
+    if any(token in lower for token in ("건너", "skip", "제외", "없음", "미지원", "유지", "생략")):
+        return "skip"
+    return "info"
+
+
+def _result_identifier(item: Dict[str, Any]) -> str:
+    if not isinstance(item, dict):
+        return ""
+    candidates = [
+        "campaign_name", "adgroup_name", "keyword", "name", "title", "headline",
+        "campaign_id", "adgroup_id", "nccCampaignId", "nccAdgroupId",
+        "nccKeywordId", "keyword_id", "nccAdId", "ad_id",
+        "adExtensionId", "ad_extension_id", "ownerId", "id", "target", "label",
+    ]
+    for key in candidates:
+        value = item.get(key)
+        if value is not None and str(value).strip():
+            return _short_log_text(value, 90)
+    return ""
+
+
+def _result_detail_text(item: Dict[str, Any]) -> str:
+    if not isinstance(item, dict):
+        return _short_log_text(item)
+    for key in ("detail", "details", "message", "error", "reason", "result", "statusReason", "step"):
+        value = item.get(key)
+        if value is None or value == "":
+            continue
+        if isinstance(value, list):
+            return " / ".join(_short_log_text(v, 120) for v in value[:4] if str(v or "").strip())
+        if isinstance(value, dict):
+            return _short_log_text(json.dumps(value, ensure_ascii=False), 200)
+        return _short_log_text(value, 200)
+    return ""
+
+
+def _make_log_detail(level: str, target: str, detail: str, source: str = "") -> Dict[str, str]:
+    return {
+        "level": level if level in {"success", "fail", "skip", "warning", "info"} else "info",
+        "target": _short_log_text(target, 120),
+        "detail": _short_log_text(detail, _ACTION_LOG_DETAIL_TEXT_LIMIT),
+        "source": _short_log_text(source, 40),
+    }
+
+
+def _append_log_detail(items: List[Dict[str, str]], seen: set, detail: Dict[str, str]) -> None:
+    if len(items) >= _ACTION_LOG_DETAIL_LIMIT:
+        return
+    key = (detail.get("level", ""), detail.get("target", ""), detail.get("detail", ""))
+    if key in seen:
+        return
+    seen.add(key)
+    items.append(detail)
+
+
+def _extract_count_value(data: Dict[str, Any], *keys: str) -> Optional[int]:
+    for key in keys:
+        value = data.get(key)
+        if value is None:
+            continue
+        try:
+            return int(value)
+        except Exception:
+            continue
+    return None
+
+
+def _extract_action_log_counts(data: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
+    results = data.get("results")
+    result_items = results if isinstance(results, list) else []
+
+    success = _extract_count_value(data, "success", "success_count", "updated_count", "created_count", "deleted_count")
+    fail = _extract_count_value(data, "fail", "fail_count", "failed_count", "error_count")
+    skipped = _extract_count_value(data, "skipped", "skipped_count", "skip_count", "unchanged", "skipped_non_shopping")
+    total = _extract_count_value(data, "total", "total_count", "matched_count", "estimated")
+
+    if result_items:
+        if success is None:
+            success = sum(1 for item in result_items if isinstance(item, dict) and item.get("ok") is True)
+        if fail is None:
+            fail = sum(1 for item in result_items if isinstance(item, dict) and item.get("ok") is False)
+        if total is None:
+            total = len(result_items)
+
+    if total is None:
+        for key in ("rows", "ids", "entity_ids", "source_ids", "campaign_ids", "adgroup_ids", "parent_ids"):
+            value = payload.get(key)
+            if isinstance(value, list) and value:
+                total = len(value)
+                break
+
+    return {
+        "total": total,
+        "success": success,
+        "fail": fail,
+        "skipped": skipped,
+    }
+
+
+def _iter_message_detail_lines(message: str) -> Iterable[str]:
+    for raw_line in str(message or "").splitlines():
+        line = raw_line.strip()
+        if not line or len(line) < 4:
+            continue
+        # 첫 줄의 성공/실패 요약은 이미 별도 count로 보여주므로 세부항목 후보에서 제외한다.
+        if any(token in line for token in ("실패", "오류", "조회 실패", "변경 실패", "생성 실패", "삭제 실패", "건너뜀", "제외", "미지원", "불일치", "Not support")):
+            yield line
+
+
+def _extract_action_log_details(data: Dict[str, Any], message: str) -> List[Dict[str, str]]:
+    items: List[Dict[str, str]] = []
+    seen: set = set()
+
+    result_items = data.get("results")
+    if isinstance(result_items, list):
+        prioritized: List[Tuple[int, Dict[str, Any]]] = []
+        for item in result_items:
+            if not isinstance(item, dict):
+                continue
+            detail_text = _result_detail_text(item)
+            target = _result_identifier(item)
+            level = _log_detail_level(item.get("ok"), f"{target} {detail_text}")
+            priority = 0 if level == "fail" else (1 if level in {"skip", "warning"} else 2)
+            prioritized.append((priority, item))
+        for _, item in sorted(prioritized, key=lambda x: x[0]):
+            detail_text = _result_detail_text(item)
+            target = _result_identifier(item)
+            if not detail_text and not target:
+                continue
+            level = _log_detail_level(item.get("ok"), f"{target} {detail_text}")
+            if level == "success" and len([x for x in items if x.get("level") == "success"]) >= 8:
+                continue
+            _append_log_detail(items, seen, _make_log_detail(level, target, detail_text or ("완료" if level == "success" else ""), "results"))
+
+    for source_key, default_level in [
+        ("details", "info"),
+        ("errors", "fail"),
+        ("warnings", "warning"),
+        ("failed_details", "fail"),
+        ("err_details", "fail"),
+    ]:
+        value = data.get(source_key)
+        if isinstance(value, list):
+            for raw in value:
+                text = _short_log_text(raw)
+                if not text:
+                    continue
+                level = "fail" if default_level == "fail" else (_log_detail_level(None, text) if default_level == "info" else default_level)
+                _append_log_detail(items, seen, _make_log_detail(level, "", text, source_key))
+        elif isinstance(value, str) and value.strip():
+            level = "fail" if default_level == "fail" else (_log_detail_level(None, value) if default_level == "info" else default_level)
+            _append_log_detail(items, seen, _make_log_detail(level, "", value, source_key))
+
+    for line in _iter_message_detail_lines(message):
+        level = _log_detail_level(None, line)
+        _append_log_detail(items, seen, _make_log_detail(level, "", line, "message"))
+
+    order = {"fail": 0, "warning": 1, "skip": 2, "info": 3, "success": 4}
+    return sorted(items, key=lambda x: order.get(x.get("level", "info"), 9))[:_ACTION_LOG_DETAIL_LIMIT]
+
+
+def _resolve_action_log_status(http_status: int, counts: Dict[str, Any]) -> str:
+    if not (200 <= int(http_status) < 400):
+        return "error"
+    fail = counts.get("fail")
+    success = counts.get("success")
+    try:
+        fail_n = int(fail) if fail is not None else 0
+    except Exception:
+        fail_n = 0
+    try:
+        success_n = int(success) if success is not None else 0
+    except Exception:
+        success_n = 0
+    if fail_n > 0 and success_n > 0:
+        return "partial"
+    if fail_n > 0 and success_n <= 0:
+        return "error"
+    return "success"
+
+
+def _format_action_log_counts(counts: Dict[str, Any]) -> str:
+    pieces = []
+    for label, key in [("대상", "total"), ("성공", "success"), ("실패", "fail"), ("건너뜀", "skipped")]:
+        value = counts.get(key)
+        if value is None:
+            continue
+        try:
+            n = int(value)
+        except Exception:
+            continue
+        pieces.append(f"{label} {n}건")
+    return " / ".join(pieces)
+
+def _format_action_log_details_for_export(row: Dict[str, Any], limit: int = 40) -> str:
+    items = row.get("detail_items") if isinstance(row, dict) else []
+    if not isinstance(items, list):
+        return ""
+    lines = []
+    level_label = {"fail": "실패", "warning": "경고", "skip": "건너뜀", "success": "성공", "info": "정보"}
+    for item in items[:limit]:
+        if not isinstance(item, dict):
+            continue
+        level = level_label.get(str(item.get("level") or "info"), "정보")
+        target = str(item.get("target") or "").strip()
+        detail = str(item.get("detail") or "").strip()
+        if target and detail:
+            lines.append(f"[{level}] {target} - {detail}")
+        elif target:
+            lines.append(f"[{level}] {target}")
+        elif detail:
+            lines.append(f"[{level}] {detail}")
+    if row.get("detail_truncated"):
+        lines.append("… 세부내역 일부 생략")
+    return "\n".join(lines)
+
 def _prune_action_log_file():
     try:
         if not os.path.exists(ACTION_LOG_PATH):
@@ -308,8 +560,15 @@ def _write_action_log_from_request(response: Response) -> None:
         return
     try:
         payload = _safe_json_body()
-        status = 'success' if 200 <= int(response.status_code) < 400 else 'error'
+        response_data = _response_json_dict(response)
+        counts = _extract_action_log_counts(response_data, payload)
+        status = _resolve_action_log_status(int(response.status_code), counts)
         customer_id = str(payload.get('customer_id') or payload.get('customerId') or '').strip()
+        message = _extract_response_message(response, response_data)
+        count_summary = _format_action_log_counts(counts)
+        base_summary = _action_summary(path, payload)
+        summary = " | ".join([x for x in [base_summary, count_summary] if x])
+        detail_items = _extract_action_log_details(response_data, message)
         entry = {
             'ts': time.strftime('%Y-%m-%d %H:%M:%S'),
             'path': path,
@@ -317,8 +576,15 @@ def _write_action_log_from_request(response: Response) -> None:
             'status': status,
             'http_status': int(response.status_code),
             'customer_id': customer_id,
-            'summary': _action_summary(path, payload),
-            'message': _extract_response_message(response),
+            'summary': summary,
+            'message': message,
+            'total': counts.get('total'),
+            'success': counts.get('success'),
+            'fail': counts.get('fail'),
+            'skipped': counts.get('skipped'),
+            'detail_items': detail_items,
+            'detail_count': len(detail_items),
+            'detail_truncated': len(detail_items) >= _ACTION_LOG_DETAIL_LIMIT,
         }
         _append_action_log(entry)
     except Exception:
@@ -2020,11 +2286,118 @@ def _collect_asset_scope_adgroups(api_key: str, secret_key: str, cid: str, scope
     if not contexts and warnings:
         return _make_fake_response(400, "\n".join(warnings[:10])), [], warnings, target_campaigns
     return _make_fake_response(200, "OK"), contexts, warnings, target_campaigns
+def _deep_first_text_by_keys(obj: Any, keys: List[str], *, max_depth: int = 5) -> str:
+    targets = {str(k or "").strip().lower() for k in keys if str(k or "").strip()}
+    if not targets:
+        return ""
+    queue: List[Tuple[Any, int]] = [(obj, 0)]
+    seen: set[int] = set()
+    while queue:
+        cur, depth = queue.pop(0)
+        if cur is None:
+            continue
+        cur_id = id(cur)
+        if isinstance(cur, (dict, list)):
+            if cur_id in seen:
+                continue
+            seen.add(cur_id)
+        if isinstance(cur, dict):
+            for key, value in cur.items():
+                key_norm = str(key or "").strip().lower()
+                if key_norm in targets:
+                    if isinstance(value, (str, int, float)):
+                        text = str(value or "").strip()
+                        if text:
+                            return text
+                    if isinstance(value, dict):
+                        for nested_key in ("text", "value", "title", "name", "label"):
+                            text = str(value.get(nested_key) or "").strip()
+                            if text:
+                                return text
+            if depth < max_depth:
+                for value in cur.values():
+                    if isinstance(value, (dict, list)):
+                        queue.append((value, depth + 1))
+                    elif isinstance(value, str):
+                        maybe = _parse_json_obj_if_needed(value)
+                        if maybe:
+                            queue.append((maybe, depth + 1))
+        elif isinstance(cur, list) and depth < max_depth:
+            for value in cur:
+                if isinstance(value, (dict, list)):
+                    queue.append((value, depth + 1))
+                elif isinstance(value, str):
+                    maybe = _parse_json_obj_if_needed(value)
+                    if maybe:
+                        queue.append((maybe, depth + 1))
+    return ""
+
+
+def _extract_lookup_ad_text_fields(ad_item: Dict[str, Any] | None) -> Dict[str, Any]:
+    """Extract title/description/url fields for ad lookup preview and Excel export."""
+    item = ad_item or {}
+    ad_obj = item.get("ad") if isinstance(item.get("ad"), dict) else _parse_json_obj_if_needed(item.get("ad"))
+    pc_obj = ad_obj.get("pc") if isinstance(ad_obj.get("pc"), dict) else _parse_json_obj_if_needed(ad_obj.get("pc"))
+    mobile_obj = ad_obj.get("mobile") if isinstance(ad_obj.get("mobile"), dict) else _parse_json_obj_if_needed(ad_obj.get("mobile"))
+    headline = str(_first_non_empty(
+        ad_obj.get("headline"), ad_obj.get("title"), ad_obj.get("productName"), ad_obj.get("name"),
+        pc_obj.get("headline"), pc_obj.get("title"), mobile_obj.get("headline"), mobile_obj.get("title"),
+        item.get("headline"), item.get("title"), item.get("productName"), item.get("name"), item.get("adName"),
+    ) or "").strip()
+    if not headline:
+        headline = _deep_first_text_by_keys(item, ["headline", "title", "productName", "adName", "name"])
+
+    description = str(_first_non_empty(
+        ad_obj.get("description"), ad_obj.get("desc"), ad_obj.get("description1"), ad_obj.get("description2"), ad_obj.get("longDescription"),
+        pc_obj.get("description"), pc_obj.get("desc"), pc_obj.get("description1"), pc_obj.get("description2"),
+        mobile_obj.get("description"), mobile_obj.get("desc"), mobile_obj.get("description1"), mobile_obj.get("description2"),
+        item.get("description"), item.get("desc"), item.get("description1"), item.get("description2"), item.get("longDescription"),
+    ) or "").strip()
+    if not description:
+        description = _deep_first_text_by_keys(item, ["description", "desc", "description1", "description2", "longDescription", "adDescription"])
+
+    product_name = str(_first_non_empty(ad_obj.get("productName"), item.get("productName"), item.get("mallProductName")) or "").strip()
+    if not product_name:
+        product_name = _deep_first_text_by_keys(item, ["productName", "mallProductName"])
+
+    pc_final_url = str(_first_non_empty(
+        pc_obj.get("final"), pc_obj.get("finalUrl"), pc_obj.get("pcFinalUrl"),
+        ad_obj.get("pcFinalUrl"), ad_obj.get("finalUrl"), item.get("pcFinalUrl"), item.get("finalUrl"),
+    ) or "").strip()
+    if not pc_final_url:
+        pc_final_url = _deep_first_text_by_keys(item, ["pcFinalUrl", "finalUrl", "landingUrl", "url"])
+
+    mobile_final_url = str(_first_non_empty(
+        mobile_obj.get("final"), mobile_obj.get("finalUrl"), mobile_obj.get("mobileFinalUrl"),
+        ad_obj.get("mobileFinalUrl"), item.get("mobileFinalUrl"), item.get("mobileUrl"), pc_final_url,
+    ) or "").strip()
+    if not mobile_final_url:
+        mobile_final_url = _deep_first_text_by_keys(item, ["mobileFinalUrl", "mobileUrl", "mobileLandingUrl"]) or pc_final_url
+
+    reference_key = str(_first_non_empty(item.get("referenceKey"), ad_obj.get("referenceKey"), item.get("referenceData")) or "").strip()
+    return {
+        "headline": headline,
+        "description": description,
+        "productName": product_name,
+        "pcFinalUrl": pc_final_url,
+        "mobileFinalUrl": mobile_final_url,
+        "referenceKey": reference_key,
+    }
+
+
 def _summarize_lookup_ad(ad_item: Dict[str, Any] | None) -> str:
     ad_item = ad_item or {}
-    ad_obj = ad_item.get("ad") if isinstance(ad_item.get("ad"), dict) else {}
+    text_fields = _extract_lookup_ad_text_fields(ad_item)
+    headline = str(text_fields.get("headline") or text_fields.get("productName") or "").strip()
+    description = str(text_fields.get("description") or "").strip()
+    if headline and description:
+        return f"{headline} / {description}"
+    if headline:
+        return headline
+    if description:
+        return description
+    ad_obj = ad_item.get("ad") if isinstance(ad_item.get("ad"), dict) else _parse_json_obj_if_needed(ad_item.get("ad"))
     pieces = [
-        str(ad_obj.get("headline") or "").strip(),
         str(ad_obj.get("productName") or "").strip(),
         str(ad_obj.get("name") or "").strip(),
         str(ad_obj.get("title") or "").strip(),
@@ -2035,6 +2408,8 @@ def _summarize_lookup_ad(ad_item: Dict[str, Any] | None) -> str:
         if value:
             return value
     return json.dumps(ad_item, ensure_ascii=False)[:120]
+
+
 def _lookup_bid_display_value(value: Any) -> Any:
     try:
         bid = int(float(value))
@@ -2112,6 +2487,7 @@ def _collect_lookup_ads_for_contexts(api_key: str, secret_key: str, cid: str, co
                 ad = ad if isinstance(ad, dict) else {}
                 ad_id = str(ad.get("nccAdId") or ad.get("id") or "").strip()
                 bid_fields = _lookup_ad_bid_fields(ad, ctx.get("adgroup_bid"))
+                text_fields = _extract_lookup_ad_text_fields(ad)
                 rows.append({
                     "campaignId": str(ctx.get("campaign_id") or ""),
                     "campaignName": str(ctx.get("campaign_name") or ""),
@@ -2122,6 +2498,12 @@ def _collect_lookup_ads_for_contexts(api_key: str, secret_key: str, cid: str, co
                     "adId": ad_id,
                     "type": str(ad.get("type") or ad.get("adType") or ""),
                     "status": "ON" if _extract_enabled_from_entity(ad) is not False else "OFF",
+                    "headline": text_fields.get("headline") or "",
+                    "description": text_fields.get("description") or "",
+                    "productName": text_fields.get("productName") or "",
+                    "pcFinalUrl": text_fields.get("pcFinalUrl") or "",
+                    "mobileFinalUrl": text_fields.get("mobileFinalUrl") or "",
+                    "referenceKey": text_fields.get("referenceKey") or "",
                     "summary": _summarize_lookup_ad(ad),
                     **bid_fields,
                 })
@@ -2223,7 +2605,96 @@ def _collect_lookup_extensions_for_contexts(api_key: str, secret_key: str, cid: 
                 })
     rows.sort(key=lambda x: (x.get("campaignName") or "", x.get("adgroupName") or "", x.get("ownerScope") or "", x.get("type") or "", x.get("summary") or ""))
     return rows, warnings
+
+def _split_lookup_ad_export_summary(summary: Any) -> Tuple[str, str]:
+    text = str(summary or "").strip()
+    if not text:
+        return "", ""
+    for sep in [" / ", "\n", " | ", " - "]:
+        if sep in text:
+            left, right = text.split(sep, 1)
+            return left.strip(), right.strip()
+    return text, ""
+
+
+def _prepare_asset_lookup_ad_export_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    prepared: List[Dict[str, Any]] = []
+    extractor = globals().get("_extract_lookup_ad_text_fields")
+    for row in rows or []:
+        item = dict(row or {})
+        nested_ad = item.get("ad") if isinstance(item.get("ad"), dict) else None
+        nested_fields: Dict[str, Any] = {}
+        if callable(extractor) and nested_ad:
+            try:
+                nested_fields = extractor(nested_ad) or {}
+            except Exception:
+                nested_fields = {}
+        fallback_title, fallback_desc = _split_lookup_ad_export_summary(item.get("summary"))
+        headline = str(
+            item.get("headline")
+            or item.get("title")
+            or item.get("productName")
+            or nested_fields.get("headline")
+            or nested_fields.get("productName")
+            or fallback_title
+            or ""
+        ).strip()
+        description = str(
+            item.get("description")
+            or item.get("desc")
+            or item.get("description1")
+            or item.get("description2")
+            or item.get("longDescription")
+            or nested_fields.get("description")
+            or fallback_desc
+            or ""
+        ).strip()
+        item["headline"] = headline
+        item["description"] = description
+        item["productName"] = str(item.get("productName") or nested_fields.get("productName") or "").strip()
+        item["pcFinalUrl"] = str(item.get("pcFinalUrl") or nested_fields.get("pcFinalUrl") or "").strip()
+        item["mobileFinalUrl"] = str(item.get("mobileFinalUrl") or nested_fields.get("mobileFinalUrl") or "").strip()
+        item["referenceKey"] = str(item.get("referenceKey") or nested_fields.get("referenceKey") or "").strip()
+        if not item.get("summary"):
+            item["summary"] = " / ".join([v for v in [headline, description] if v])
+        prepared.append(item)
+    return prepared
+
+
+def _ensure_asset_lookup_ad_export_columns(columns: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+    normalized = list(columns or [])
+    labels = [label for _, label in normalized]
+    keys = [key for key, _ in normalized]
+    looks_like_ad_export = "소재 ID" in labels or "adId" in keys
+    if not looks_like_ad_export:
+        return normalized
+    extra = []
+    if "headline" not in keys and "소재 제목" not in labels:
+        extra.append(("headline", "소재 제목"))
+    if "description" not in keys and "소재 설명" not in labels:
+        extra.append(("description", "소재 설명"))
+    if "productName" not in keys and "상품명" not in labels:
+        extra.append(("productName", "상품명"))
+    if "pcFinalUrl" not in keys and "PC 연결 URL" not in labels:
+        extra.append(("pcFinalUrl", "PC 연결 URL"))
+    if "mobileFinalUrl" not in keys and "모바일 연결 URL" not in labels:
+        extra.append(("mobileFinalUrl", "모바일 연결 URL"))
+    if not extra:
+        return normalized
+    insert_at = None
+    for idx, (key, label) in enumerate(normalized):
+        if key == "summary" or label == "요약":
+            insert_at = idx
+            break
+    if insert_at is None:
+        insert_at = min(len(normalized), 6)
+    return normalized[:insert_at] + extra + normalized[insert_at:]
+
 def _build_asset_lookup_workbook(rows: List[Dict[str, Any]], title: str, scope_label: str, columns: List[Tuple[str, str]]):
+    if "소재" in str(title or ""):
+        rows = _prepare_asset_lookup_ad_export_rows(rows)
+        columns = _ensure_asset_lookup_ad_export_columns(columns)
+
     def _format_lookup_excel_value(key: str, label: str, value: Any) -> Any:
         return format_asset_lookup_excel_value(
             key,
@@ -2242,8 +2713,12 @@ def _build_asset_lookup_workbook(rows: List[Dict[str, Any]], title: str, scope_l
             for key, label in columns
         ])
     width_by_key = {
-        "campaignType": 14, "campaignName": 22, "adgroupType": 16, "adgroupName": 22, "summary": 36, "type": 18, "status": 10,
-        "effectiveBidAmt": 14, "adBidAmt": 14, "adUseGroupBidAmt": 16, "adgroupBidAmt": 16, "adId": 24, "adExtensionId": 24, "imageId": 28, "ownerId": 24, "campaignId": 20, "adgroupId": 22, "ownerScope": 12,
+        "campaignType": 14, "campaignName": 22, "adgroupType": 16, "adgroupName": 22,
+        "headline": 30, "description": 46, "productName": 30, "summary": 42, "type": 18, "status": 10,
+        "pcFinalUrl": 42, "mobileFinalUrl": 42, "referenceKey": 28,
+        "effectiveBidAmt": 14, "adBidAmt": 14, "adUseGroupBidAmt": 16, "adgroupBidAmt": 16, "adId": 24,
+        "adExtensionId": 24, "imageId": 34, "imageIdCount": 12, "imageIdDetail": 36,
+        "extensionTypeLabel": 18, "resolvedExtensionType": 18, "ownerId": 24, "campaignId": 20, "adgroupId": 22, "ownerScope": 12,
     }
     widths = {
         idx: width_by_key.get(key, max(12, min(40, len(label) + 4)))
@@ -2255,6 +2730,7 @@ def _build_asset_lookup_workbook(rows: List[Dict[str, Any]], title: str, scope_l
         metadata=[
             f"생성시각: {generated_at}",
             f"조회범위: {scope_label}",
+            *( ["컬럼버전: ad-export-title-description-v3"] if "소재" in str(title or "") else [] ),
         ],
         headers=headers,
         rows=data_rows,
@@ -5316,12 +5792,13 @@ def export_action_logs_excel():
 
         headers = [
             "번호", "일시", "상태", "HTTP상태", "작업", "광고주ID",
-            "요약", "메시지", "요청경로"
+            "대상", "성공", "실패", "건너뜀", "요약", "메시지", "세부내역", "요청경로"
         ]
         data_rows = []
+        status_label_map = {"error": "실패", "partial": "부분성공", "success": "성공"}
         for idx, row in enumerate(rows, 1):
             status_raw = str(row.get("status") or "").strip().lower()
-            status_label = "실패" if status_raw == "error" else "성공"
+            status_label = status_label_map.get(status_raw, "성공")
             data_rows.append([
                 idx,
                 row.get("ts") or "",
@@ -5329,14 +5806,20 @@ def export_action_logs_excel():
                 row.get("http_status") or "",
                 row.get("action") or "",
                 row.get("customer_id") or "",
+                row.get("total") if row.get("total") is not None else "",
+                row.get("success") if row.get("success") is not None else "",
+                row.get("fail") if row.get("fail") is not None else "",
+                row.get("skipped") if row.get("skipped") is not None else "",
                 row.get("summary") or "",
                 row.get("message") or "",
+                _format_action_log_details_for_export(row),
                 row.get("path") or "",
             ])
 
         widths = {
             "A": 8, "B": 20, "C": 10, "D": 12, "E": 24,
-            "F": 18, "G": 46, "H": 58, "I": 36,
+            "F": 18, "G": 10, "H": 10, "I": 10, "J": 10,
+            "K": 46, "L": 58, "M": 72, "N": 36,
         }
         wb = build_table_workbook(
             sheet_title="작업이력로그",
@@ -6940,13 +7423,18 @@ def update_budget():
     entity_type, entity_ids, budget = d.get("entity_type"), d.get("entity_ids", []), int(d.get("budget", 0))
     use_daily_budget = bool(d.get("use_daily_budget", budget > 0))
     results = {"success": 0, "fail": 0}
+    detail_rows: List[Dict[str, Any]] = []
+    entity_label = "캠페인" if entity_type == "campaign" else "광고그룹"
     for eid in entity_ids:
-        uri = f"/ncc/campaigns/{str(eid).strip()}" if entity_type == "campaign" else f"/ncc/adgroups/{str(eid).strip()}"
+        eid = str(eid).strip()
+        uri = f"/ncc/campaigns/{eid}" if entity_type == "campaign" else f"/ncc/adgroups/{eid}"
         r_get = _do_req("GET", api_key, secret_key, cid, uri)
         if r_get.status_code != 200:
             results["fail"] += 1
+            detail_rows.append({"ok": False, "id": eid, "target": f"{entity_label} {eid}", "detail": f"조회 실패: {r_get.text}"})
             continue
         obj = r_get.json()
+        target_name = str((obj or {}).get("name") or eid)
         obj["useDailyBudget"] = use_daily_budget
         obj["dailyBudget"] = budget if use_daily_budget else 0
         if "budget" in obj:
@@ -6954,9 +7442,18 @@ def update_budget():
         r_put = _do_req("PUT", api_key, secret_key, cid, uri, params={"fields": "budget"}, json_body=obj)
         if r_put.status_code == 200:
             results["success"] += 1
+            detail_rows.append({"ok": True, "id": eid, "name": target_name, "detail": f"예산 {budget:,}원 적용"})
         else:
             results["fail"] += 1
-    return jsonify({"ok": True, "message": f"총 {len(entity_ids)}개 예산 업데이트 성공: {results['success']}개 / 실패: {results['fail']}개"})
+            detail_rows.append({"ok": False, "id": eid, "name": target_name, "detail": f"변경 실패: {r_put.text}"})
+    return jsonify({
+        "ok": True,
+        "message": f"총 {len(entity_ids)}개 예산 업데이트 성공: {results['success']}개 / 실패: {results['fail']}개",
+        "total": len(entity_ids),
+        "success": results["success"],
+        "fail": results["fail"],
+        "results": detail_rows,
+    })
 def _normalize_schedule_days(values: Any) -> List[int]:
     out: List[int] = []
     if not isinstance(values, list):
@@ -9979,25 +10476,31 @@ def set_campaign_state():
         return jsonify({"error": "선택된 캠페인이 없습니다."}), 400
     success = fail = 0
     details: List[str] = []
+    detail_rows: List[Dict[str, Any]] = []
     child_success = child_fail = 0
     for camp_id in ids:
         camp_id = str(camp_id or "").strip()
         ok, detail = _set_user_lock_for_entity(api_key, secret_key, cid, "campaign", camp_id, enabled)
         if ok:
             success += 1
+            detail_rows.append({"ok": True, "target": f"캠페인 {camp_id}", "detail": "상태 변경 완료"})
         else:
             fail += 1
+            detail_rows.append({"ok": False, "target": f"캠페인 {camp_id}", "detail": detail})
             if detail and len(details) < 8:
                 details.append(f"[캠페인 {camp_id}] {detail}")
             continue
         if enabled:
             r_adg, rows = _fetch_adgroups(api_key, secret_key, cid, camp_id)
             if r_adg.status_code != 200:
+                detail_text = f"하위 광고그룹 조회 실패: {r_adg.text}"
+                detail_rows.append({"ok": False, "target": f"캠페인 {camp_id}", "detail": detail_text})
                 if len(details) < 8:
-                    details.append(f"[캠페인 {camp_id}] 하위 광고그룹 조회 실패: {r_adg.text}")
+                    details.append(f"[캠페인 {camp_id}] {detail_text}")
                 continue
             for row in rows:
                 adg_id = str(row.get("id") or row.get("nccAdgroupId") or "").strip()
+                adg_name = str(row.get("name") or adg_id)
                 if not adg_id:
                     continue
                 ok_child, child_detail = _set_user_lock_for_entity(api_key, secret_key, cid, "adgroup", adg_id, enabled)
@@ -10005,15 +10508,26 @@ def set_campaign_state():
                     child_success += 1
                 else:
                     child_fail += 1
+                    detail_rows.append({"ok": False, "target": f"광고그룹 {adg_name}", "detail": child_detail})
                     if child_detail and len(details) < 8:
-                        details.append(f"[광고그룹 {adg_id}] {child_detail}")
+                        details.append(f"[광고그룹 {adg_name}] {child_detail}")
     msg = f"캠페인 {'ON' if enabled else 'OFF'} 완료! (캠페인 성공: {success} / 실패: {fail})"
     if enabled:
         msg += f" · 하위 광고그룹 ON 반영: 성공 {child_success} / 실패 {child_fail}"
     if details:
         msg += "\n" + "\n".join(details)
     _cache_invalidate(d.get("api_key"), d.get("secret_key"), d.get("customer_id"))
-    return jsonify({"ok": True, "message": msg})
+    return jsonify({
+        "ok": True,
+        "message": msg,
+        "total": len(ids),
+        "success": success,
+        "fail": fail + child_fail,
+        "child_success": child_success,
+        "child_fail": child_fail,
+        "details": details,
+        "results": detail_rows,
+    })
 def delete_selected():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
