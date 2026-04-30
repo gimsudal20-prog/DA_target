@@ -4593,7 +4593,7 @@
                     <div class="card-title">시간대 및 가중치 일괄 설정</div>
                     <div class="form-group">
                         <label>적용 단위</label>
-                        <select id="schedule_target_type"><option value="adgroup">선택한 광고그룹에 적용</option><option value="campaign">선택한 캠페인 하위 광고그룹 전체 자동 적용</option></select>
+                        <select id="schedule_target_type"><option value="campaign" selected>선택한 캠페인 하위 광고그룹 전체 자동 적용</option><option value="adgroup">선택한 광고그룹에 적용</option></select>
                     </div>
                     <div class="form-group">
                         <label>적용 방식</label>
@@ -6461,6 +6461,7 @@ window.onload = async function() {
     toggleBudgetInput('campaign_budget_unlimited', 'campaign_budget_val');
     toggleBudgetInput('adgroup_budget_unlimited', 'adgroup_budget_val');
     syncCreateAdgroupForm();
+    setDefaultScheduleTargetType();
     initScheduleControls();
     document.addEventListener('pointerup', stopScheduleDrag);
     document.addEventListener('pointercancel', stopScheduleDrag);
@@ -8687,6 +8688,12 @@ function finishScheduleDrag(ev) {
     return true;
 }
 function selectAllScheduleHours(flag) { selectedScheduleHours = flag ? new Set(Array.from({length:24}, (_,i)=>i)) : new Set(); initScheduleControls(); }
+function setDefaultScheduleTargetType() {
+    // 시간대 설정의 기본 적용 단위는 캠페인입니다.
+    // 다른 패치에서 option 순서가 바뀌거나 브라우저가 이전 값을 복원해도 최초 진입 시 캠페인을 기본값으로 고정합니다.
+    const el = document.getElementById('schedule_target_type');
+    if(el && el.value !== 'campaign') el.value = 'campaign';
+}
 setScheduleActionMode('overwrite');
 
 async function saveScheduleBySelection() {
