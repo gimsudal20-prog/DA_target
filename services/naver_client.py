@@ -130,7 +130,17 @@ def request_naver_api(
                 continue
             return response
         except requests.exceptions.RequestException as exc:
-            last_err = str(exc)
+            # 일부 네트워크 예외는 str(exc)가 빈 문자열이라 프론트에
+            # "알 수 없는 오류"만 노출된다. 예외 타입/원인까지 남겨 후속 조치가 가능하게 한다.
+            parts: list[str] = [type(exc).__name__]
+            msg = str(exc).strip()
+            if msg:
+                parts.append(msg)
+            cause = getattr(exc, "__cause__", None) or getattr(exc, "__context__", None)
+            if cause:
+                cause_msg = str(cause).strip() or repr(cause)
+                parts.append(f"cause={type(cause).__name__}: {cause_msg}")
+            last_err = " | ".join(dict.fromkeys([p for p in parts if p]))
             time.sleep(1.25)
 
     return make_fake_response(500, f"네트워크 통신 실패: {last_err or '알 수 없는 오류'}")

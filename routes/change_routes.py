@@ -20,6 +20,8 @@ def create_change_blueprint(service):
     post_routes = [
         ("/rename_adgroups_bulk", "rename_adgroups_bulk"),
         ("/update_media", "update_media"),
+        ("/add_restricted_media_ids", "add_restricted_media_ids"),
+        ("/copy_restricted_media_settings", "copy_restricted_media_settings"),
         ("/update_powerlink_device_bid_weights", "update_powerlink_device_bid_weights"),
         ("/apply_target_settings_bulk", "apply_target_settings_bulk"),
         ("/update_budget", "update_budget"),
@@ -36,9 +38,42 @@ def create_change_blueprint(service):
         ("/update_keyword_bids_avg_position", "update_keyword_bids_avg_position"),
         ("/set_searched_powerlink_keyword_state", "set_searched_powerlink_keyword_state"),
         ("/set_campaign_state", "set_campaign_state"),
+        ("/set_ads_state_by_scope", "set_ads_state_by_scope"),
+        ("/set_ad_extensions_state_by_scope", "set_ad_extensions_state_by_scope"),
+        ("/set_asset_state_by_ids", "set_asset_state_by_ids"),
     ]
+    # Register the main POST routes.
+    # Some older local builds or cached HTML can call the restricted-media URLs
+    # with a trailing slash or a short legacy path; keep those aliases mapped to
+    # the same service so the UI does not fall into Flask's generic 404 page.
+    trailing_slash_aliases = {
+        "/add_restricted_media_ids",
+        "/copy_restricted_media_settings",
+    }
     for rule, name in post_routes:
-        bp.add_url_rule(rule, endpoint=name, view_func=_view(service, name), methods=["POST"])
+        handler = _view(service, name)
+        bp.add_url_rule(rule, endpoint=name, view_func=handler, methods=["POST"])
+        if rule in trailing_slash_aliases:
+            bp.add_url_rule(
+                f"{rule}/",
+                endpoint=f"{name}_slash_alias",
+                view_func=handler,
+                methods=["POST"],
+            )
+
+    restricted_media_legacy_aliases = [
+        ("/copy_restricted_media", "copy_restricted_media_settings"),
+        ("/copy_restricted_media/", "copy_restricted_media_settings"),
+        ("/copy_restricted_media_only", "copy_restricted_media_settings"),
+        ("/copy_restricted_media_only/", "copy_restricted_media_settings"),
+    ]
+    for idx, (rule, name) in enumerate(restricted_media_legacy_aliases, start=1):
+        bp.add_url_rule(
+            rule,
+            endpoint=f"{name}_legacy_alias_{idx}",
+            view_func=_view(service, name),
+            methods=["POST"],
+        )
 
     for idx, rule in enumerate([
         "/update_adgroup_search_options",

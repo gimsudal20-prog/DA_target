@@ -25,6 +25,7 @@ def create_registration_blueprint(service):
         ("/create_ad_advanced", "create_ad_advanced"),
         ("/create_extension_simple", "create_extension_simple"),
         ("/bulk_upload_headlines", "bulk_upload_headlines"),
+        ("/bulk_upload_extensions", "bulk_upload_extensions"),
         ("/create_shopping_ad_simple", "create_shopping_ad_simple"),
         ("/create_extension_raw", "create_extension_raw"),
         ("/create_restricted_keywords_simple", "create_restricted_keywords_simple"),

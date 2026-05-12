@@ -12,6 +12,8 @@ CAMPAIGN_TYPE_LABELS = {
     "WEB_SITE": "파워링크",
     "SHOPPING": "쇼핑검색",
     "SHOPPING_BRAND": "쇼핑브랜드",
+    "BRAND_SEARCH": "브랜드검색",
+    "BRAND_SEARCH_AD": "브랜드검색 소재",
     "CATALOG": "카탈로그",
     "PLACE": "플레이스",
     "PLACE_AD": "플레이스",
@@ -23,6 +25,8 @@ CAMPAIGN_TYPE_COLORS = {
     "WEB_SITE": "blue",
     "SHOPPING": "green",
     "SHOPPING_BRAND": "green",
+    "BRAND_SEARCH": "purple",
+    "BRAND_SEARCH_AD": "purple",
     "CATALOG": "green",
     "PLACE": "purple",
     "PLACE_AD": "purple",
@@ -34,6 +38,8 @@ ADGROUP_TYPE_LABELS = {
     "WEB_SITE": "파워링크",
     "SHOPPING": "쇼핑검색",
     "SHOPPING_BRAND": "쇼핑브랜드",
+    "BRAND_SEARCH": "브랜드검색",
+    "BRAND_SEARCH_AD": "브랜드검색 소재",
     "CATALOG": "카탈로그",
 }
 
@@ -44,6 +50,8 @@ AD_TYPE_LABELS = {
     "CATALOG_PRODUCT_AD": "카탈로그 상품소재",
     "CATALOG_AD": "카탈로그 소재",
     "SHOPPING_BRAND_AD": "쇼핑브랜드 소재",
+    "BRAND_SEARCH": "브랜드검색",
+    "BRAND_SEARCH_AD": "브랜드검색 소재",
 }
 
 AD_EXTENSION_TYPE_LABELS = {
@@ -80,6 +88,13 @@ YES_NO_USE_LABELS = {
     "NO": "미사용",
     "FALSE": "미사용",
     "0": "미사용",
+}
+
+TYPE_CODE_LABELS = {
+    **CAMPAIGN_TYPE_LABELS,
+    **ADGROUP_TYPE_LABELS,
+    **AD_TYPE_LABELS,
+    **AD_EXTENSION_TYPE_LABELS,
 }
 
 
@@ -178,13 +193,24 @@ def format_asset_lookup_excel_value(
         if not raw:
             return value
         normalized_ad_type = normalize_ad_type(raw) if normalize_ad_type else raw_upper
-        ad_label = label_ad_type(normalized_ad_type, default=None)
+        ad_label = label_ad_type(normalized_ad_type, default="")
         if ad_label:
             return ad_label
         normalized_ext_type = normalize_extension_type(raw) if normalize_extension_type else raw_upper
-        ext_label = label_extension_type(normalized_ext_type, default=None)
+        ext_label = label_extension_type(normalized_ext_type, default="")
         if ext_label:
             return ext_label
+        known_type_label = TYPE_CODE_LABELS.get(raw_upper)
+        if known_type_label:
+            return known_type_label
         return value
+
+    # Some Naver API type codes can leak into fallback text columns such as
+    # summary/headline when the response does not include a human-readable title.
+    # In Excel exports, convert exact type-code cells only, so IDs/URLs/raw JSON are
+    # not touched.
+    known_type_label = TYPE_CODE_LABELS.get(raw_upper)
+    if known_type_label:
+        return known_type_label
 
     return value

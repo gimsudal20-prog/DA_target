@@ -53,14 +53,15 @@ class AccountLookupService:
         cid = str(d.get("customer_id") or "").strip()
         scope = d.get("scope") or d.get("search_scope")
         campaign_ids = [str(x or "").strip() for x in (d.get("campaign_ids") or []) if str(x or "").strip()]
-        return api_key, secret_key, cid, scope, campaign_ids
+        adgroup_ids = [str(x or "").strip() for x in (d.get("adgroup_ids") or []) if str(x or "").strip()]
+        return api_key, secret_key, cid, scope, campaign_ids, adgroup_ids
 
     @staticmethod
     def _hash_text(value: Any) -> str:
         return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()
 
     def _cache_key(self, kind: str, payload: Dict[str, Any]) -> str:
-        api_key, secret_key, cid, scope_raw, campaign_ids = self._credentials(payload)
+        api_key, secret_key, cid, scope_raw, campaign_ids, adgroup_ids = self._credentials(payload)
         scope = self.normalize_lookup_scope(scope_raw)
         raw = {
             "kind": kind,
@@ -69,6 +70,7 @@ class AccountLookupService:
             "customer_id": cid,
             "scope": scope,
             "campaign_ids": sorted(campaign_ids),
+            "adgroup_ids": sorted(adgroup_ids),
             "cache_bust": str((payload or {}).get("_cache_bust") or "0"),
         }
         return hashlib.sha256(json.dumps(raw, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
@@ -104,11 +106,11 @@ class AccountLookupService:
             self._result_cache[key] = (now, dict(value))
 
     def _collect_contexts(self, payload: Dict[str, Any], fail_label: str):
-        api_key, secret_key, cid, scope_raw, campaign_ids = self._credentials(payload)
+        api_key, secret_key, cid, scope_raw, campaign_ids, adgroup_ids = self._credentials(payload)
         scope = self.normalize_lookup_scope(scope_raw)
         if not api_key or not secret_key or not cid:
             return None, api_error("API 정보 및 광고주를 선택해주세요."), 400
-        res_ctx, contexts, warnings, _ = self.collect_asset_scope_adgroups(api_key, secret_key, cid, scope, campaign_ids)
+        res_ctx, contexts, warnings, _ = self.collect_asset_scope_adgroups(api_key, secret_key, cid, scope, campaign_ids, adgroup_ids)
         if getattr(res_ctx, "status_code", 500) != 200:
             return None, api_error(fail_label, getattr(res_ctx, "text", "")), 400
         return {
@@ -290,7 +292,12 @@ class AccountLookupService:
         return prepared
 
     def _export_result(self, rows: List[Dict[str, Any]], title: str, scope: str, columns, filename_prefix: str, *, scope_suffix: str | None = None):
-        scope_label = "선택 캠페인만" if scope == "campaign" else "계정 전체"
+        if scope == "adgroup":
+            scope_label = "선택 광고그룹만"
+        elif scope == "campaign":
+            scope_label = "선택 캠페인만"
+        else:
+            scope_label = "계정 전체"
         if scope_suffix:
             scope_label = f"{scope_label} · {scope_suffix}"
         wb = self.build_asset_lookup_workbook(rows, title, scope_label, columns)
@@ -396,6 +403,34 @@ class AccountLookupService:
             ("adId", "소재 ID"), ("referenceKey", "참조키"), ("campaignId", "캠페인 ID"), ("adgroupId", "광고그룹 ID"),
         ], "account_ads")
 
+    @classmethod
+    def _extension_export_columns(cls, extension_type: Any, rows: List[Dict[str, Any]] | None = None):
+        """Return export columns suited to the selected extension type.
+
+        Type-specific extension downloads should not expose unrelated image
+        columns. For example, HEADLINE(추가 제목) exports do not need image ID
+        columns, while IMAGE_SUB_LINKS and POWER_LINK_IMAGE do.
+        """
+        target = cls._normalize_extension_type_filter(extension_type)
+        base_columns = [
+            ("campaignType", "캠페인유형"), ("campaignName", "캠페인명"),
+            ("adgroupType", "광고그룹유형"), ("adgroupName", "광고그룹명"),
+            ("ownerScope", "적용대상"), ("extensionTypeLabel", "확장소재유형"), ("status", "상태"),
+            ("summary", "요약"), ("adExtensionId", "확장소재 ID"),
+        ]
+        tail_columns = [("ownerId", "owner ID"), ("campaignId", "캠페인 ID"), ("adgroupId", "광고그룹 ID")]
+
+        image_types = {"IMAGE_SUB_LINKS", "POWER_LINK_IMAGE"}
+        has_image_data = any(cls._split_image_ids((row or {}).get("imageId")) for row in (rows or []))
+        include_image_columns = target in image_types or (target == "ALL" and has_image_data)
+        if include_image_columns:
+            base_columns.extend([
+                ("imageIdCount", "이미지 ID 수"),
+                ("imageIdDetail", "이미지별 ID"),
+                ("imageId", "이미지 ID 원문"),
+            ])
+        return base_columns + tail_columns
+
     def export_extensions_excel(self, payload: Dict[str, Any]):
         result, status = self._collect_extensions_result(payload, use_cache=True)
         if status != 200:
@@ -411,10 +446,5 @@ class AccountLookupService:
         label = self._extension_filter_label(extension_type)
         title = "계정 등록 확장소재 조회" if label == "전체" else f"계정 등록 확장소재 조회 - {label}"
         filename_prefix = "account_extensions" if label == "전체" else f"account_extensions_{self._normalize_extension_type_filter(extension_type).lower()}"
-        return self._export_result(filtered_rows, title, result.get("scope") or "account", [
-            ("campaignType", "캠페인유형"), ("campaignName", "캠페인명"), ("adgroupType", "광고그룹유형"), ("adgroupName", "광고그룹명"),
-            ("ownerScope", "적용대상"), ("extensionTypeLabel", "확장소재유형"), ("status", "상태"),
-            ("summary", "요약"), ("adExtensionId", "확장소재 ID"),
-            ("imageIdCount", "이미지 ID 수"), ("imageIdDetail", "이미지별 ID"), ("imageId", "이미지 ID 원문"),
-            ("ownerId", "owner ID"), ("campaignId", "캠페인 ID"), ("adgroupId", "광고그룹 ID"),
-        ], filename_prefix, scope_suffix=f"확장소재유형 {label}")
+        columns = self._extension_export_columns(extension_type, filtered_rows)
+        return self._export_result(filtered_rows, title, result.get("scope") or "account", columns, filename_prefix, scope_suffix=f"확장소재유형 {label}")
