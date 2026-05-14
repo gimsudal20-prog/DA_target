@@ -9,6 +9,7 @@ import io
 import json
 import os
 import re
+import socket
 import time
 import threading
 from collections import defaultdict
@@ -22,6 +23,7 @@ from utils.excel import (
     XLSX_MIME,
     build_report_workbook,
     build_table_workbook,
+    write_table,
     workbook_to_bytesio,
 )
 from services.naver_client import (
@@ -97,7 +99,7 @@ os.makedirs(LOG_DIR, exist_ok=True)
 ACTION_LOG_PATH = os.path.join(LOG_DIR, "action_history.jsonl")
 _ACTION_LOG_LOCK = threading.RLock()
 _ACTION_LOG_MAX_LINES = 2000
-_ACTION_LOG_DETAIL_LIMIT = 120
+_ACTION_LOG_DETAIL_LIMIT = 500
 _ACTION_LOG_DETAIL_TEXT_LIMIT = 260
 def _stable_cache_key(api_key: str, secret_key: str, cid: str, scope: str) -> str:
     return stable_cache_key(api_key, secret_key, cid, scope)
@@ -248,7 +250,10 @@ def _action_summary(path: str, payload: Dict[str, Any]) -> str:
         if ids:
             extra.append(f"건수={len(ids)}")
         if str(payload.get('search_text') or '').strip():
-            match_label = "완전일치" if _boolish(payload.get('exact_match'), False) else "부분일치"
+            if _boolish(payload.get('exact_match'), False):
+                match_label = "완전일치"
+            else:
+                match_label = "부분일치·지명경계" if _boolish(payload.get('boundary_match', payload.get('korean_boundary_match')), False) else "부분일치"
             extra.append(f"검색={str(payload.get('search_text') or '').strip()} ({match_label})")
         if str(payload.get('bid_amt') or '').strip():
             extra.append(f"입찰가={payload.get('bid_amt')}")
@@ -397,17 +402,67 @@ def _result_detail_text(item: Dict[str, Any]) -> str:
     return ""
 
 
-def _make_log_detail(level: str, target: str, detail: str, source: str = "") -> Dict[str, str]:
+def _extract_error_code_from_value(value: Any) -> str:
+    if value is None or value == "":
+        return ""
+    if isinstance(value, dict):
+        for key in ("code", "errorCode", "error_code", "statusCode", "status_code"):
+            raw = value.get(key)
+            if raw is not None and str(raw).strip():
+                return _short_log_text(raw, 60)
+        for key in ("error", "errors", "detail", "details", "message", "reason"):
+            nested = _extract_error_code_from_value(value.get(key))
+            if nested:
+                return nested
+        return ""
+    if isinstance(value, list):
+        for item in value[:5]:
+            nested = _extract_error_code_from_value(item)
+            if nested:
+                return nested
+        return ""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        parsed = json.loads(text)
+        nested = _extract_error_code_from_value(parsed)
+        if nested:
+            return nested
+    except Exception:
+        pass
+    for pattern in [
+        r'"(?:errorCode|error_code|code|statusCode|status_code)"\s*:\s*"?(?P<code>[^",}\]\s]+)',
+        r"(?:errorCode|error_code|code|statusCode|status_code)\s*[:=]\s*['\"]?(?P<code>[A-Za-z0-9_.-]+)",
+    ]:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return _short_log_text(match.group("code"), 60)
+    return ""
+
+
+def _result_error_code(item: Dict[str, Any], detail_text: str = "") -> str:
+    if not isinstance(item, dict):
+        return _extract_error_code_from_value(detail_text)
+    for key in ("code", "errorCode", "error_code", "statusCode", "status_code"):
+        value = item.get(key)
+        if value is not None and str(value).strip():
+            return _short_log_text(value, 60)
+    return _extract_error_code_from_value(detail_text or item)
+
+
+def _make_log_detail(level: str, target: str, detail: str, source: str = "", code: str = "") -> Dict[str, str]:
     return {
         "level": level if level in {"success", "fail", "skip", "warning", "info"} else "info",
         "target": _short_log_text(target, 120),
         "detail": _short_log_text(detail, _ACTION_LOG_DETAIL_TEXT_LIMIT),
         "source": _short_log_text(source, 40),
+        "code": _short_log_text(code, 60),
     }
 
 
 def _append_log_detail(items: List[Dict[str, str]], seen: set, detail: Dict[str, str]) -> None:
-    key = (detail.get("level", ""), detail.get("target", ""), detail.get("detail", ""))
+    key = (detail.get("level", ""), detail.get("target", ""), detail.get("detail", ""), detail.get("code", ""))
     if key in seen:
         return
     seen.add(key)
@@ -508,9 +563,8 @@ def _extract_action_log_details(data: Dict[str, Any], message: str, limit: Optio
             if not detail_text and not target:
                 continue
             level = _explicit_log_detail_level(item, f"{target} {detail_text}")
-            if level == "success" and len([x for x in items if x.get("level") == "success"]) >= 60:
-                continue
-            _append_log_detail(items, seen, _make_log_detail(level, target, detail_text or ("완료" if level == "success" else ""), "results"))
+            code = _result_error_code(item, detail_text) if level == "fail" else ""
+            _append_log_detail(items, seen, _make_log_detail(level, target, detail_text or ("완료" if level == "success" else ""), "results", code))
 
     for source_key, default_level in [
         ("details", "info"),
@@ -528,23 +582,58 @@ def _extract_action_log_details(data: Dict[str, Any], message: str, limit: Optio
                 target, detail_text = _split_log_detail_target(text)
                 detected_level = _log_detail_level(None, text)
                 level = "fail" if default_level == "fail" else ("fail" if default_level == "warning" and detected_level == "fail" else (detected_level if default_level == "info" else default_level))
-                _append_log_detail(items, seen, _make_log_detail(level, target, detail_text, source_key))
+                code = _extract_error_code_from_value(text) if level == "fail" else ""
+                _append_log_detail(items, seen, _make_log_detail(level, target, detail_text, source_key, code))
         elif isinstance(value, str) and value.strip():
             target, detail_text = _split_log_detail_target(value)
             detected_level = _log_detail_level(None, value)
             level = "fail" if default_level == "fail" else ("fail" if default_level == "warning" and detected_level == "fail" else (detected_level if default_level == "info" else default_level))
-            _append_log_detail(items, seen, _make_log_detail(level, target, detail_text, source_key))
+            code = _extract_error_code_from_value(value) if level == "fail" else ""
+            _append_log_detail(items, seen, _make_log_detail(level, target, detail_text, source_key, code))
 
     for line in _iter_message_detail_lines(message):
         target, detail_text = _split_log_detail_target(line)
         level = _log_detail_level(None, line)
-        _append_log_detail(items, seen, _make_log_detail(level, target, detail_text, "message"))
+        code = _extract_error_code_from_value(line) if level == "fail" else ""
+        _append_log_detail(items, seen, _make_log_detail(level, target, detail_text, "message", code))
 
     order = {"fail": 0, "warning": 1, "skip": 2, "info": 3, "success": 4}
     sorted_items = sorted(items, key=lambda x: order.get(x.get("level", "info"), 9))
     if limit is None:
         return sorted_items
     return sorted_items[:limit]
+
+
+def _synthesize_success_log_details_from_payload(payload: Dict[str, Any], counts: Dict[str, Any]) -> List[Dict[str, str]]:
+    try:
+        fail_count = int(counts.get("fail") or 0)
+    except Exception:
+        fail_count = 0
+    try:
+        success_count = int(counts.get("success") or 0)
+    except Exception:
+        success_count = 0
+    if fail_count > 0 or success_count <= 0:
+        return []
+    candidates: List[str] = []
+    for key in ("ids", "entity_ids", "source_ids", "campaign_ids", "adgroup_ids", "parent_ids"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            candidates.extend(str(x or "").strip() for x in value if str(x or "").strip())
+    rows = payload.get("rows")
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            ident = _result_identifier(row) or str(row.get("keyword") or row.get("name") or "").strip()
+            if ident:
+                candidates.append(ident)
+    if not candidates:
+        return []
+    out: List[Dict[str, str]] = []
+    for target in _unique_keep_order(candidates)[:_ACTION_LOG_DETAIL_LIMIT]:
+        out.append(_make_log_detail("success", target, "완료", "payload"))
+    return out
 
 
 def _resolve_action_log_status(http_status: int, counts: Dict[str, Any]) -> str:
@@ -580,16 +669,39 @@ def _format_action_log_counts(counts: Dict[str, Any]) -> str:
         pieces.append(f"{label} {n}건")
     return " / ".join(pieces)
 
+def _action_log_level_label(level: str) -> str:
+    return {"fail": "실패", "warning": "경고", "skip": "건너뜀", "success": "성공", "info": "정보"}.get(str(level or "info"), "정보")
+
+
+def _action_log_detail_level_counts(row: Dict[str, Any]) -> Dict[str, int]:
+    counts = {"success": 0, "fail": 0, "warning": 0, "skip": 0, "info": 0}
+    explicit = row.get("detail_level_counts") if isinstance(row, dict) else None
+    if isinstance(explicit, dict):
+        for key in counts:
+            try:
+                counts[key] = int(explicit.get(key) or 0)
+            except Exception:
+                counts[key] = 0
+        return counts
+    items = row.get("detail_items") if isinstance(row, dict) else []
+    if isinstance(items, list):
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            level = str(item.get("level") or "info")
+            counts[level if level in counts else "info"] += 1
+    return counts
+
+
 def _format_action_log_details_for_export(row: Dict[str, Any], limit: int = 120) -> str:
     items = row.get("detail_items") if isinstance(row, dict) else []
     if not isinstance(items, list):
         return ""
     lines = []
-    level_label = {"fail": "실패", "warning": "경고", "skip": "건너뜀", "success": "성공", "info": "정보"}
     for item in items[:limit]:
         if not isinstance(item, dict):
             continue
-        level = level_label.get(str(item.get("level") or "info"), "정보")
+        level = _action_log_level_label(str(item.get("level") or "info"))
         target = str(item.get("target") or "").strip()
         detail = str(item.get("detail") or "").strip()
         if target and detail:
@@ -686,7 +798,13 @@ def _write_action_log_from_request(response: Response) -> None:
         base_summary = _action_summary(path, payload)
         summary = " | ".join([x for x in [base_summary, count_summary] if x])
         all_detail_items = _extract_action_log_details(response_data, message, limit=None)
+        if not any(str(item.get("level") or "") == "success" for item in all_detail_items):
+            all_detail_items.extend(_synthesize_success_log_details_from_payload(payload, counts))
         detail_items = all_detail_items[:_ACTION_LOG_DETAIL_LIMIT]
+        detail_level_counts: Dict[str, int] = {}
+        for item in all_detail_items:
+            if isinstance(item, dict):
+                detail_level_counts[str(item.get("level") or "info")] = detail_level_counts.get(str(item.get("level") or "info"), 0) + 1
         entry = {
             'ts': time.strftime('%Y-%m-%d %H:%M:%S'),
             'path': path,
@@ -702,6 +820,7 @@ def _write_action_log_from_request(response: Response) -> None:
             'skipped': counts.get('skipped'),
             'detail_items': detail_items,
             'detail_count': len(all_detail_items),
+            'detail_level_counts': detail_level_counts,
             'detail_truncated': len(all_detail_items) > len(detail_items),
         }
         _append_action_log(entry)
@@ -932,6 +1051,96 @@ def _read_table_text(text: str) -> List[Dict[str, Any]]:
     return df.to_dict(orient="records")
 def _result_item(row_no: int, ok: bool, name: str, detail: str = "") -> Dict[str, Any]:
     return {"row_no": row_no, "ok": ok, "name": name, "detail": detail}
+POWERLINK_KEYWORD_LIMIT_PER_ADGROUP = 1000
+POWERLINK_KEYWORD_LIMIT_TOTAL = 100000
+def _response_json_value(res: Any) -> Any:
+    if res is None:
+        return None
+    try:
+        value = res.json()
+        if isinstance(value, dict) and set(value.keys()) == {"data"} and isinstance(value.get("data"), list):
+            return value.get("data")
+        return value
+    except Exception:
+        pass
+    raw = str(getattr(res, "text", "") or "").strip()
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except Exception:
+        return None
+def _flatten_error_value(value: Any, limit: int = 4) -> str:
+    if value is None or value == "":
+        return ""
+    if isinstance(value, str):
+        return _short_log_text(value, 500)
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    if isinstance(value, list):
+        parts = [_flatten_error_value(x, limit=limit) for x in value[:limit]]
+        return " / ".join([x for x in parts if x])
+    if isinstance(value, dict):
+        return _short_log_text(json.dumps(value, ensure_ascii=False), 700)
+    return _short_log_text(value, 500)
+def _looks_like_keyword_limit_error(text: Any) -> bool:
+    detail = str(text or "")
+    probe = detail.lower()
+    return (
+        "100000" in probe
+        or "100,000" in probe
+        or "허용된 키워드 수" in detail
+        or "키워드 수를 초과" in detail
+        or ("keyword" in probe and any(token in probe for token in ("limit", "exceed", "maximum", "max")))
+        or ("키워드" in detail and any(token in detail for token in ("한도", "초과", "최대")))
+    )
+def _keyword_limit_error_detail(raw_detail: Any) -> str:
+    detail = _flatten_error_value(raw_detail) or _short_log_text(raw_detail, 700) or "키워드 등록 실패"
+    if _looks_like_keyword_limit_error(detail):
+        return (
+            f"네이버 키워드 등록 한도 초과: 광고그룹당 최대 {POWERLINK_KEYWORD_LIMIT_PER_ADGROUP:,}개, "
+            f"캠페인/계정 전체 최대 {POWERLINK_KEYWORD_LIMIT_TOTAL:,}개 제한을 초과했습니다. 원문: {detail}"
+        )
+    return detail
+def _keyword_create_error_text(value: Any) -> str:
+    if value is None or value == "":
+        return ""
+    if isinstance(value, str):
+        return _keyword_limit_error_detail(value) if value.strip() else ""
+    if isinstance(value, list):
+        errors = [_keyword_create_error_text(item) for item in value]
+        errors = [x for x in errors if x]
+        return " / ".join(errors[:4])
+    if isinstance(value, dict):
+        if value.get("nccKeywordId") and not any(k in value for k in ("error", "errors", "errorCode", "errorMessage", "error_message", "invalidItems", "failedItems", "failures")):
+            return ""
+        for key in ("error", "errors", "errorMessage", "error_message", "invalidItems", "invalids", "failedItems", "failures"):
+            if key in value and value.get(key):
+                return _keyword_limit_error_detail(value.get(key))
+        message_keys = [key for key in ("message", "detail", "details", "reason", "title") if value.get(key)]
+        status_raw = value.get("status") or value.get("statusCode")
+        code_raw = value.get("code") or value.get("errorCode")
+        if message_keys and (code_raw is not None or status_raw is not None or not value.get("nccKeywordId")):
+            message = " / ".join(_flatten_error_value(value.get(key)) for key in message_keys if value.get(key))
+            return _keyword_limit_error_detail(message)
+    return ""
+def _classify_keyword_create_success_response(res: Any, chunk: List[Tuple[int, Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    parsed = _response_json_value(res)
+    if isinstance(parsed, dict) and isinstance(parsed.get("data"), list):
+        parsed = parsed.get("data")
+    if isinstance(parsed, list) and len(parsed) == len(chunk):
+        classified: List[Dict[str, Any]] = []
+        for (idx, payload), item in zip(chunk, parsed):
+            error_text = _keyword_create_error_text(item)
+            if error_text:
+                classified.append(_result_item(idx, False, str(payload.get("keyword")), error_text))
+            else:
+                classified.append(_result_item(idx, True, str(payload.get("keyword")), "생성 완료"))
+        return classified
+    error_text = _keyword_create_error_text(parsed)
+    if error_text:
+        return [_result_item(idx, False, str(payload.get("keyword")), error_text) for idx, payload in chunk]
+    return [_result_item(idx, True, str(payload.get("keyword")), "생성 완료") for idx, payload in chunk]
 def _read_uploaded_table(upload) -> List[Dict[str, Any]]:
     if upload is None or not getattr(upload, "filename", ""):
         return []
@@ -1191,6 +1400,26 @@ def _fetch_keywords(api_key: str, secret_key: str, cid: str, adgroup_id: str):
     return res, res.json() or []
 def _normalize_keyword_search_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip()).casefold()
+_KOREAN_PLACE_BOUNDARY_SUFFIXES = ("동", "읍", "면", "리", "가", "로", "길")
+_KOREAN_PLACE_TOKEN_RE = re.compile(r"^[가-힣]{2,16}$")
+def _is_hangul_syllable(ch: str) -> bool:
+    return len(ch) == 1 and "\uac00" <= ch <= "\ud7a3"
+def _needs_korean_place_prefix_boundary(token: str) -> bool:
+    token = str(token or "").strip()
+    return bool(_KOREAN_PLACE_TOKEN_RE.match(token)) and token.endswith(_KOREAN_PLACE_BOUNDARY_SUFFIXES)
+def _keyword_partial_token_matches(keyword_norm: str, token: str, boundary_match: bool = False) -> bool:
+    token = str(token or "")
+    if not token:
+        return False
+    if not boundary_match or not _needs_korean_place_prefix_boundary(token):
+        return token in keyword_norm
+    start = keyword_norm.find(token)
+    while start >= 0:
+        prev = keyword_norm[start - 1] if start > 0 else ""
+        if not prev or not _is_hangul_syllable(prev):
+            return True
+        start = keyword_norm.find(token, start + 1)
+    return False
 def _parse_keyword_search_groups(search_text: Any) -> List[str]:
     raw = str(search_text or "")
     parts = re.split(r"[\r\n,;|]+", raw)
@@ -1206,11 +1435,11 @@ def _parse_keyword_search_groups(search_text: Any) -> List[str]:
         return groups
     fallback = _normalize_keyword_search_text(raw)
     return [fallback] if fallback else []
-def _keyword_match_terms(keyword: Any, search_text: Any, exact_match: bool = False, exclude_text: Any = None) -> List[str]:
+def _keyword_match_terms(keyword: Any, search_text: Any, exact_match: bool = False, exclude_text: Any = None, boundary_match: bool = False) -> List[str]:
     keyword_norm = _normalize_keyword_search_text(keyword)
     if not keyword_norm:
         return []
-    if _keyword_matches_search(keyword_norm, exclude_text, exact_match=exact_match):
+    if _keyword_matches_search(keyword_norm, exclude_text, exact_match=exact_match, boundary_match=boundary_match):
         return []
     groups = _parse_keyword_search_groups(search_text)
     matched: List[str] = []
@@ -1222,10 +1451,10 @@ def _keyword_match_terms(keyword: Any, search_text: Any, exact_match: bool = Fal
                 matched.append(group)
             continue
         tokens = [tok for tok in group.split(" ") if tok]
-        if tokens and all(tok in keyword_norm for tok in tokens):
+        if tokens and all(_keyword_partial_token_matches(keyword_norm, tok, boundary_match=boundary_match) for tok in tokens):
             matched.append(group)
     return matched
-def _keyword_matches_search(keyword: Any, search_text: Any, exact_match: bool = False) -> bool:
+def _keyword_matches_search(keyword: Any, search_text: Any, exact_match: bool = False, boundary_match: bool = False) -> bool:
     keyword_norm = _normalize_keyword_search_text(keyword)
     if not keyword_norm:
         return False
@@ -1238,7 +1467,7 @@ def _keyword_matches_search(keyword: Any, search_text: Any, exact_match: bool = 
                 return True
             continue
         tokens = [tok for tok in group.split(" ") if tok]
-        if tokens and all(tok in keyword_norm for tok in tokens):
+        if tokens and all(_keyword_partial_token_matches(keyword_norm, tok, boundary_match=boundary_match) for tok in tokens):
             return True
     return False
 def _collect_powerlink_campaigns_and_adgroups(api_key: str, secret_key: str, cid: str, campaign_ids: List[str] | None = None):
@@ -1304,7 +1533,7 @@ def _collect_powerlink_campaigns_and_adgroups(api_key: str, secret_key: str, cid
                 })
     adgroup_contexts.sort(key=lambda x: (str(x.get("campaign_name") or "").casefold(), str(x.get("adgroup_name") or "").casefold()))
     return res_camp, powerlink_campaigns, adgroup_contexts, warnings[:10]
-def _scan_powerlink_keywords_by_search(api_key: str, secret_key: str, cid: str, search_text: str, exact_match: bool = False, campaign_ids: List[str] | None = None, adgroup_ids: List[str] | None = None, exclude_text: str = ""):
+def _scan_powerlink_keywords_by_search(api_key: str, secret_key: str, cid: str, search_text: str, exact_match: bool = False, campaign_ids: List[str] | None = None, adgroup_ids: List[str] | None = None, exclude_text: str = "", boundary_match: bool = False):
     _, powerlink_campaigns, adgroup_contexts, warnings = _collect_powerlink_campaigns_and_adgroups(api_key, secret_key, cid, campaign_ids=campaign_ids)
     selected_adgroup_ids = _unique_keep_order([str(x or "").strip() for x in (adgroup_ids or []) if str(x or "").strip()])
     if selected_adgroup_ids:
@@ -1333,6 +1562,7 @@ def _scan_powerlink_keywords_by_search(api_key: str, secret_key: str, cid: str, 
             "matched_count": 0,
             "search_groups": search_groups,
             "exclude_groups": exclude_groups,
+            "boundary_match": bool(boundary_match),
         }
     max_workers = min(max(BID_IO_WORKERS, 10), max(1, len(adgroup_contexts)))
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
@@ -1361,7 +1591,7 @@ def _scan_powerlink_keywords_by_search(api_key: str, secret_key: str, cid: str, 
                 if not keyword_text:
                     continue
                 scanned_keyword_count += 1
-                matched_terms = _keyword_match_terms(keyword_text, search_text, exact_match=exact_match, exclude_text=exclude_text)
+                matched_terms = _keyword_match_terms(keyword_text, search_text, exact_match=exact_match, exclude_text=exclude_text, boundary_match=boundary_match)
                 if not matched_terms:
                     continue
                 matched_count += 1
@@ -1409,6 +1639,8 @@ def _scan_powerlink_keywords_by_search(api_key: str, secret_key: str, cid: str, 
         "scanned_keyword_count": int(scanned_keyword_count),
         "matched_count": int(matched_count),
         "search_groups": search_groups,
+        "exclude_groups": exclude_groups,
+        "boundary_match": bool(boundary_match),
     }
 def _extract_enabled_from_entity(entity: Dict[str, Any] | None) -> bool | None:
     src = entity or {}
@@ -1470,7 +1702,8 @@ def _build_powerlink_keyword_search_message(search_text: str, exact_match: bool,
     exclude_groups = scan.get("exclude_groups") or _parse_keyword_search_groups(exclude_text)
     scanned_keyword_count = int(scan.get("scanned_keyword_count") or 0)
     matched_count = int(scan.get("matched_count") or 0)
-    mode_label = "완전일치" if exact_match else "부분일치"
+    boundary_match = bool(scan.get("boundary_match"))
+    mode_label = "완전일치" if exact_match else ("부분일치 · 지명경계" if boundary_match else "부분일치")
     lines = [
         f"검색어 기준 파워링크 키워드 조회 완료! ({mode_label})",
         f"검색어: {search_text}",
@@ -2187,6 +2420,7 @@ def _put_single_ad_with_ad_attr(api_key: str, secret_key: str, cid: str, ad_item
 def _apply_ad_bid_map(api_key: str, secret_key: str, cid: str, adgroup_contexts: List[Dict[str, Any]], bid_map: Dict[str, int], ad_meta: Optional[Dict[str, Dict[str, Any]]] = None):
     success_cnt = fail_cnt = skipped_cnt = 0
     err_details: List[str] = []
+    results: List[Dict[str, Any]] = []
     ad_meta = ad_meta or {}
     for ctx in adgroup_contexts:
         if not _adgroup_uses_ad_level_bid(ctx.get("adgroup_type")):
@@ -2195,8 +2429,10 @@ def _apply_ad_bid_map(api_key: str, secret_key: str, cid: str, adgroup_contexts:
         res_ads, ads = _fetch_ads(api_key, secret_key, cid, adg_id)
         if res_ads.status_code != 200:
             fail_cnt += 1
+            detail = f"소재 조회 실패: {res_ads.text}"
+            results.append({"ok": False, "level": "fail", "target": f"광고그룹 {adg_id}", "detail": detail, "code": _extract_error_code_from_value(res_ads.text)})
             if len(err_details) < 5:
-                err_details.append(f"[광고그룹 {adg_id}] 소재 조회 실패: {res_ads.text}")
+                err_details.append(f"[광고그룹 {adg_id}] {detail}")
             continue
         for ad in (ads or []):
             if not _ad_item_has_bid_attr(ad):
@@ -2211,8 +2447,13 @@ def _apply_ad_bid_map(api_key: str, secret_key: str, cid: str, adgroup_contexts:
             current_use_group = bool(meta.get("use_group_bid", _extract_ad_attr(ad).get("useGroupBidAmt")))
             current_bid = _normalize_bid_amt(meta.get("current_bid"))
             target_bid = int(bid_map[ad_id])
+            name = str(meta.get("name") or ((ad.get("ad") or {}).get("productName") if isinstance(ad.get("ad"), dict) else "") or ad_id)
+            current_label = f"{int(current_bid):,}원" if current_bid is not None else "현재가 없음"
+            if current_use_group:
+                current_label += " (그룹입찰가 사용)"
             if current_bid == target_bid and (not current_use_group):
                 skipped_cnt += 1
+                results.append({"level": "skip", "name": name, "target": name, "ad_id": ad_id, "detail": f"이미 동일 입찰가 {target_bid:,}원이라 유지"})
                 continue
             item = copy.deepcopy(ad)
             ad_attr = _extract_ad_attr(item)
@@ -2222,12 +2463,14 @@ def _apply_ad_bid_map(api_key: str, secret_key: str, cid: str, adgroup_contexts:
             r_put = _put_single_ad_with_ad_attr(api_key, secret_key, cid, item)
             if r_put.status_code in [200, 201]:
                 success_cnt += 1
+                results.append({"ok": True, "level": "success", "name": name, "target": name, "ad_id": ad_id, "detail": f"{current_label} → {target_bid:,}원 적용"})
             else:
                 fail_cnt += 1
+                detail = f"변경 실패: {r_put.text}"
+                results.append({"ok": False, "level": "fail", "name": name, "target": name, "ad_id": ad_id, "detail": detail, "code": _extract_error_code_from_value(r_put.text)})
                 if len(err_details) < 5:
-                    name = str(meta.get("name") or ((ad.get("ad") or {}).get("productName") if isinstance(ad.get("ad"), dict) else "") or ad_id)
-                    err_details.append(f"[{name}] 변경 실패: {r_put.text}")
-    return success_cnt, fail_cnt, skipped_cnt, err_details
+                    err_details.append(f"[{name}] {detail}")
+    return success_cnt, fail_cnt, skipped_cnt, err_details, results
 def _resolve_shopping_extra_owner_ids(api_key: str, secret_key: str, cid: str, campaign_ids: List[str] | None = None, adgroup_ids: List[str] | None = None):
     campaign_ids = [str(x).strip() for x in (campaign_ids or []) if str(x).strip()]
     adgroup_ids = [str(x).strip() for x in (adgroup_ids or []) if str(x).strip()]
@@ -5261,9 +5504,19 @@ def _bulk_create_keywords(api_key: str, secret_key: str, cid: str, rows: List[Di
             payloads = [x[1] for x in chunk]
             res = _do_req("POST", api_key, secret_key, cid, "/ncc/keywords", params={"nccAdgroupId": adg_id}, json_body=payloads)
             if res.status_code in [200, 201]:
+                classified = _classify_keyword_create_success_response(res, chunk)
+                for item in classified:
+                    if item.get("ok"):
+                        success += 1
+                    else:
+                        fail += 1
+                    results.append(item)
+                continue
+            if _looks_like_keyword_limit_error(getattr(res, "text", "")):
+                detail = _keyword_limit_error_detail(res.text)
                 for idx, payload in chunk:
-                    success += 1
-                    results.append(_result_item(idx, True, str(payload.get("keyword")), "생성 완료"))
+                    fail += 1
+                    results.append(_result_item(idx, False, str(payload.get("keyword")), detail))
                 continue
             with ThreadPoolExecutor(max_workers=min(8, len(chunk))) as ex:
                 future_map = {
@@ -5279,11 +5532,16 @@ def _bulk_create_keywords(api_key: str, secret_key: str, cid: str, rows: List[Di
                         results.append(_result_item(idx, False, str(payload.get("keyword")), str(e)))
                         continue
                     if single.status_code in [200, 201]:
-                        success += 1
-                        results.append(_result_item(idx, True, str(payload.get("keyword")), "생성 완료"))
+                        classified = _classify_keyword_create_success_response(single, [(idx, payload)])
+                        item = classified[0] if classified else _result_item(idx, True, str(payload.get("keyword")), "생성 완료")
+                        if item.get("ok"):
+                            success += 1
+                        else:
+                            fail += 1
+                        results.append(item)
                     else:
                         fail += 1
-                        results.append(_result_item(idx, False, str(payload.get("keyword")), single.text))
+                        results.append(_result_item(idx, False, str(payload.get("keyword")), _keyword_limit_error_detail(single.text)))
     return success, fail, sorted(results, key=lambda x: x["row_no"])
 def _post_one_ad(api_key: str, secret_key: str, cid: str, row_no: int, payload: Dict[str, Any]):
     adg_id = str(payload.get("nccAdgroupId") or "").strip()
@@ -6163,9 +6421,9 @@ def search_powerlink_keywords():
     search_text = str(d.get("search_text") or d.get("keyword_query") or "").strip()
     exact_match = _boolish(d.get("exact_match"), False)
     exclude_text = str(d.get("exclude_text") or d.get("exclude_keyword_query") or "").strip()
+    boundary_match = _boolish(d.get("boundary_match", d.get("korean_boundary_match")), False)
     search_scope = str(d.get("search_scope") or "account").strip().lower()
     campaign_ids = [str(x or "").strip() for x in (d.get("campaign_ids") or []) if str(x or "").strip()]
-    adgroup_ids = [str(x or "").strip() for x in (d.get("adgroup_ids") or []) if str(x or "").strip()]
     adgroup_ids = [str(x or "").strip() for x in (d.get("adgroup_ids") or []) if str(x or "").strip()]
     if not api_key or not secret_key or not cid:
         return jsonify({"error": "API 정보 및 광고주를 선택해주세요."}), 400
@@ -6187,6 +6445,7 @@ def search_powerlink_keywords():
             campaign_ids=(campaign_ids if search_scope == "selected_campaigns" else None),
             adgroup_ids=(adgroup_ids if search_scope == "selected_adgroups" else None),
             exclude_text=exclude_text,
+            boundary_match=boundary_match,
         )
         if search_scope == "selected_campaigns":
             selected_set = set(campaign_ids)
@@ -6205,7 +6464,7 @@ def search_powerlink_keywords():
             scan["adgroup_contexts"] = [row for row in (scan.get("adgroup_contexts") or []) if str(row.get("adgroup_id") or "").strip() in selected_adgroup_set]
             selected_campaign_set = {str(row.get("campaign_id") or "").strip() for row in (scan.get("adgroup_contexts") or []) if str(row.get("campaign_id") or "").strip()}
             scan["powerlink_campaigns"] = [row for row in (scan.get("powerlink_campaigns") or []) if str(row.get("id") or "").strip() in selected_campaign_set]
-        preview_token = hashlib.sha256(f"{cid}|{search_scope}|{'/'.join(campaign_ids)}|{'/'.join(adgroup_ids)}|{search_text}|{exclude_text}|{'1' if exact_match else '0'}|{int(scan.get('matched_count') or 0)}".encode('utf-8')).hexdigest()[:20]
+        preview_token = hashlib.sha256(f"{cid}|{search_scope}|{'/'.join(campaign_ids)}|{'/'.join(adgroup_ids)}|{search_text}|{exclude_text}|{'1' if exact_match else '0'}|{'1' if boundary_match else '0'}|{int(scan.get('matched_count') or 0)}".encode('utf-8')).hexdigest()[:20]
         scope_label = "선택 캠페인 기준" if search_scope == "selected_campaigns" else ("선택 그룹 기준" if search_scope == "selected_adgroups" else "계정 전체 기준")
         return jsonify({
             "ok": True,
@@ -6213,6 +6472,7 @@ def search_powerlink_keywords():
             "search_text": search_text,
             "search_groups": scan.get("search_groups") or _parse_keyword_search_groups(search_text),
             "exact_match": bool(exact_match),
+            "boundary_match": bool(boundary_match),
             "exclude_text": exclude_text,
             "matched_count": int(scan.get("matched_count") or 0),
             "scanned_keyword_count": int(scan.get("scanned_keyword_count") or 0),
@@ -6236,6 +6496,7 @@ def export_powerlink_keywords_excel():
     search_text = str(d.get("search_text") or d.get("keyword_query") or "").strip()
     exact_match = _boolish(d.get("exact_match"), False)
     exclude_text = str(d.get("exclude_text") or d.get("exclude_keyword_query") or "").strip()
+    boundary_match = _boolish(d.get("boundary_match", d.get("korean_boundary_match")), False)
     search_scope = str(d.get("search_scope") or "account").strip().lower()
     campaign_ids = [str(x or "").strip() for x in (d.get("campaign_ids") or []) if str(x or "").strip()]
     adgroup_ids = [str(x or "").strip() for x in (d.get("adgroup_ids") or []) if str(x or "").strip()]
@@ -6259,6 +6520,7 @@ def export_powerlink_keywords_excel():
             campaign_ids=(campaign_ids if search_scope == "selected_campaigns" else None),
             adgroup_ids=(adgroup_ids if search_scope == "selected_adgroups" else None),
             exclude_text=exclude_text,
+            boundary_match=boundary_match,
         )
         rows = scan.get("matched_rows") or []
         if not rows:
@@ -6306,13 +6568,16 @@ def export_action_logs_excel():
 
         headers = [
             "번호", "일시", "상태", "HTTP상태", "작업", "광고주ID",
-            "대상", "성공", "실패", "건너뜀", "요약", "메시지", "세부내역", "요청경로"
+            "대상", "성공", "실패", "건너뜀", "세부성공", "세부실패", "세부경고", "세부건너뜀",
+            "요약", "메시지", "세부내역", "요청경로"
         ]
         data_rows = []
+        detail_rows = []
         status_label_map = {"error": "실패", "partial": "부분성공", "success": "성공"}
         for idx, row in enumerate(rows, 1):
             status_raw = str(row.get("status") or "").strip().lower()
             status_label = status_label_map.get(status_raw, "성공")
+            detail_counts = _action_log_detail_level_counts(row)
             data_rows.append([
                 idx,
                 row.get("ts") or "",
@@ -6324,22 +6589,80 @@ def export_action_logs_excel():
                 row.get("success") if row.get("success") is not None else "",
                 row.get("fail") if row.get("fail") is not None else "",
                 row.get("skipped") if row.get("skipped") is not None else "",
+                detail_counts.get("success") or "",
+                detail_counts.get("fail") or "",
+                detail_counts.get("warning") or "",
+                detail_counts.get("skip") or "",
                 row.get("summary") or "",
                 row.get("message") or "",
-                _format_action_log_details_for_export(row),
+                _format_action_log_details_for_export(row, limit=500),
                 row.get("path") or "",
             ])
+            detail_items = row.get("detail_items") if isinstance(row, dict) else []
+            if isinstance(detail_items, list):
+                for detail_idx, item in enumerate(detail_items, 1):
+                    if not isinstance(item, dict):
+                        continue
+                    level = str(item.get("level") or "info")
+                    detail_rows.append([
+                        idx,
+                        detail_idx,
+                        row.get("ts") or "",
+                        status_label,
+                        row.get("action") or "",
+                        row.get("customer_id") or "",
+                        _action_log_level_label(level),
+                        item.get("target") or "",
+                        item.get("detail") or "",
+                        item.get("code") or "",
+                        item.get("source") or "",
+                        row.get("path") or "",
+                    ])
+                if row.get("detail_truncated"):
+                    detail_rows.append([
+                        idx,
+                        "",
+                        row.get("ts") or "",
+                        status_label,
+                        row.get("action") or "",
+                        row.get("customer_id") or "",
+                        "정보",
+                        "",
+                        "세부내역이 많아 일부만 저장되었습니다.",
+                        "",
+                        "system",
+                        row.get("path") or "",
+                    ])
 
         widths = {
             "A": 8, "B": 20, "C": 10, "D": 12, "E": 24,
             "F": 18, "G": 10, "H": 10, "I": 10, "J": 10,
-            "K": 46, "L": 58, "M": 72, "N": 36,
+            "K": 12, "L": 12, "M": 12, "N": 12,
+            "O": 46, "P": 58, "Q": 72, "R": 36,
         }
         wb = build_table_workbook(
             sheet_title="작업이력로그",
             headers=headers,
             rows=data_rows,
             widths=widths,
+            freeze_panes="A2",
+            auto_filter=True,
+            header_fill="E8F0FE",
+            header_font_color=None,
+        )
+        detail_headers = [
+            "로그번호", "세부번호", "일시", "로그상태", "작업", "광고주ID",
+            "세부상태", "대상", "내용", "실패코드", "출처", "요청경로"
+        ]
+        detail_ws = wb.create_sheet("세부내역")
+        write_table(
+            detail_ws,
+            detail_headers,
+            detail_rows,
+            widths={
+                "A": 10, "B": 10, "C": 20, "D": 10, "E": 24, "F": 18,
+                "G": 12, "H": 34, "I": 72, "J": 18, "K": 14, "L": 36,
+            },
             freeze_panes="A2",
             auto_filter=True,
             header_fill="E8F0FE",
@@ -6580,14 +6903,24 @@ def create_keywords_simple():
     if not rows:
         return jsonify({"error": "광고그룹과 키워드는 필수입니다."}), 400
     success, fail, results = _bulk_create_keywords(d.get("api_key"), d.get("secret_key"), d.get("customer_id"), rows)
-    return jsonify({
-        "ok": True,
+    failed_details = [str((item or {}).get("detail") or "").strip() for item in (results or []) if isinstance(item, dict) and not item.get("ok") and str((item or {}).get("detail") or "").strip()]
+    status_code = 200 if fail <= 0 else (207 if success > 0 else 400)
+    response = {
+        "ok": fail <= 0,
         "total": len(rows),
         "success": success,
         "fail": fail,
+        "success_count": success,
+        "fail_count": fail,
+        "message": f"키워드 등록 처리 완료: 성공 {success}건 / 실패 {fail}건",
         "results": results,
         "batch_summary": batch_summary,
-    })
+    }
+    if fail > 0:
+        response["error"] = "키워드 등록 실패" if success <= 0 else "키워드 일부 등록 실패"
+        response["details"] = failed_details[0] if failed_details else f"실패 {fail}건"
+        response["failed_details"] = failed_details[:50]
+    return jsonify(response), status_code
 def _parse_target_ids(payload: Dict[str, Any], single_key: str, multi_key: str) -> List[str]:
     ids: List[str] = []
     raw_multi = payload.get(multi_key)
@@ -9427,17 +9760,21 @@ def _estimate_ad_bids_by_avg_position(api_key: str, secret_key: str, cid: str, a
 def _apply_keyword_bid_map(api_key: str, secret_key: str, cid: str, adgroup_ids: List[str], bid_map: Dict[str, int], keyword_meta: Optional[Dict[str, Dict[str, Any]]] = None):
     success_cnt = fail_cnt = skipped_cnt = 0
     err_details: List[str] = []
+    results: List[Dict[str, Any]] = []
     cleanup_keys = ['regTm', 'editTm', 'status', 'statusReason', 'inspectStatus', 'delFlag', 'managedKeyword', 'referenceKey']
     keyword_meta = keyword_meta or {}
     for adg_id in adgroup_ids:
         r_kw = _do_req("GET", api_key, secret_key, cid, "/ncc/keywords", params={"nccAdgroupId": adg_id})
         if r_kw.status_code != 200:
             fail_cnt += 1
+            detail = f"키워드 조회 실패: {r_kw.text}"
+            results.append({"ok": False, "level": "fail", "target": f"광고그룹 {adg_id}", "detail": detail, "code": _extract_error_code_from_value(r_kw.text)})
             if len(err_details) < 5:
-                err_details.append(f"[광고그룹 {adg_id}] 키워드 조회 실패: {r_kw.text}")
+                err_details.append(f"[광고그룹 {adg_id}] {detail}")
             continue
         kws = r_kw.json() or []
         update_payload = []
+        update_meta: Dict[str, Dict[str, Any]] = {}
         for kw in kws:
             kid = str(kw.get("nccKeywordId") or "").strip()
             if not kid:
@@ -9449,8 +9786,13 @@ def _apply_keyword_bid_map(api_key: str, secret_key: str, cid: str, adgroup_ids:
             meta = keyword_meta.get(kid, {})
             current_bid = _normalize_bid_amt(meta.get("current_bid", kw.get("bidAmt")))
             current_use_group = bool(meta.get("use_group_bid", kw.get("useGroupBidAmt")))
+            keyword_name = str(meta.get("keyword") or kw.get("keyword") or kid)
+            current_label = f"{int(current_bid):,}원" if current_bid is not None else "현재가 없음"
+            if current_use_group:
+                current_label += " (그룹입찰가 사용)"
             if (current_bid == target_bid) and (not current_use_group):
                 skipped_cnt += 1
+                results.append({"level": "skip", "keyword": keyword_name, "nccKeywordId": kid, "detail": f"이미 동일 입찰가 {target_bid:,}원이라 유지"})
                 continue
             item = copy.deepcopy(kw)
             item["useGroupBidAmt"] = False
@@ -9458,6 +9800,11 @@ def _apply_keyword_bid_map(api_key: str, secret_key: str, cid: str, adgroup_ids:
             for k in cleanup_keys:
                 item.pop(k, None)
             update_payload.append(item)
+            update_meta[kid] = {
+                "keyword": keyword_name,
+                "current_label": current_label,
+                "target_bid": target_bid,
+            }
         for i in range(0, len(update_payload), 100):
             batch = update_payload[i:i + 100]
             if not batch:
@@ -9465,16 +9812,38 @@ def _apply_keyword_bid_map(api_key: str, secret_key: str, cid: str, adgroup_ids:
             r_put = _do_req("PUT", api_key, secret_key, cid, "/ncc/keywords", params={"fields": "bidAmt,useGroupBidAmt"}, json_body=batch)
             if r_put.status_code in [200, 201]:
                 success_cnt += len(batch)
+                for item in batch:
+                    kid = str(item.get("nccKeywordId") or "").strip()
+                    meta = update_meta.get(kid, {})
+                    results.append({
+                        "ok": True,
+                        "level": "success",
+                        "keyword": meta.get("keyword") or item.get("keyword") or kid,
+                        "nccKeywordId": kid,
+                        "detail": f"{meta.get('current_label') or '현재가 없음'} → {int(meta.get('target_bid') or item.get('bidAmt') or 0):,}원 적용",
+                    })
             else:
                 for item in batch:
                     r_single = _do_req("PUT", api_key, secret_key, cid, f"/ncc/keywords/{item['nccKeywordId']}", params={"fields": "bidAmt,useGroupBidAmt"}, json_body=item)
+                    kid = str(item.get("nccKeywordId") or "").strip()
+                    meta = update_meta.get(kid, {})
+                    keyword_name = meta.get("keyword") or item.get("keyword") or kid
                     if r_single.status_code in [200, 201]:
                         success_cnt += 1
+                        results.append({
+                            "ok": True,
+                            "level": "success",
+                            "keyword": keyword_name,
+                            "nccKeywordId": kid,
+                            "detail": f"{meta.get('current_label') or '현재가 없음'} → {int(meta.get('target_bid') or item.get('bidAmt') or 0):,}원 적용",
+                        })
                     else:
                         fail_cnt += 1
+                        detail = f"변경 실패: {r_single.text}"
+                        results.append({"ok": False, "level": "fail", "keyword": keyword_name, "nccKeywordId": kid, "detail": detail, "code": _extract_error_code_from_value(r_single.text)})
                         if len(err_details) < 5:
-                            err_details.append(f"[{item.get('keyword', '알수없음')}] 변경 실패: {r_single.text}")
-    return success_cnt, fail_cnt, skipped_cnt, err_details
+                            err_details.append(f"[{keyword_name}] {detail}")
+    return success_cnt, fail_cnt, skipped_cnt, err_details, results
 def update_non_search_keyword_exclusion():
     d = request.get_json(force=True) or {}
     api_key = str(d.get("api_key") or "").strip()
@@ -9527,6 +9896,7 @@ def preview_keyword_bids_by_search():
     search_text = str(d.get("search_text") or d.get("keyword_query") or "").strip()
     exact_match = _boolish(d.get("exact_match"), False)
     exclude_text = str(d.get("exclude_text") or d.get("exclude_keyword_query") or "").strip()
+    boundary_match = _boolish(d.get("boundary_match", d.get("korean_boundary_match")), False)
     search_scope = str(d.get("search_scope") or "account").strip().lower()
     campaign_ids = [str(x or "").strip() for x in (d.get("campaign_ids") or []) if str(x or "").strip()]
     adgroup_ids = [str(x or "").strip() for x in (d.get("adgroup_ids") or []) if str(x or "").strip()]
@@ -9549,6 +9919,7 @@ def preview_keyword_bids_by_search():
         campaign_ids=(campaign_ids if search_scope == "selected_campaigns" else None),
         adgroup_ids=(adgroup_ids if search_scope == "selected_adgroups" else None),
         exclude_text=exclude_text,
+        boundary_match=boundary_match,
     )
     powerlink_campaigns = scan["powerlink_campaigns"]
     adgroup_contexts = scan["adgroup_contexts"]
@@ -9556,7 +9927,7 @@ def preview_keyword_bids_by_search():
     err_details = scan["warnings"]
     scanned_keyword_count = int(scan["scanned_keyword_count"])
     matched_count = int(scan["matched_count"])
-    preview_token = hashlib.sha256(f"{cid}|{search_scope}|{'/'.join(campaign_ids)}|{'/'.join(adgroup_ids)}|{search_text}|{exclude_text}|{'1' if exact_match else '0'}|{matched_count}".encode('utf-8')).hexdigest()[:20]
+    preview_token = hashlib.sha256(f"{cid}|{search_scope}|{'/'.join(campaign_ids)}|{'/'.join(adgroup_ids)}|{search_text}|{exclude_text}|{'1' if exact_match else '0'}|{'1' if boundary_match else '0'}|{matched_count}".encode('utf-8')).hexdigest()[:20]
     scope_label = "선택 캠페인 기준" if search_scope == "selected_campaigns" else ("선택 그룹 기준" if search_scope == "selected_adgroups" else "계정 전체 기준")
     return jsonify({
         "ok": True,
@@ -9564,6 +9935,7 @@ def preview_keyword_bids_by_search():
         "search_text": search_text,
         "search_groups": scan.get("search_groups") or _parse_keyword_search_groups(search_text),
         "exact_match": bool(exact_match),
+        "boundary_match": bool(boundary_match),
         "exclude_text": exclude_text,
         "matched_count": matched_count,
         "scanned_keyword_count": scanned_keyword_count,
@@ -9584,6 +9956,7 @@ def update_keyword_bids_by_search():
     search_text = str(d.get("search_text") or d.get("keyword_query") or "").strip()
     exact_match = _boolish(d.get("exact_match"), False)
     exclude_text = str(d.get("exclude_text") or d.get("exclude_keyword_query") or "").strip()
+    boundary_match = _boolish(d.get("boundary_match", d.get("korean_boundary_match")), False)
     search_scope = str(d.get("search_scope") or "account").strip().lower()
     campaign_ids = [str(x or "").strip() for x in (d.get("campaign_ids") or []) if str(x or "").strip()]
     adgroup_ids = [str(x or "").strip() for x in (d.get("adgroup_ids") or []) if str(x or "").strip()]
@@ -9627,6 +10000,7 @@ def update_keyword_bids_by_search():
         campaign_ids=(campaign_ids if search_scope == "selected_campaigns" else None),
         adgroup_ids=(adgroup_ids if search_scope == "selected_adgroups" else None),
         exclude_text=exclude_text,
+        boundary_match=boundary_match,
     )
     powerlink_campaigns = scan["powerlink_campaigns"]
     adgroup_contexts = scan["adgroup_contexts"]
@@ -9767,7 +10141,7 @@ def update_keyword_bids_by_search():
                     )
                     if len(err_details) < 10:
                         err_details.append(f"[{item.get('keyword', '알수없음')}] 키워드 입찰가 변경 실패: {r_single.text}")
-    mode_label = "완전일치" if exact_match else "부분일치"
+    mode_label = "완전일치" if exact_match else ("부분일치 · 지명경계" if boundary_match else "부분일치")
     target_bid_label = "키워드별 개별 지정" if override_bid_map else f"{int(target_bid or 0):,}원"
     target_count = int(len(update_payload) + skipped_count + (len(override_bid_map) - len(processed_override_ids) if override_bid_map else 0))
     lines = [
@@ -9798,6 +10172,7 @@ def update_keyword_bids_by_search():
         "message": "\n".join(lines),
         "search_text": search_text,
         "exact_match": bool(exact_match),
+        "boundary_match": bool(boundary_match),
         "exclude_text": exclude_text,
         "search_scope": search_scope,
         "target_bid": (int(target_bid) if target_bid is not None else None),
@@ -9827,6 +10202,7 @@ def preview_keyword_bid_weights_by_search():
     cid = str(d.get("customer_id") or "").strip()
     search_text = str(d.get("search_text") or d.get("keyword_query") or "").strip()
     exact_match = _boolish(d.get("exact_match"), False)
+    boundary_match = _boolish(d.get("boundary_match", d.get("korean_boundary_match")), False)
     search_scope = str(d.get("search_scope") or "account").strip().lower()
     campaign_ids = [str(x or "").strip() for x in (d.get("campaign_ids") or []) if str(x or "").strip()]
     adgroup_ids = [str(x or "").strip() for x in (d.get("adgroup_ids") or []) if str(x or "").strip()]
@@ -9848,6 +10224,7 @@ def preview_keyword_bid_weights_by_search():
         exact_match=exact_match,
         campaign_ids=(campaign_ids if search_scope == "selected_campaigns" else None),
         adgroup_ids=(adgroup_ids if search_scope == "selected_adgroups" else None),
+        boundary_match=boundary_match,
     )
     powerlink_campaigns = scan["powerlink_campaigns"]
     adgroup_contexts = scan["adgroup_contexts"]
@@ -9855,7 +10232,7 @@ def preview_keyword_bid_weights_by_search():
     err_details = scan["warnings"]
     scanned_keyword_count = int(scan["scanned_keyword_count"])
     matched_count = int(scan["matched_count"])
-    mode_label = "완전일치" if exact_match else "부분일치"
+    mode_label = "완전일치" if exact_match else ("부분일치 · 지명경계" if boundary_match else "부분일치")
     scope_label = "선택 캠페인 기준" if search_scope == "selected_campaigns" else ("선택 그룹 기준" if search_scope == "selected_adgroups" else "계정 전체 기준")
     lines = [
         f"검색어 기준 파워링크 키워드 입찰가중치 조회 완료! ({mode_label})",
@@ -9875,12 +10252,13 @@ def preview_keyword_bid_weights_by_search():
     if err_details:
         lines.append("\n[상세 내역]")
         lines.extend(err_details[:10])
-    preview_token = hashlib.sha256(f"BW|{cid}|{search_text}|{'1' if exact_match else '0'}|{matched_count}".encode('utf-8')).hexdigest()[:20]
+    preview_token = hashlib.sha256(f"BW|{cid}|{search_scope}|{search_text}|{'1' if exact_match else '0'}|{'1' if boundary_match else '0'}|{matched_count}".encode('utf-8')).hexdigest()[:20]
     return jsonify({
         "ok": True,
         "message": "\n".join(lines),
         "search_text": search_text,
         "exact_match": bool(exact_match),
+        "boundary_match": bool(boundary_match),
         "matched_count": matched_count,
         "scanned_keyword_count": scanned_keyword_count,
         "total_powerlink_campaign_count": len(powerlink_campaigns),
@@ -9899,6 +10277,7 @@ def update_keyword_bid_weights_by_search():
     cid = str(d.get("customer_id") or "").strip()
     search_text = str(d.get("search_text") or d.get("keyword_query") or "").strip()
     exact_match = _boolish(d.get("exact_match"), False)
+    boundary_match = _boolish(d.get("boundary_match", d.get("korean_boundary_match")), False)
     search_scope = str(d.get("search_scope") or "account").strip().lower()
     campaign_ids = [str(x or "").strip() for x in (d.get("campaign_ids") or []) if str(x or "").strip()]
     adgroup_ids = [str(x or "").strip() for x in (d.get("adgroup_ids") or []) if str(x or "").strip()]
@@ -9923,6 +10302,7 @@ def update_keyword_bid_weights_by_search():
         exact_match=exact_match,
         campaign_ids=(campaign_ids if search_scope == "selected_campaigns" else None),
         adgroup_ids=(adgroup_ids if search_scope == "selected_adgroups" else None),
+        boundary_match=boundary_match,
     )
     powerlink_campaigns = scan["powerlink_campaigns"]
     adgroup_contexts = scan["adgroup_contexts"]
@@ -10033,7 +10413,7 @@ def update_keyword_bid_weights_by_search():
                     )
                     if len(err_details) < 10:
                         err_details.append(f"[{item.get('keyword', '알수없음')}] 키워드 입찰가중치 변경 실패: {r_single.text}")
-    mode_label = "완전일치" if exact_match else "부분일치"
+    mode_label = "완전일치" if exact_match else ("부분일치 · 지명경계" if boundary_match else "부분일치")
     lines = [
         f"검색어 기준 파워링크 키워드 입찰가중치 변경 완료! ({mode_label})",
         f"범위: {scope_label}",
@@ -10059,6 +10439,7 @@ def update_keyword_bid_weights_by_search():
         "message": "\n".join(lines),
         "search_text": search_text,
         "exact_match": bool(exact_match),
+        "boundary_match": bool(boundary_match),
         "search_scope": search_scope,
         "target_weight": int(target_weight),
         "matched_count": int(matched_count),
@@ -10574,16 +10955,19 @@ def adjust_keyword_bids_by_threshold():
     kw_success = kw_fail = kw_skipped = 0
     ad_success = ad_fail = ad_skipped = 0
     err_details: List[str] = []
+    result_rows: List[Dict[str, Any]] = []
     if keyword_bid_map:
-        kw_success, kw_fail, kw_skipped, kw_err_details = _apply_keyword_bid_map(
+        kw_success, kw_fail, kw_skipped, kw_err_details, kw_result_rows = _apply_keyword_bid_map(
             api_key, secret_key, cid, [str(x.get("adgroup_id") or "") for x in adgroup_contexts if not _adgroup_uses_ad_level_bid(x.get("adgroup_type"))], keyword_bid_map, keyword_meta=keyword_meta
         )
         err_details.extend(kw_err_details)
+        result_rows.extend(kw_result_rows)
     if ad_bid_map:
-        ad_success, ad_fail, ad_skipped, ad_err_details = _apply_ad_bid_map(
+        ad_success, ad_fail, ad_skipped, ad_err_details, ad_result_rows = _apply_ad_bid_map(
             api_key, secret_key, cid, adgroup_contexts, ad_bid_map, ad_meta=ad_meta
         )
         err_details.extend(ad_err_details)
+        result_rows.extend(ad_result_rows)
     stats = _calc_bid_stats(list(keyword_bid_map.values()) + list(ad_bid_map.values()))
     lines = [
         "상/하한 기준 입찰가 조정 완료!",
@@ -10623,6 +11007,7 @@ def adjust_keyword_bids_by_threshold():
             "unchanged_preview": unchanged_preview,
             "skipped": kw_skipped + ad_skipped,
         },
+        "results": result_rows,
     })
 
 def _keyword_avg_position_by_search_common(d: Dict[str, Any], preview_only: bool):
@@ -10632,6 +11017,7 @@ def _keyword_avg_position_by_search_common(d: Dict[str, Any], preview_only: bool
     search_text = str(d.get("search_text") or d.get("keyword_query") or "").strip()
     exclude_text = str(d.get("exclude_text") or d.get("keyword_exclude") or "").strip()
     exact_match = _boolish(d.get("exact_match"), False)
+    boundary_match = _boolish(d.get("boundary_match", d.get("korean_boundary_match")), False)
     search_scope = str(d.get("search_scope") or "account").strip().lower()
     campaign_ids = _unique_keep_order([str(x or "").strip() for x in (d.get("campaign_ids") or []) if str(x or "").strip()])
     adgroup_ids = _unique_keep_order([str(x or "").strip() for x in (d.get("adgroup_ids") or []) if str(x or "").strip()])
@@ -10679,6 +11065,7 @@ def _keyword_avg_position_by_search_common(d: Dict[str, Any], preview_only: bool
         campaign_ids=scope_campaign_ids,
         adgroup_ids=scope_adgroup_ids,
         exclude_text=exclude_text,
+        boundary_match=boundary_match,
     )
     matched_rows = scan.get("matched_rows") or []
     if not matched_rows:
@@ -10783,7 +11170,7 @@ def _keyword_avg_position_by_search_common(d: Dict[str, Any], preview_only: bool
                 "will_change": will_change,
             })
     stats = _calc_bid_stats(list(estimated_map.values()))
-    mode_label = "완전일치" if exact_match else "부분일치"
+    mode_label = "완전일치" if exact_match else ("부분일치 · 지명경계" if boundary_match else "부분일치")
     scope_label = "선택 캠페인" if search_scope == "campaign" else ("선택 광고그룹" if search_scope == "adgroup" else "전체 계정")
     lines = [
         f"검색어 기준 파워링크 평균순위 {device} {position}위 입찰가 {'미리보기' if preview_only else '적용'} 완료 ({mode_label})",
@@ -10822,13 +11209,14 @@ def _keyword_avg_position_by_search_common(d: Dict[str, Any], preview_only: bool
         lines.extend(warnings[:5])
 
     if preview_only:
-        token_src = f"{cid}|{search_text}|{exclude_text}|{exact_match}|{search_scope}|{','.join(scope_campaign_ids or [])}|{','.join(scope_adgroup_ids or [])}|{device}|{position}|{min_bid or ''}|{max_bid or ''}|{len(estimated_map)}|{len(changed_bids)}"
+        token_src = f"{cid}|{search_text}|{exclude_text}|{exact_match}|{boundary_match}|{search_scope}|{','.join(scope_campaign_ids or [])}|{','.join(scope_adgroup_ids or [])}|{device}|{position}|{min_bid or ''}|{max_bid or ''}|{len(estimated_map)}|{len(changed_bids)}"
         preview_token = hashlib.sha256(token_src.encode("utf-8")).hexdigest()[:20]
         return jsonify({
             "ok": True,
             "preview": True,
             "message": "\n".join(lines),
             "preview_token": preview_token,
+            "boundary_match": bool(boundary_match),
             "matched_count": len(matched_rows),
             "estimated": len(estimated_map),
             "changed": len(changed_bids),
@@ -10839,7 +11227,7 @@ def _keyword_avg_position_by_search_common(d: Dict[str, Any], preview_only: bool
             "skipped_pending": skipped_pending,
         })
 
-    success_cnt, fail_cnt, skipped_cnt, err_details = _apply_keyword_bid_map(api_key, secret_key, cid, keyword_adgroup_ids, estimated_map, keyword_meta=keyword_meta)
+    success_cnt, fail_cnt, skipped_cnt, err_details, result_rows = _apply_keyword_bid_map(api_key, secret_key, cid, keyword_adgroup_ids, estimated_map, keyword_meta=keyword_meta)
     lines.append(f"\n변경 성공: {success_cnt}개 / 실패: {fail_cnt}개 / 유지/생략: {skipped_cnt}개")
     if err_details:
         lines.append("\n[실패 상세]")
@@ -10848,6 +11236,7 @@ def _keyword_avg_position_by_search_common(d: Dict[str, Any], preview_only: bool
         "ok": True,
         "preview": False,
         "message": "\n".join(lines),
+        "boundary_match": bool(boundary_match),
         "matched_count": len(matched_rows),
         "estimated": len(estimated_map),
         "changed": len(changed_bids),
@@ -10856,6 +11245,7 @@ def _keyword_avg_position_by_search_common(d: Dict[str, Any], preview_only: bool
         "skipped_count": skipped_cnt,
         "updated_adgroup_ids": keyword_adgroup_ids,
         "rows": preview_rows,
+        "results": result_rows,
         "warnings": warnings[:10],
     }), (200 if fail_cnt == 0 else 207)
 
@@ -11146,12 +11536,15 @@ def update_keyword_bids_avg_position():
     kw_success = kw_fail = kw_skipped = 0
     ad_success = ad_fail = ad_skipped = 0
     err_details: List[str] = []
+    result_rows: List[Dict[str, Any]] = []
     if estimated_keyword_bid_map:
-        kw_success, kw_fail, kw_skipped, kw_err_details = _apply_keyword_bid_map(api_key, secret_key, cid, keyword_adgroup_ids, estimated_keyword_bid_map, keyword_meta=keyword_meta)
+        kw_success, kw_fail, kw_skipped, kw_err_details, kw_result_rows = _apply_keyword_bid_map(api_key, secret_key, cid, keyword_adgroup_ids, estimated_keyword_bid_map, keyword_meta=keyword_meta)
         err_details.extend(kw_err_details)
+        result_rows.extend(kw_result_rows)
     if estimated_ad_bid_map:
-        ad_success, ad_fail, ad_skipped, ad_err_details = _apply_ad_bid_map(api_key, secret_key, cid, shopping_contexts, estimated_ad_bid_map, ad_meta=ad_meta)
+        ad_success, ad_fail, ad_skipped, ad_err_details, ad_result_rows = _apply_ad_bid_map(api_key, secret_key, cid, shopping_contexts, estimated_ad_bid_map, ad_meta=ad_meta)
         err_details.extend(ad_err_details)
+        result_rows.extend(ad_result_rows)
     type_label = "파워링크" if avg_target_type == "powerlink" else ("쇼핑검색" if avg_target_type == "shopping" else "전체")
     lines = [
         f"{type_label} · {device} 평균순위 {position}위 기준 입찰가 적용 완료!",
@@ -11194,6 +11587,7 @@ def update_keyword_bids_avg_position():
         "skipped": kw_skipped + ad_skipped,
         "unchanged": unchanged_cnt,
         "stats": stats,
+        "results": result_rows,
     })
 def _delete_payload_rows(api_key: str, secret_key: str, cid: str, entity_type: str, rows: List[Dict[str, Any]], max_workers: int | None = None):
     def _delete_one(idx: int, row: Dict[str, Any]):
@@ -12349,6 +12743,7 @@ def set_searched_powerlink_keyword_state():
     success = 0
     fail = 0
     details: List[str] = []
+    results: List[Dict[str, Any]] = []
     max_workers = min(max(1, BID_IO_WORKERS), max(1, len(normalized_ids)))
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         future_map = {ex.submit(_set_keyword_state, api_key, secret_key, cid, kid, enabled): kid for kid in normalized_ids}
@@ -12360,15 +12755,17 @@ def set_searched_powerlink_keyword_state():
                 ok, detail = False, str(exc)
             if ok:
                 success += 1
+                results.append({"ok": True, "level": "success", "target": kid, "detail": f"{'ON' if enabled else 'OFF'} 변경 완료"})
             else:
                 fail += 1
+                results.append({"ok": False, "level": "fail", "target": kid, "detail": detail, "code": _extract_error_code_from_value(detail)})
                 if detail and len(details) < 12:
                     details.append(f"[{kid}] {detail}")
     msg = f"조회 키워드 {'ON' if enabled else 'OFF'} 완료! (성공: {success} / 실패: {fail})"
     if details:
         msg += "\n" + "\n".join(details)
     _cache_invalidate(api_key, secret_key, cid)
-    return jsonify({"ok": True, "message": msg, "success": success, "fail": fail, "enabled": enabled})
+    return jsonify({"ok": True, "message": msg, "success": success, "fail": fail, "enabled": enabled, "results": results})
 def set_campaign_state():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
@@ -12530,6 +12927,20 @@ _COPY_DELETE_SERVICE = CopyDeleteService({
 })
 app.register_blueprint(create_copy_delete_blueprint(_COPY_DELETE_SERVICE))
 
+def _pick_available_port(start_port: int = 5000, max_tries: int = 20) -> int:
+    for port in range(int(start_port), int(start_port) + int(max_tries)):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                sock.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return port
+    return int(start_port)
+
 if __name__ == "__main__":
     os.makedirs(SAMPLES_DIR, exist_ok=True)
-    app.run(debug=True, port=5000)
+    port = _pick_available_port(5000)
+    if port != 5000:
+        print(f"Port 5000 is already in use. Running on http://127.0.0.1:{port}")
+    app.run(debug=True, port=port, use_reloader=False)
