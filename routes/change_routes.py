@@ -41,6 +41,8 @@ def create_change_blueprint(service):
         ("/set_ads_state_by_scope", "set_ads_state_by_scope"),
         ("/set_ad_extensions_state_by_scope", "set_ad_extensions_state_by_scope"),
         ("/set_asset_state_by_ids", "set_asset_state_by_ids"),
+        ("/update_ad_product_name", "update_ad_product_name"),
+        ("/update_ad_product_names_bulk", "update_ad_product_names_bulk"),
     ]
     # Register the main POST routes.
     # Some older local builds or cached HTML can call the restricted-media URLs

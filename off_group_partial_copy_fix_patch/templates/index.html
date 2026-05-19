@@ -7046,1019 +7046,6 @@
       transform: none !important;
     }
 
-    /* Unified UI cleanup pass 2026-05-19
-       Final visual layer only: keeps markup, IDs, and event handlers intact. */
-    :root {
-      --clean-bg: #f4f6f8;
-      --clean-panel: #ffffff;
-      --clean-panel-2: #f9fafb;
-      --clean-panel-3: #f1f5f9;
-      --clean-line: #d8dee8;
-      --clean-line-strong: #c5cedb;
-      --clean-text: #101828;
-      --clean-muted: #667085;
-      --clean-faint: #98a2b3;
-      --clean-ink: #172033;
-      --clean-blue: #2563eb;
-      --clean-blue-soft: #eff6ff;
-      --clean-green: #059669;
-      --clean-green-soft: #ecfdf3;
-      --clean-red: #dc2626;
-      --clean-red-soft: #fff1f0;
-      --clean-purple: #6d5bd0;
-      --clean-purple-soft: #f4f3ff;
-      --clean-amber: #b7791f;
-      --clean-amber-soft: #fff7e6;
-      --clean-radius: 8px;
-      --clean-shadow: 0 1px 2px rgba(16,24,40,.05), 0 8px 22px rgba(16,24,40,.06);
-      --bg: var(--clean-bg);
-      --card: var(--clean-panel);
-      --line: var(--clean-line);
-      --border: var(--clean-line);
-      --text: var(--clean-text);
-      --muted: var(--clean-muted);
-      --blue: var(--clean-blue);
-      --blue-bg: var(--clean-blue-soft);
-      --green: var(--clean-green);
-      --green-bg: var(--clean-green-soft);
-      --red: var(--clean-red);
-      --red-bg: var(--clean-red-soft);
-      --purple: var(--clean-purple);
-      --surface: var(--clean-panel-3);
-      --surface-strong: var(--clean-line-strong);
-      --radius-lg: var(--clean-radius);
-      --radius-md: var(--clean-radius);
-    }
-
-    html,
-    body {
-      background: var(--clean-bg) !important;
-      color: var(--clean-text) !important;
-      font-family: Pretendard, Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
-      font-size: 13px !important;
-      letter-spacing: 0 !important;
-      text-rendering: optimizeLegibility;
-    }
-    *,
-    *::before,
-    *::after {
-      letter-spacing: 0 !important;
-    }
-
-    .app-layout {
-      width: 100vw !important;
-      height: 100vh !important;
-      background: var(--clean-bg) !important;
-    }
-    .sidebar {
-      width: 260px !important;
-      padding: 12px !important;
-      background: #111827 !important;
-      border-right: 1px solid #263244 !important;
-    }
-    .master-panel {
-      width: 340px !important;
-      background: var(--clean-panel) !important;
-      border-right: 1px solid var(--clean-line) !important;
-    }
-    .detail-panel {
-      min-width: 0 !important;
-      background: var(--clean-bg) !important;
-    }
-    .app-layout.account-sidebar-collapsed .sidebar {
-      width: 50px !important;
-      padding: 10px 8px !important;
-    }
-    .app-layout.target-panel-collapsed .master-panel {
-      width: 50px !important;
-    }
-
-    .brand {
-      margin: 0 0 10px !important;
-      padding: 6px 6px 12px !important;
-      border-bottom: 1px solid rgba(255,255,255,.10) !important;
-    }
-    .brand h1 {
-      color: #fff !important;
-      font-size: 15px !important;
-      font-weight: 850 !important;
-      line-height: 1.25 !important;
-    }
-    .side-card,
-    .auth-card {
-      padding: 10px !important;
-      background: #192335 !important;
-      border: 1px solid #2e3d54 !important;
-      border-radius: var(--clean-radius) !important;
-      box-shadow: none !important;
-    }
-    .sidebar .list-group-title,
-    .sidebar .form-group label {
-      color: #b7c1cf !important;
-      font-size: 11px !important;
-      font-weight: 800 !important;
-      text-transform: none !important;
-    }
-    .sidebar input[type="text"],
-    .sidebar input[type="password"] {
-      min-height: 34px !important;
-      background: #202b3d !important;
-      color: #f8fafc !important;
-      border: 1px solid #35445c !important;
-      border-radius: var(--clean-radius) !important;
-    }
-    .account-item {
-      margin-bottom: 5px !important;
-      padding: 9px !important;
-      color: #e6edf7 !important;
-      border: 1px solid transparent !important;
-      border-radius: var(--clean-radius) !important;
-      background: transparent !important;
-      box-shadow: none !important;
-      transform: none !important;
-    }
-    .account-item:hover {
-      background: #1d2a3d !important;
-      border-color: #33445d !important;
-    }
-    .account-item.active {
-      background: #e9f3ff !important;
-      border-color: #9cc3ff !important;
-      color: #10243f !important;
-      box-shadow: inset 3px 0 0 var(--clean-green) !important;
-    }
-    .account-item .name,
-    .list-item .title {
-      font-weight: 800 !important;
-      line-height: 1.35 !important;
-    }
-    .account-item .sub,
-    .list-item .meta {
-      line-height: 1.35 !important;
-    }
-
-    .master-header,
-    .breadcrumb-bar,
-    .workspace-toolbar,
-    .workspace-content > .main-tabs,
-    .workspace-content > .workflow-main-tabs,
-    .sub-tabs {
-      background: var(--clean-panel) !important;
-      border-color: var(--clean-line) !important;
-      border-radius: var(--clean-radius) !important;
-      box-shadow: none !important;
-      backdrop-filter: none !important;
-      -webkit-backdrop-filter: none !important;
-    }
-    .master-header {
-      padding: 12px !important;
-    }
-    .master-header h2 {
-      margin: 0 0 10px !important;
-      font-size: 15px !important;
-      line-height: 1.3 !important;
-    }
-    .master-content {
-      padding: 8px 10px 16px !important;
-    }
-    .list-group-title,
-    .type-filter-label {
-      margin: 12px 2px 7px !important;
-      color: var(--clean-muted) !important;
-      font-size: 11px !important;
-      font-weight: 850 !important;
-    }
-    .quick-select-row {
-      gap: 6px !important;
-      margin: 7px 0 10px !important;
-    }
-    .list-item {
-      min-height: 42px !important;
-      padding: 9px 10px !important;
-      border-radius: var(--clean-radius) !important;
-      border: 1px solid transparent !important;
-      background: transparent !important;
-      transform: none !important;
-    }
-    .list-item:hover {
-      background: var(--clean-panel-2) !important;
-      border-color: var(--clean-line) !important;
-    }
-    .list-item.active {
-      background: var(--clean-blue-soft) !important;
-      border-color: #b8ccff !important;
-      box-shadow: inset 3px 0 0 var(--clean-blue) !important;
-    }
-
-    .breadcrumb-bar {
-      min-height: 44px !important;
-      padding: 9px 16px !important;
-      border-radius: 0 !important;
-      border-width: 0 0 1px 0 !important;
-      font-size: 12px !important;
-    }
-    .breadcrumb-bar > div {
-      min-width: 0 !important;
-      flex-wrap: wrap !important;
-      justify-content: flex-end !important;
-    }
-    .selection-summary-pill,
-    #workspace_selection_mini,
-    .selection-float-status {
-      min-width: 0 !important;
-      color: #344054 !important;
-      background: var(--clean-panel-3) !important;
-      border: 1px solid var(--clean-line) !important;
-      border-radius: var(--clean-radius) !important;
-      line-height: 1.25 !important;
-    }
-
-    .workspace-content {
-      padding: 12px 16px 82px !important;
-      background: var(--clean-bg) !important;
-      scroll-padding-top: 146px !important;
-    }
-    .workspace-toolbar {
-      position: sticky !important;
-      top: 0 !important;
-      z-index: 50 !important;
-      display: grid !important;
-      grid-template-columns: minmax(170px, auto) minmax(300px, 1fr) !important;
-      gap: 8px !important;
-      min-height: 44px !important;
-      margin-bottom: 8px !important;
-      padding: 6px 8px !important;
-      border: 1px solid var(--clean-line) !important;
-    }
-    .workspace-status,
-    .workspace-actions,
-    .workflow-help-controls,
-    .btn-row {
-      min-width: 0 !important;
-      flex-wrap: wrap !important;
-    }
-    .toolbar-label {
-      min-height: 24px !important;
-      padding: 4px 8px !important;
-      border-radius: 6px !important;
-      background: var(--clean-panel-3) !important;
-      color: var(--clean-muted) !important;
-      font-size: 11px !important;
-      font-weight: 850 !important;
-    }
-    .workflow-help-hub {
-      width: min(760px, 100%) !important;
-      min-height: 32px !important;
-      display: grid !important;
-      grid-template-columns: auto minmax(180px, 1fr) auto !important;
-      gap: 6px !important;
-      padding: 4px !important;
-      background: #fff !important;
-      border: 1px solid var(--clean-line) !important;
-      border-radius: var(--clean-radius) !important;
-      box-shadow: none !important;
-    }
-    .workflow-help-hub-label {
-      min-height: 26px !important;
-      padding: 0 8px !important;
-      color: var(--clean-muted) !important;
-      border-right: 1px solid var(--clean-line) !important;
-      font-size: 12px !important;
-      white-space: nowrap !important;
-    }
-    .workflow-help-arrow {
-      display: none !important;
-    }
-    .workflow-command-input {
-      height: 28px !important;
-      min-height: 28px !important;
-      border: 0 !important;
-      background: transparent !important;
-      box-shadow: none !important;
-    }
-
-    .workspace-content > .workflow-main-tabs,
-    .workspace-content > .main-tabs {
-      top: calc(var(--workspace-toolbar-h, 44px) + 6px) !important;
-      z-index: 48 !important;
-      display: flex !important;
-      min-height: 38px !important;
-      margin: 0 0 8px !important;
-      padding: 3px !important;
-      gap: 3px !important;
-      overflow-x: auto !important;
-      overflow-y: hidden !important;
-      border: 1px solid var(--clean-line) !important;
-    }
-    .workspace-content > .workflow-main-tabs .tab-btn,
-    .workspace-content > .main-tabs .tab-btn,
-    .sub-tabs .tab-btn {
-      display: inline-flex !important;
-      align-items: center !important;
-      justify-content: center !important;
-      white-space: nowrap !important;
-      min-height: 30px !important;
-      border-radius: 6px !important;
-      border: 1px solid transparent !important;
-      transform: none !important;
-      box-shadow: none !important;
-    }
-    .workspace-content > .workflow-main-tabs .tab-btn,
-    .workspace-content > .main-tabs .tab-btn {
-      padding: 5px 13px !important;
-      color: var(--clean-muted) !important;
-      font-size: 13px !important;
-      font-weight: 850 !important;
-    }
-    .workspace-content > .workflow-main-tabs .tab-btn:hover,
-    .workspace-content > .main-tabs .tab-btn:hover {
-      color: var(--clean-text) !important;
-      background: var(--clean-panel-3) !important;
-    }
-    .workspace-content > .workflow-main-tabs .tab-btn.active,
-    .workspace-content > .main-tabs .tab-btn.active {
-      color: #fff !important;
-      background: var(--clean-ink) !important;
-      border-color: var(--clean-ink) !important;
-    }
-    .workspace-content > .workflow-main-tabs .danger-tab.active,
-    .workspace-content > .main-tabs .danger-tab.active {
-      color: #fff !important;
-      background: var(--clean-red) !important;
-      border-color: var(--clean-red) !important;
-    }
-    .sub-tabs {
-      position: sticky !important;
-      top: calc(var(--workspace-toolbar-h, 44px) + var(--workspace-main-tabs-h, 38px) + 6px) !important;
-      z-index: 46 !important;
-      padding: 5px !important;
-      gap: 4px !important;
-      border: 1px solid var(--clean-line) !important;
-      overflow-x: auto !important;
-    }
-    .sub-tabs .tab-btn {
-      padding: 5px 10px !important;
-      color: var(--clean-muted) !important;
-      font-size: 12px !important;
-      font-weight: 800 !important;
-      background: transparent !important;
-    }
-    .sub-tabs .tab-btn.active {
-      color: var(--clean-blue) !important;
-      background: var(--clean-blue-soft) !important;
-      border-color: #bfd0ff !important;
-    }
-
-    .workflow-shortcut-panel,
-    .workflow-guide-card,
-    .workflow-quick-card-wrap,
-    .workflow-next-action-card {
-      display: none !important;
-    }
-    .card,
-    .workflow-shortcut-panel,
-    .workflow-guide-card,
-    .workflow-quick-card-wrap,
-    .workflow-next-action-card,
-    .log-item,
-    .detail-table-shell,
-    .media-detail-group,
-    .keyword-diagnosis-panel,
-    .keyword-diagnosis-entry-card,
-    .keyword-diagnosis-side-card,
-    .copy-name-panel,
-    .restricted-media-box,
-    .restricted-media-list {
-      border: 1px solid var(--clean-line) !important;
-      border-radius: var(--clean-radius) !important;
-      background: var(--clean-panel) !important;
-      box-shadow: none !important;
-      transform: none !important;
-    }
-    .card {
-      margin-bottom: 10px !important;
-      padding: 14px !important;
-    }
-    .workspace-content .card:hover {
-      border-color: var(--clean-line-strong) !important;
-      box-shadow: none !important;
-    }
-    .card-title,
-    .workflow-guide-title,
-    .workflow-quick-card-title,
-    .workflow-next-title {
-      min-height: 26px !important;
-      margin: -1px 0 12px !important;
-      padding-bottom: 9px !important;
-      color: var(--clean-text) !important;
-      border-bottom: 1px solid var(--clean-line) !important;
-      font-size: 14px !important;
-      font-weight: 850 !important;
-      line-height: 1.35 !important;
-    }
-    .workspace-content .card.dense-card .card-title::after {
-      content: '설정' !important;
-      margin-left: auto !important;
-      padding: 3px 7px !important;
-      border-radius: 6px !important;
-      background: var(--clean-panel-3) !important;
-      border: 1px solid var(--clean-line) !important;
-      color: var(--clean-muted) !important;
-      font-size: 10px !important;
-      font-weight: 850 !important;
-    }
-
-    .grid-2 {
-      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-      gap: 10px !important;
-    }
-    .grid-3 {
-      grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-      gap: 10px !important;
-    }
-    .form-group {
-      margin-bottom: 11px !important;
-      min-width: 0 !important;
-    }
-    .form-group label {
-      margin-bottom: 5px !important;
-      color: #475467 !important;
-      font-size: 12px !important;
-      font-weight: 800 !important;
-      line-height: 1.35 !important;
-    }
-    .field-help,
-    .field-note,
-    .log-meta,
-    .log-msg,
-    .log-summary {
-      color: var(--clean-muted) !important;
-      font-size: 12px !important;
-      line-height: 1.45 !important;
-    }
-
-    input[type="text"],
-    input[type="password"],
-    input[type="number"],
-    input[type="search"],
-    select,
-    textarea {
-      min-height: 34px !important;
-      padding: 8px 10px !important;
-      color: var(--clean-text) !important;
-      background: #fff !important;
-      border: 1px solid var(--clean-line-strong) !important;
-      border-radius: var(--clean-radius) !important;
-      box-shadow: none !important;
-    }
-    textarea {
-      line-height: 1.5 !important;
-      resize: vertical;
-    }
-    input:hover,
-    select:hover,
-    textarea:hover {
-      border-color: #b5c0ce !important;
-    }
-    input:focus,
-    select:focus,
-    textarea:focus {
-      border-color: var(--clean-blue) !important;
-      box-shadow: 0 0 0 3px rgba(37,99,235,.12) !important;
-      outline: none !important;
-    }
-    input[type="checkbox"],
-    input[type="radio"] {
-      accent-color: var(--clean-blue) !important;
-    }
-
-    .btn,
-    .type-select-btn,
-    .mini-toolbar-btn,
-    .selection-float-action-btn,
-    .selection-float-top-btn,
-    .workflow-next-btn,
-    .scope-btn,
-    .mini-chip,
-    .day-chip,
-    .schedule-mini-chip {
-      display: inline-flex !important;
-      align-items: center !important;
-      justify-content: center !important;
-      min-height: 32px !important;
-      padding: 6px 10px !important;
-      border: 1px solid var(--clean-line-strong) !important;
-      border-radius: var(--clean-radius) !important;
-      font-size: 12px !important;
-      font-weight: 800 !important;
-      line-height: 1.2 !important;
-      white-space: nowrap !important;
-      box-shadow: none !important;
-      transform: none !important;
-      filter: none !important;
-      transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease !important;
-    }
-    .btn:hover:not(:disabled),
-    .type-select-btn:hover,
-    .mini-toolbar-btn:hover,
-    .selection-float-action-btn:hover,
-    .selection-float-top-btn:hover,
-    .workflow-next-btn:hover,
-    .scope-btn:hover,
-    .mini-chip:hover,
-    .day-chip:hover,
-    .schedule-mini-chip:hover {
-      transform: none !important;
-      box-shadow: none !important;
-    }
-    .btn-primary,
-    .workflow-next-btn.primary {
-      background: var(--clean-blue) !important;
-      border-color: var(--clean-blue) !important;
-      color: #fff !important;
-    }
-    .btn-primary:hover:not(:disabled),
-    .workflow-next-btn.primary:hover {
-      background: #1d4ed8 !important;
-      border-color: #1d4ed8 !important;
-    }
-    .btn-sub,
-    .mini-toolbar-btn,
-    .type-select-btn,
-    .selection-float-action-btn {
-      background: #fff !important;
-      color: var(--clean-text) !important;
-    }
-    .btn-sub:hover:not(:disabled),
-    .mini-toolbar-btn:hover,
-    .type-select-btn:hover,
-    .selection-float-action-btn:hover {
-      background: var(--clean-panel-3) !important;
-      border-color: #b5c0ce !important;
-    }
-    .btn-green,
-    .btn.is-export-action,
-    .workspace-content button.btn[onclick*="download"],
-    .workspace-content button.btn[onclick*="Download"],
-    .workspace-content button.btn[onclick*="export"],
-    .workspace-content button.btn[onclick*="Export"] {
-      background: var(--clean-green-soft) !important;
-      border-color: #b8e2c8 !important;
-      color: #067647 !important;
-    }
-    .btn-red,
-    .btn-danger,
-    .btn.is-danger-ghost:hover:not(:disabled) {
-      background: var(--clean-red) !important;
-      border-color: var(--clean-red) !important;
-      color: #fff !important;
-    }
-    .btn-purple {
-      background: var(--clean-purple) !important;
-      border-color: var(--clean-purple) !important;
-      color: #fff !important;
-    }
-    .match-mode-toggle-btn.match-mode-selected,
-    .match-mode-toggle-btn[data-selected="true"],
-    .mini-chip.active,
-    .day-chip.active,
-    .schedule-mini-chip.active {
-      background: var(--clean-ink) !important;
-      border-color: var(--clean-ink) !important;
-      color: #fff !important;
-    }
-    .type-select-btn.active,
-    .campaign-filter-btn.active,
-    .scope-btn.is-selected,
-    .scope-btn[aria-pressed="true"] {
-      background: var(--clean-blue-soft) !important;
-      border-color: #a9c4ff !important;
-      color: #1644a3 !important;
-      box-shadow: inset 0 0 0 1px rgba(37,99,235,.06) !important;
-    }
-    .type-select-btn.active:hover,
-    .campaign-filter-btn.active:hover,
-    .scope-btn.is-selected:hover,
-    .scope-btn[aria-pressed="true"]:hover {
-      background: #e5efff !important;
-      border-color: #8fb3ff !important;
-      color: #123a8c !important;
-    }
-    .campaign-filter-btn.active span,
-    .type-select-btn.active span {
-      display: inline-flex !important;
-      align-items: center !important;
-      justify-content: center !important;
-      min-width: 22px !important;
-      min-height: 20px !important;
-      margin-left: 4px !important;
-      padding: 2px 6px !important;
-      border-radius: 999px !important;
-      background: #dff7ea !important;
-      color: #067647 !important;
-      font-weight: 900 !important;
-    }
-
-    .badge,
-    .scope-badge {
-      min-height: 21px !important;
-      padding: 3px 7px !important;
-      border-radius: 6px !important;
-      border: 1px solid transparent !important;
-      font-size: 11px !important;
-      font-weight: 850 !important;
-      line-height: 1.15 !important;
-    }
-    .badge.blue,
-    .scope-badge-blue {
-      background: var(--clean-blue-soft) !important;
-      border-color: #c6d6ff !important;
-      color: var(--clean-blue) !important;
-    }
-    .badge.green {
-      background: var(--clean-green-soft) !important;
-      border-color: #b8e2c8 !important;
-      color: var(--clean-green) !important;
-    }
-
-    table {
-      width: 100% !important;
-      border: 1px solid var(--clean-line) !important;
-      border-radius: var(--clean-radius) !important;
-      background: #fff !important;
-      font-size: 12px !important;
-      box-shadow: none !important;
-    }
-    th,
-    td {
-      height: 34px !important;
-      padding: 8px 10px !important;
-      border-bottom: 1px solid var(--clean-line) !important;
-      vertical-align: middle !important;
-      line-height: 1.35 !important;
-    }
-    th {
-      background: var(--clean-panel-2) !important;
-      color: #475467 !important;
-      font-size: 11px !important;
-      font-weight: 850 !important;
-    }
-    tr:hover td {
-      background: #fbfcfe !important;
-    }
-    .detail-table-toolbar {
-      background: var(--clean-panel-2) !important;
-      border-color: var(--clean-line) !important;
-    }
-    .account-lookup-table-scroll,
-    .detail-table-shell,
-    .log-list,
-    .keyword-lookup-result-panel .keyword-lookup-result-list,
-    .restricted-media-options {
-      scrollbar-gutter: stable;
-    }
-
-    #tab_data > .card:first-child {
-      padding: 0 !important;
-      overflow: visible !important;
-    }
-    #tab_data > .card:first-child > .card-title {
-      min-height: 40px !important;
-      margin: 0 !important;
-      padding: 0 14px !important;
-      background: #fff !important;
-      display: flex !important;
-      align-items: center !important;
-    }
-    #tab_data > .card:first-child .account-lookup-console {
-      gap: 10px !important;
-      padding: 12px !important;
-      background: var(--clean-panel-2) !important;
-      border-bottom: 1px solid var(--clean-line) !important;
-    }
-    #tab_data > .card:first-child .lookup-action-panel,
-    #tab_data > .card:first-child .export-action-panel {
-      border-radius: var(--clean-radius) !important;
-      border-color: var(--clean-line) !important;
-      box-shadow: none !important;
-    }
-    #tab_data > .card:first-child .asset-scope-segment {
-      border-color: var(--clean-line) !important;
-      background: var(--clean-panel-3) !important;
-      border-radius: var(--clean-radius) !important;
-    }
-    #tab_data > .card:first-child .asset-scope-segment .scope-btn.is-selected,
-    #tab_data > .card:first-child .asset-scope-segment .scope-btn[aria-pressed="true"] {
-      background: var(--clean-blue-soft) !important;
-      border-color: #a9c4ff !important;
-      color: #1644a3 !important;
-    }
-    #tab_data > .card:first-child .account-ext-export-control {
-      background: var(--clean-green-soft) !important;
-      border-color: #b8e2c8 !important;
-      box-shadow: none !important;
-    }
-    #tab_data > .card:first-child .account-ext-export-control .inline-export-label {
-      color: #067647 !important;
-      background: #dff7ea !important;
-      border-color: #b8e2c8 !important;
-    }
-
-    /* Detail/preview tabs live inside cards, so they must stay in normal flow.
-       The sticky sub-tab treatment is reserved for top-level workflow menus. */
-    .workspace-content .card > .sub-tabs,
-    #tab_data > .card:first-child > .sub-tabs,
-    #tab_data > .card:nth-of-type(2) > .sub-tabs {
-      position: static !important;
-      top: auto !important;
-      z-index: auto !important;
-      display: flex !important;
-      width: 100% !important;
-      margin-top: 10px !important;
-      margin-bottom: 0 !important;
-      padding: 5px !important;
-      overflow-x: auto !important;
-      overflow-y: hidden !important;
-      border: 1px solid var(--clean-line) !important;
-      border-radius: var(--clean-radius) !important;
-      background: #fff !important;
-    }
-    #tab_data > .card:first-child > .sub-tabs {
-      width: auto !important;
-      margin: 12px 12px 0 !important;
-      border-top: 1px solid var(--clean-line) !important;
-      border-bottom: 1px solid var(--clean-line) !important;
-    }
-    #tab_data > .card:first-child .account-asset-preview-shell {
-      margin: 0 12px 12px !important;
-      padding: 12px !important;
-    }
-    #tab_data > .card:first-child .account-asset-preview-shell.has-results {
-      margin: 0 12px 12px !important;
-    }
-    #tab_data > .card:nth-of-type(2) {
-      clear: both !important;
-      position: relative !important;
-      z-index: 1 !important;
-    }
-    #tab_data > .card:nth-of-type(2) > .card-title {
-      position: relative !important;
-      z-index: 2 !important;
-    }
-    #tab_data > .card:nth-of-type(2) > div[style*="max-height"] {
-      margin-top: 8px !important;
-      overflow: auto !important;
-    }
-    #b_media_restrict > .card {
-      padding: 16px !important;
-    }
-    #b_media_restrict .restricted-media-panel {
-      padding-top: 0 !important;
-      margin-bottom: 0 !important;
-      border-top: 0 !important;
-    }
-    #b_media_restrict .restricted-media-panel > .card-title {
-      margin-top: 0 !important;
-    }
-    .workspace-content .card-title,
-    .workspace-content .section-title,
-    .workspace-content .form-section-title {
-      letter-spacing: 0 !important;
-      color: var(--clean-ink) !important;
-    }
-    .workspace-content .grid-2,
-    .workspace-content .grid-3,
-    .workspace-content .form-grid,
-    .workspace-content .media-detail-grid,
-    .workspace-content .restricted-media-lists {
-      align-items: start !important;
-    }
-    .workspace-content .btn-row,
-    .workspace-content .detail-actions,
-    .workspace-content .inline-actions,
-    .workspace-content .toolbar-actions {
-      display: flex !important;
-      align-items: center !important;
-      gap: 8px !important;
-      flex-wrap: wrap !important;
-    }
-    .workspace-content input[type="text"],
-    .workspace-content input[type="number"],
-    .workspace-content input[type="password"],
-    .workspace-content select,
-    .workspace-content textarea {
-      border-color: var(--clean-line-strong) !important;
-      background: #fff !important;
-      color: var(--clean-ink) !important;
-      box-shadow: none !important;
-    }
-    .workspace-content input:focus,
-    .workspace-content select:focus,
-    .workspace-content textarea:focus {
-      border-color: #9bbcff !important;
-      box-shadow: 0 0 0 3px rgba(37, 99, 235, .12) !important;
-      outline: none !important;
-    }
-    .workspace-content label,
-    .workspace-content .form-label,
-    .workspace-content .field-label {
-      color: #344054 !important;
-      font-weight: 800 !important;
-    }
-    .detail-table-shell table {
-      table-layout: auto !important;
-    }
-    .detail-table-shell th,
-    .detail-table-shell td {
-      white-space: normal !important;
-    }
-    .product-name-edit {
-      display: grid !important;
-      grid-template-columns: minmax(160px, 1fr) auto !important;
-      align-items: center !important;
-      gap: 6px !important;
-      min-width: 240px !important;
-    }
-    .product-name-edit input {
-      width: 100% !important;
-      min-width: 0 !important;
-      height: 30px !important;
-      padding: 5px 8px !important;
-      border-radius: 6px !important;
-      font-size: 12px !important;
-      line-height: 1.2 !important;
-    }
-    .product-name-edit .btn {
-      height: 30px !important;
-      min-width: 48px !important;
-      padding: 0 10px !important;
-      border-radius: 6px !important;
-      font-size: 12px !important;
-      white-space: nowrap !important;
-    }
-    .product-name-edit input:disabled,
-    .product-name-edit .btn:disabled {
-      opacity: .62 !important;
-      cursor: not-allowed !important;
-    }
-    .workspace-content .btn-row.action-zone,
-    .workspace-content .form-action-zone {
-      margin-top: 8px !important;
-      padding: 0 !important;
-      border-top: 0 !important;
-      background: transparent !important;
-    }
-    .workspace-content .btn-row.action-zone .btn,
-    .workspace-content .form-action-zone .btn {
-      min-width: 0 !important;
-    }
-    .workspace-content .card.dense-card {
-      background: #fff !important;
-    }
-    .workspace-content .card.dense-card .card-title::after {
-      display: none !important;
-      content: none !important;
-    }
-    .workspace-content .schedule-block-row,
-    .workspace-content .media-detail-group,
-    .workspace-content .restricted-media-summary,
-    .workspace-content .restricted-media-list,
-    .workspace-content .restricted-media-list-head,
-    .workspace-content .copy-name-panel,
-    .workspace-content .copy-name-panel .copy-section-title,
-    .workspace-content .copy-name-preview-empty,
-    .workspace-content .detail-table-toolbar {
-      background: #fff !important;
-    }
-    .workspace-content tr:hover td {
-      background: #fff !important;
-    }
-
-    .log-empty {
-      min-height: 42px !important;
-      padding: 12px !important;
-      border-radius: var(--clean-radius) !important;
-      background: var(--clean-panel-2) !important;
-      border-color: var(--clean-line) !important;
-      color: var(--clean-muted) !important;
-    }
-    .log-item.success {
-      border-left-color: var(--clean-green) !important;
-    }
-    .log-item.error {
-      border-left-color: var(--clean-red) !important;
-      background: #fffafa !important;
-    }
-    .restricted-media-lists,
-    .media-detail-grid,
-    .keyword-diagnosis-workbench,
-    .keyword-diagnosis-utility-strip {
-      gap: 10px !important;
-    }
-    .selection-float-widget {
-      right: 16px !important;
-      bottom: 16px !important;
-      border: 1px solid var(--clean-line) !important;
-      border-radius: var(--clean-radius) !important;
-      background: rgba(255,255,255,.98) !important;
-      box-shadow: var(--clean-shadow) !important;
-      backdrop-filter: none !important;
-      -webkit-backdrop-filter: none !important;
-      animation: none !important;
-    }
-    .selection-float-dot {
-      background: var(--clean-green) !important;
-      animation: none !important;
-      box-shadow: none !important;
-    }
-    .toast,
-    .workflow-command-results {
-      border-radius: var(--clean-radius) !important;
-      box-shadow: var(--clean-shadow) !important;
-    }
-    .loading-overlay {
-      background: rgba(244,246,248,.76) !important;
-    }
-    .spinner {
-      border-top-color: var(--clean-blue) !important;
-    }
-
-    .workspace-content::-webkit-scrollbar,
-    .master-content::-webkit-scrollbar,
-    .sidebar::-webkit-scrollbar,
-    .account-lookup-table-scroll::-webkit-scrollbar,
-    .detail-table-shell::-webkit-scrollbar {
-      width: 10px;
-      height: 10px;
-    }
-    .workspace-content::-webkit-scrollbar-thumb,
-    .master-content::-webkit-scrollbar-thumb,
-    .account-lookup-table-scroll::-webkit-scrollbar-thumb,
-    .detail-table-shell::-webkit-scrollbar-thumb {
-      background: #c7d0dc;
-      border: 3px solid transparent;
-      border-radius: 999px;
-      background-clip: content-box;
-    }
-    .sidebar::-webkit-scrollbar-thumb {
-      background: #48576d;
-      border: 3px solid transparent;
-      border-radius: 999px;
-      background-clip: content-box;
-    }
-
-    .tab-content.active,
-    .ui-motion-ready .workflow-guide-card,
-    .ui-motion-ready .workflow-quick-card-wrap,
-    .ui-motion-ready .workflow-next-action-card,
-    .ui-motion-ready .workflow-shortcut-panel,
-    .selection-float-widget,
-    .toast {
-      animation: none !important;
-    }
-
-    @media (max-width: 1180px) {
-      .sidebar { width: 236px !important; }
-      .master-panel { width: 310px !important; }
-      .workspace-toolbar {
-        grid-template-columns: 1fr !important;
-      }
-      .workflow-help-hub {
-        width: 100% !important;
-      }
-      .grid-3 {
-        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-      }
-      #tab_data > .card:first-child .account-lookup-console {
-        grid-template-columns: 1fr !important;
-      }
-    }
-    @media (max-width: 820px) {
-      body {
-        overflow: auto !important;
-      }
-      .app-layout {
-        min-width: 760px !important;
-      }
-      .workspace-content {
-        padding: 10px 10px 78px !important;
-      }
-      .grid-2,
-      .grid-3,
-      .restricted-media-lists,
-      .media-detail-grid,
-      .keyword-diagnosis-workbench {
-        grid-template-columns: 1fr !important;
-      }
-      .workflow-help-hub {
-        grid-template-columns: 1fr !important;
-      }
-      .workflow-help-hub-label {
-        border-right: 0 !important;
-        border-bottom: 1px solid var(--clean-line) !important;
-        padding-bottom: 6px !important;
-      }
-    }
   </style>
 </head>
 <body>
@@ -8325,10 +7312,10 @@
               <button class="btn btn-sub" style="padding: 4px 10px; font-size: 12px;" onclick="loadAdgroupDetails()" data-require="adgroup-current">새로고침</button>
             </div>
             <div class="tabs sub-tabs" style="margin-bottom: 0; border: none;">
-              <button class="tab-btn active" onclick="toggleDetailSubTab('sub_kw', this)">키워드 (<span id="cnt_kw">0</span>)</button>
-              <button class="tab-btn" onclick="toggleDetailSubTab('sub_ad', this)">소재 (<span id="cnt_ad">0</span>)</button>
-              <button class="tab-btn" onclick="toggleDetailSubTab('sub_ext', this)">확장소재 (<span id="cnt_ext">0</span>)</button>
-              <button class="tab-btn" onclick="toggleDetailSubTab('sub_neg', this)">제외키워드 (<span id="cnt_neg">0</span>)</button>
+              <button class="tab-btn active" onclick="switchSubTab('sub_kw', this, '#tab_data')">키워드 (<span id="cnt_kw">0</span>)</button>
+              <button class="tab-btn" onclick="switchSubTab('sub_ad', this, '#tab_data')">소재 (<span id="cnt_ad">0</span>)</button>
+              <button class="tab-btn" onclick="switchSubTab('sub_ext', this, '#tab_data')">확장소재 (<span id="cnt_ext">0</span>)</button>
+              <button class="tab-btn" onclick="switchSubTab('sub_neg', this, '#tab_data')">제외키워드 (<span id="cnt_neg">0</span>)</button>
             </div>
             <div style="border: 1px solid var(--line); border-radius: 8px; max-height: 500px; overflow-y: auto;">
                 <div id="sub_kw" class="tab-content active">
@@ -8404,7 +7391,7 @@
                 <button class="tab-btn" onclick="switchSubTab('c_kw', this, '#tab_create')">키워드</button>
                 <button class="tab-btn" onclick="switchSubTab('c_ad', this, '#tab_create')">소재</button>
                 <button class="tab-btn" onclick="switchSubTab('c_ext', this, '#tab_create')">확장/제외</button>
-                <button class="tab-btn" type="button" onclick="switchCreateBulkAdTab(this)">소재 대량</button>
+                <button class="tab-btn" type="button" onclick="openWorkflowUtility('bulkad')">소재 대량</button>
             </div>
 
             <div id="c_camp_adg" class="tab-content active">
@@ -8608,9 +7595,8 @@
                 <button class="tab-btn" data-workflow-group="change" onclick="switchSubTab('b_time', this, '#tab_bulk')">시간대 설정</button>
                 <button class="tab-btn" data-workflow-group="lookup" onclick="switchSubTab('b_keyword_inspect', this, '#tab_bulk')">키워드 진단</button>
                 <button class="tab-btn" data-workflow-group="copy" onclick="switchSubTab('b_copy', this, '#tab_bulk')">복사</button>
-                <button class="tab-btn" data-workflow-group="create" onclick="switchWorkflowTab('bulkad')">소재 대량</button>
+                <button class="tab-btn" data-workflow-group="create" onclick="switchSubTab('b_headline_bulk', this, '#tab_bulk')">소재 대량</button>
                 <button class="tab-btn" data-workflow-group="change" onclick="switchSubTab('b_status', this, '#tab_bulk')">상태/예산</button>
-                <button class="tab-btn" data-workflow-group="change" onclick="switchSubTab('b_media_restrict', this, '#tab_bulk')">노출 제한매체</button>
                 <button class="tab-btn danger-tab" data-workflow-group="delete" onclick="switchSubTab('b_delete', this, '#tab_bulk')">삭제</button>
             </div>
 
@@ -8776,10 +7762,11 @@
                     </div>
                     <div class="form-group"><label>공통 요일 선택</label><div class="schedule-grid" id="schedule_days"></div><div class="field-note" style="margin-top:6px;">구간별로 요일을 따로 지정하지 않으면 여기서 고른 요일을 공통으로 사용합니다.</div></div>
                     <div class="form-group">
-                        <label>시간대별 가중치 개별 설정</label>
-                        <div class="field-note" style="margin-bottom:8px;">구간을 추가해 시간대마다 입찰가중치를 개별로 입력합니다. 화면의 종료 시각은 다음 시각 기준이라 00~06시를 적용하려면 00시~07시로 지정됩니다.</div>
+                        <label>구간별 시간/가중치 설정 (여러 가중치 가능)</label>
+                        <div class="field-note" style="margin-bottom:8px;">예: 00~06시는 50%, 07~24시는 100%처럼 구간마다 다른 입찰가중치를 적용할 수 있습니다. 화면의 종료 시각은 다음 시각 기준이라 00~06시를 적용하려면 00시~07시로 지정됩니다.</div>
                         <div class="schedule-block-toolbar" style="margin-bottom:8px;">
-                            <button class="btn btn-sub" type="button" onclick="addScheduleBlock()">가중치 구간 추가</button>
+                            <button class="btn btn-sub" type="button" onclick="applySchedulePresetDawn50Day100()">00~06 50% · 07~24 100% 자동 입력</button>
+                            <button class="btn btn-sub" type="button" onclick="addScheduleBlock()">구간 추가</button>
                             <button class="btn btn-sub" type="button" onclick="clearScheduleBlocks()">구간 초기화</button>
                         </div>
                         <div id="schedule_blocks_container" class="schedule-blocks"></div>
@@ -9121,26 +8108,15 @@
                             <div class="form-group"><label>대상 (도착지) 광고그룹</label><select id="copy_entity_target_adgroup_select"></select></div>
                         </div>
                         <div class="form-group">
-                            <label>다중 붙여넣기 대상</label>
-                            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; font-size:12px; margin-bottom:8px;">
-                                <label><input type="checkbox" id="copy_entity_target_campaign_all" onchange="toggleCopyEntityTargetCampaign(this.checked)"> 필터 캠페인 전체 광고그룹</label>
-                                <button type="button" class="btn btn-sub" style="padding:5px 9px; font-size:11px;" onclick="selectAllCopyEntityTargets(true)">전체 선택</button>
-                                <button type="button" class="btn btn-sub" style="padding:5px 9px; font-size:11px;" onclick="selectAllCopyEntityTargets(false)">선택 해제</button>
-                                <span id="copy_entity_target_count" class="field-note" style="margin:0;">선택 0개</span>
-                            </div>
-                            <div id="copy_entity_target_adgroup_checks" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:6px; max-height:190px; overflow:auto; padding:8px; border:1px solid var(--line); border-radius:6px; background:#fff;"></div>
-                            <div class="field-note">대상 캠페인을 필터로 고른 뒤 광고그룹을 여러 개 체크하면, 선택한 원본 항목을 체크한 대상 그룹 전체에 붙여넣습니다. 원본으로 체크한 동일 광고그룹은 대상에서 자동 제외됩니다.</div>
-                        </div>
-                        <div class="form-group">
                             <label>복사할 항목</label>
                             <div style="display:flex; gap:12px; font-size:12px; flex-wrap:wrap;">
                                 <label><input type="checkbox" id="copy_include_keywords" checked> 키워드</label>
                                 <label><input type="checkbox" id="copy_include_ads" checked> 소재</label>
                                 <label><input type="checkbox" id="copy_include_extensions" checked> 확장소재</label>
                                 <label><input type="checkbox" id="copy_include_negatives" checked> 제외키워드</label>
-                                <label><input type="checkbox" id="copy_exclude_off_assets" checked> OFF 원본 광고그룹/소재/확장소재 제외</label>
+                                <label><input type="checkbox" id="copy_exclude_off_assets"> OFF 원본 광고그룹/소재/확장소재 제외</label>
                             </div>
-                            <div class="field-note">기본 ON입니다. 체크 시 OFF 상태인 원본 광고그룹은 건너뛰고, OFF 소재와 확장소재는 생성 요청 전 서버에서 제외합니다.</div>
+                            <div class="field-note">체크 시 OFF 상태인 원본 광고그룹은 건너뛰고, OFF 소재와 확장소재도 복사 대상에서 제외됩니다.</div>
                         </div>
                         <button class="btn btn-purple" style="width:100%" onclick="execCopyEntities()">선택 항목 대상 그룹으로 복사</button>
                     </div>
@@ -9173,23 +8149,6 @@
                         <label>처리 결과</label>
                         <textarea id="bulk_text_ad_result" rows="10" readonly placeholder="실행 결과가 여기에 표시됩니다."></textarea>
                     </div>
-                </div>
-
-                <div class="card" style="margin-bottom:16px;">
-                    <div class="card-title">노출용 상품명 대량 변경</div>
-                    <div id="product_name_bulk_slot_control_wrap" style="display:flex; align-items:center; gap:10px; margin-top:-2px; margin-bottom:12px; width:100%;">
-                        <button type="button" class="btn btn-sub" style="width:34px; min-width:34px; height:34px; padding:0; font-size:18px; line-height:1;" onclick="changeProductNameBulkSlotCount(-1)" aria-label="슬롯 수 줄이기">−</button>
-                        <input type="range" id="product_name_bulk_slot_range" min="1" max="10" step="1" value="1" oninput="applyProductNameBulkSlotCount(this.value)" style="flex:1; width:100%; min-width:0;">
-                        <button type="button" class="btn btn-sub" style="width:34px; min-width:34px; height:34px; padding:0; font-size:18px; line-height:1;" onclick="changeProductNameBulkSlotCount(1)" aria-label="슬롯 수 늘리기">+</button>
-                        <div id="product_name_bulk_slot_count_badge" style="min-width:72px; text-align:center; font-size:12px; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:7px 10px; white-space:nowrap;">1개</div>
-                    </div>
-                    <div class="field-note" id="product_name_bulk_note" style="margin-bottom:12px;">그룹별로 쇼핑/카탈로그 소재의 노출용 상품명을 변경합니다. 기본 1개, 최대 10개까지 설정할 수 있으며 상품명은 최대 25자입니다.</div>
-                    <div id="product_name_bulk_slots" style="display:flex; flex-direction:column; gap:12px;"></div>
-                    <div class="btn-row" style="margin-top:12px; gap:8px;">
-                        <button type="button" class="btn btn-sub" style="flex:1;" onclick="fillProductNameBulkSlotsFromChecked()">체크한 그룹으로 채우기</button>
-                        <button type="button" class="btn btn-primary" style="flex:1;" onclick="updateProductNamesBulk()">노출용 상품명 대량 변경</button>
-                    </div>
-                    <textarea id="product_name_bulk_result" rows="6" readonly placeholder="실행 결과가 여기에 표시됩니다." style="margin-top:12px;"></textarea>
                 </div>
 
                 <div class="card">
@@ -9322,7 +8281,69 @@
                             </div>
                         </div>
                         <button class="btn btn-sub" style="width:100%; margin-bottom:16px;" onclick="updateAdgroupMedia()">선택 광고그룹 매체 변경</button>
-                        
+                        <div class="restricted-media-panel">
+                            <div class="card-title" style="font-size:14px; margin-bottom:10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">노출 제한 매체 추가 <span class="scope-badge scope-badge-blue">파워링크</span></div>
+                            <div class="field-note" style="margin-bottom:10px;">파워링크 광고그룹 전용입니다. 매체 ID는 화면에 표시하지 않고, 체크한 매체 이름 기준으로 제한 매체 목록에 추가합니다. 기존 매체 설정은 유지되며 이미 포함된 매체는 중복 추가하지 않습니다.</div>
+                            <div class="grid-2">
+                                <div class="form-group"><label>적용 범위</label><select id="restricted_media_scope"><option value="adgroup">선택한 광고그룹</option><option value="campaign">선택한 캠페인 하위 광고그룹 전체</option></select></div>
+                                <div class="form-group"><label>처리 결과</label><textarea id="restricted_media_result" rows="4" readonly placeholder="노출 제한 매체 추가(파워링크) 결과가 여기에 표시됩니다."></textarea></div>
+                            </div>
+                            <div class="restricted-media-box">
+                                <div class="restricted-media-toolbar">
+                                    <input type="search" id="restricted_media_search" class="restricted-media-search" placeholder="매체 이름 검색 (예: 네이버 쇼핑, Bing, 다음)">
+                                    <button type="button" class="btn btn-sub" onclick="clearRestrictedMediaSelection()">선택 초기화</button>
+                                </div>
+                                <div id="restricted_media_selected_summary" class="restricted-media-summary">선택한 매체 0개</div>
+                                <div class="restricted-media-lists">
+                                    <div class="restricted-media-list" id="restricted_media_pc_box">
+                                        <div class="restricted-media-list-head">
+                                            <div class="restricted-media-list-title">PC 매체</div>
+                                            <div class="restricted-media-list-actions">
+                                                <button type="button" class="btn btn-sub btn-xs" onclick="selectRestrictedMediaByDevice('pc', true)">PC 전체 선택</button>
+                                                <button type="button" class="btn btn-sub btn-xs" onclick="selectRestrictedMediaByDevice('pc', false)">해제</button>
+                                            </div>
+                                        </div>
+                                        <div id="restricted_media_pc_list" class="restricted-media-options"></div>
+                                        <div class="restricted-media-empty">검색 결과가 없습니다.</div>
+                                    </div>
+                                    <div class="restricted-media-list" id="restricted_media_mobile_box">
+                                        <div class="restricted-media-list-head">
+                                            <div class="restricted-media-list-title">모바일 매체</div>
+                                            <div class="restricted-media-list-actions">
+                                                <button type="button" class="btn btn-sub btn-xs" onclick="selectRestrictedMediaByDevice('mobile', true)">모바일 전체 선택</button>
+                                                <button type="button" class="btn btn-sub btn-xs" onclick="selectRestrictedMediaByDevice('mobile', false)">해제</button>
+                                            </div>
+                                        </div>
+                                        <div id="restricted_media_mobile_list" class="restricted-media-options"></div>
+                                        <div class="restricted-media-empty">검색 결과가 없습니다.</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-sub" style="width:100%; margin-top:10px;" onclick="addRestrictedMediaIds()">선택 범위 노출 제한 매체 추가 (파워링크)</button>
+                            <div class="restricted-media-copy-box">
+                                <div class="restricted-media-copy-title" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">노출 제한 매체 설정 복사/덮어쓰기 <span class="scope-badge scope-badge-blue">파워링크</span></div>
+                                <div class="field-note" style="margin-bottom:10px;">
+                                    파워링크 광고그룹 기준으로 원본 광고그룹의 <strong>노출 제한 매체 목록만</strong> 대상에 덮어씁니다. PC/모바일 매체, 검색·콘텐츠 지면 선택, 입찰가 설정은 변경하지 않습니다.
+                                </div>
+                                <div class="grid-2">
+                                    <div class="form-group">
+                                        <label>원본 광고그룹</label>
+                                        <select id="restricted_media_copy_source_adgroup"><option value="">원본 광고그룹 선택</option></select>
+                                        <div class="field-note">현재 캠페인의 광고그룹 목록에서 선택합니다.</div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>덮어쓰기 대상</label>
+                                        <select id="restricted_media_copy_scope">
+                                            <option value="adgroup">선택한 광고그룹</option>
+                                            <option value="campaign">선택한 캠페인 하위 광고그룹 전체</option>
+                                        </select>
+                                        <div class="field-note">좌측 체크박스에서 대상 그룹 또는 캠페인을 선택합니다.</div>
+                                    </div>
+                                </div>
+                                <button type="button" class="btn btn-sub" style="width:100%; margin-top:2px;" onclick="copyRestrictedMediaSettings()">노출 제한 매체 설정만 복사해서 덮어쓰기</button>
+                                <div class="form-group" style="margin-top:10px;"><label>복사 결과</label><textarea id="restricted_media_copy_result" rows="4" readonly placeholder="노출 제한 매체 설정 복사(파워링크) 결과가 여기에 표시됩니다."></textarea></div>
+                            </div>
+                        </div>
                         <div class="grid-2">
                             <div class="form-group">
                                 <label>적용 범위</label>
@@ -9435,74 +8456,6 @@
                         </div>
                         <button class="btn btn-sub" style="width:100%;" onclick="applyBulkTargetSettings()">선택 범위에 타겟 일괄 적용</button>
                     </div>
-                </div>
-            </div>
-
-            <div id="b_media_restrict" class="tab-content">
-                <div class="card">
-                    <div class="restricted-media-panel">
-                                                <div class="card-title" style="font-size:14px; margin-bottom:10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">노출 제한 매체 추가 <span class="scope-badge scope-badge-blue">파워링크</span></div>
-                                                <div class="field-note" style="margin-bottom:10px;">파워링크 광고그룹 전용입니다. 매체 ID는 화면에 표시하지 않고, 체크한 매체 이름 기준으로 제한 매체 목록에 추가합니다. 기존 매체 설정은 유지되며 이미 포함된 매체는 중복 추가하지 않습니다.</div>
-                                                <div class="grid-2">
-                                                    <div class="form-group"><label>적용 범위</label><select id="restricted_media_scope"><option value="adgroup">선택한 광고그룹</option><option value="campaign">선택한 캠페인 하위 광고그룹 전체</option></select></div>
-                                                    <div class="form-group"><label>처리 결과</label><textarea id="restricted_media_result" rows="4" readonly placeholder="노출 제한 매체 추가(파워링크) 결과가 여기에 표시됩니다."></textarea></div>
-                                                </div>
-                                                <div class="restricted-media-box">
-                                                    <div class="restricted-media-toolbar">
-                                                        <input type="search" id="restricted_media_search" class="restricted-media-search" placeholder="매체 이름 검색 (예: 네이버 쇼핑, Bing, 다음)">
-                                                        <button type="button" class="btn btn-sub" onclick="clearRestrictedMediaSelection()">선택 초기화</button>
-                                                    </div>
-                                                    <div id="restricted_media_selected_summary" class="restricted-media-summary">선택한 매체 0개</div>
-                                                    <div class="restricted-media-lists">
-                                                        <div class="restricted-media-list" id="restricted_media_pc_box">
-                                                            <div class="restricted-media-list-head">
-                                                                <div class="restricted-media-list-title">PC 매체</div>
-                                                                <div class="restricted-media-list-actions">
-                                                                    <button type="button" class="btn btn-sub btn-xs" onclick="selectRestrictedMediaByDevice('pc', true)">PC 전체 선택</button>
-                                                                    <button type="button" class="btn btn-sub btn-xs" onclick="selectRestrictedMediaByDevice('pc', false)">해제</button>
-                                                                </div>
-                                                            </div>
-                                                            <div id="restricted_media_pc_list" class="restricted-media-options"></div>
-                                                            <div class="restricted-media-empty">검색 결과가 없습니다.</div>
-                                                        </div>
-                                                        <div class="restricted-media-list" id="restricted_media_mobile_box">
-                                                            <div class="restricted-media-list-head">
-                                                                <div class="restricted-media-list-title">모바일 매체</div>
-                                                                <div class="restricted-media-list-actions">
-                                                                    <button type="button" class="btn btn-sub btn-xs" onclick="selectRestrictedMediaByDevice('mobile', true)">모바일 전체 선택</button>
-                                                                    <button type="button" class="btn btn-sub btn-xs" onclick="selectRestrictedMediaByDevice('mobile', false)">해제</button>
-                                                                </div>
-                                                            </div>
-                                                            <div id="restricted_media_mobile_list" class="restricted-media-options"></div>
-                                                            <div class="restricted-media-empty">검색 결과가 없습니다.</div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <button type="button" class="btn btn-sub" style="width:100%; margin-top:10px;" onclick="addRestrictedMediaIds()">선택 범위 노출 제한 매체 추가 (파워링크)</button>
-                                                <div class="restricted-media-copy-box">
-                                                    <div class="restricted-media-copy-title" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">노출 제한 매체 설정 복사/덮어쓰기 <span class="scope-badge scope-badge-blue">파워링크</span></div>
-                                                    <div class="field-note" style="margin-bottom:10px;">
-                                                        파워링크 광고그룹 기준으로 원본 광고그룹의 <strong>노출 제한 매체 목록만</strong> 대상에 덮어씁니다. PC/모바일 매체, 검색·콘텐츠 지면 선택, 입찰가 설정은 변경하지 않습니다.
-                                                    </div>
-                                                    <div class="grid-2">
-                                                        <div class="form-group">
-                                                            <label>원본 광고그룹</label>
-                                                            <select id="restricted_media_copy_source_adgroup"><option value="">원본 광고그룹 선택</option></select>
-                                                            <div class="field-note">현재 캠페인의 광고그룹 목록에서 선택합니다.</div>
-                                                        </div>
-                                                        <div class="form-group">
-                                                            <label>덮어쓰기 대상</label>
-                                                            <select id="restricted_media_copy_scope">
-                                                                <option value="adgroup">선택한 광고그룹</option>
-                                                                <option value="campaign">선택한 캠페인 하위 광고그룹 전체</option>
-                                                            </select>
-                                                            <div class="field-note">좌측 체크박스에서 대상 그룹 또는 캠페인을 선택합니다.</div>
-                                                        </div>
-                                                    </div>
-                                                    <button type="button" class="btn btn-sub" style="width:100%; margin-top:2px;" onclick="copyRestrictedMediaSettings()">노출 제한 매체 설정만 복사해서 덮어쓰기</button>
-                                                    <div class="form-group" style="margin-top:10px;"><label>복사 결과</label><textarea id="restricted_media_copy_result" rows="4" readonly placeholder="노출 제한 매체 설정 복사(파워링크) 결과가 여기에 표시됩니다."></textarea></div>
-                                                </div>
-                                            </div>
                 </div>
             </div>
 
@@ -9697,8 +8650,6 @@ let detailKeywordMeta = { totalCount: 0, totalUnfilteredCount: 0, truncated: fal
 
 let checkedCampaignIds = new Set();
 let checkedAdgroupIds = new Set();
-let copyEntityTargetAdgroups = [];
-let selectedCopyEntityTargetAdgroupIds = new Set();
 let favoriteAccountIds = new Set();
 const ACCOUNT_FAVORITES_KEY = 'naver_account_favorites';
 const API_KEY_STORAGE_KEY = 'naver_api_key';
@@ -11023,7 +9974,7 @@ const WORKFLOW_COMMANDS = [
     { label: '입찰가 변경', desc: '고정 입찰가, 기기별 가중치, 순위 기준 변경', action: 'change-bid', group: '변경', keywords: '입찰가 변경 bid pc 모바일 순위 가중치' },
     { label: '시간대 설정', desc: '요일/시간대 노출 및 입찰 가중치 설정', action: 'change-time', group: '변경', keywords: '시간대 요일 스케줄 노출 가중치 설정' },
     { label: '상태/예산 변경', desc: 'ON/OFF, 예산, 매체, 타겟 설정 변경', action: 'change-status', group: '변경', keywords: '상태 예산 on off 매체 타겟 변경' },
-    { label: '노출 제한 매체 추가 (파워링크)', desc: '파워링크 광고그룹 기준으로 매체 이름을 체크해 제한 매체를 일괄 추가', action: 'change-restricted-media', group: '변경', keywords: '노출 제한 매체 파워링크 media name check black media 추가' },
+    { label: '노출 제한 매체 추가 (파워링크)', desc: '파워링크 광고그룹 기준으로 매체 이름을 체크해 제한 매체를 일괄 추가', action: 'change-status', group: '변경', keywords: '노출 제한 매체 파워링크 media name check black media 추가' },
     { label: '복사 작업', desc: '캠페인/그룹/키워드/소재/확장소재 복사', action: 'copy', group: '복사', keywords: '복사 캠페인 그룹 키워드 소재 확장소재 제외키워드' },
     { label: '삭제 작업', desc: '캠페인·그룹·키워드·소재·확장소재 삭제', action: 'delete', group: '삭제', keywords: '삭제 캠페인 그룹 키워드 소재 확장소재 제외키워드' }
 ].map((item, idx) => ({ ...item, index: idx }));
@@ -11257,12 +10208,11 @@ function updateWorkflowNextActionCard(forcedWorkflow=null) {
             change: {
                 kicker: '선택 완료',
                 title: `${label} — 변경 작업을 실행할 수 있습니다`,
-                desc: '입찰가, 시간대, 상태/예산, 노출 제한매체 중 필요한 작업으로 바로 이동하세요.',
+                desc: '입찰가, 시간대, 상태/예산 중 필요한 작업으로 바로 이동하세요.',
                 buttons: [
                     { label: '입찰가', action: 'change-bid', primary: true },
                     { label: '시간대', action: 'change-time' },
-                    { label: '상태/예산', action: 'change-status' },
-                    { label: '노출 제한매체', action: 'change-restricted-media' }
+                    { label: '상태/예산', action: 'change-status' }
                 ]
             },
             copy: {
@@ -11666,9 +10616,6 @@ function renderMasterList() {
     }
     updateBreadcrumb();
     updateCopyNameSettingsUi();
-    if(document.getElementById('copy_entity_target_adgroup_checks')) {
-        renderCopyEntityTargetChecklist();
-    }
 }
 
 function toggleListCheck(type, id) {
@@ -11946,174 +10893,6 @@ buildKeywordBatchSlots();
 refreshAllKeywordTextareaCounts();
 updateKeywordBatchModeNote();
 
-const PRODUCT_NAME_BULK_MAX_SLOTS = 10;
-const PRODUCT_NAME_MAX_LENGTH = 25;
-
-function clampProductNameBulkSlotCount(value) {
-    const n = Number(value);
-    if(!Number.isFinite(n)) return 1;
-    return Math.max(1, Math.min(PRODUCT_NAME_BULK_MAX_SLOTS, Math.round(n)));
-}
-
-function getProductNameBulkSlotCount() {
-    return clampProductNameBulkSlotCount(document.getElementById('product_name_bulk_slot_range')?.value || 1);
-}
-
-function snapshotProductNameBulkSlotState() {
-    const state = {};
-    for(let i=1; i<=PRODUCT_NAME_BULK_MAX_SLOTS; i++) {
-        state[i] = {
-            adgroup_id: document.getElementById(`product_name_bulk_adgroup_${i}`)?.value || '',
-            product_name: document.getElementById(`product_name_bulk_value_${i}`)?.value || ''
-        };
-    }
-    return state;
-}
-
-function syncProductNameBulkSlotUi() {
-    const rangeEl = document.getElementById('product_name_bulk_slot_range');
-    const badge = document.getElementById('product_name_bulk_slot_count_badge');
-    const note = document.getElementById('product_name_bulk_note');
-    const count = clampProductNameBulkSlotCount(rangeEl?.value || 1);
-    if(rangeEl) rangeEl.value = String(count);
-    if(badge) badge.textContent = `${count}개`;
-    if(note) note.textContent = `그룹별로 쇼핑/카탈로그 소재의 노출용 상품명을 변경합니다. 현재 슬롯 ${count}개이며 최대 ${PRODUCT_NAME_BULK_MAX_SLOTS}개까지 설정할 수 있습니다. 상품명은 최대 ${PRODUCT_NAME_MAX_LENGTH}자입니다.`;
-}
-
-function updateProductNameBulkCharCount(slotIndex) {
-    const input = document.getElementById(`product_name_bulk_value_${slotIndex}`);
-    const countEl = document.getElementById(`product_name_bulk_count_${slotIndex}`);
-    const len = String(input?.value || '').length;
-    if(countEl) {
-        countEl.textContent = `${len}/${PRODUCT_NAME_MAX_LENGTH}자`;
-        countEl.style.color = len > PRODUCT_NAME_MAX_LENGTH ? 'var(--red)' : 'var(--muted)';
-    }
-}
-
-function buildProductNameBulkSlots() {
-    const root = document.getElementById('product_name_bulk_slots');
-    if(!root) return;
-    const prevState = snapshotProductNameBulkSlotState();
-    const slots = [];
-    for(let i=1; i<=getProductNameBulkSlotCount(); i++) {
-        slots.push(`
-            <div class="card" style="padding:12px; border:1px solid var(--line); box-shadow:none;">
-                <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:12px; color:var(--muted); margin-bottom:8px;">
-                    <span style="font-weight:800; color:var(--text);">슬롯 ${i}</span>
-                    <span id="product_name_bulk_count_${i}" style="font-size:11px;">0/${PRODUCT_NAME_MAX_LENGTH}자</span>
-                </div>
-                <div class="grid-2">
-                    <div class="form-group"><label>대상 광고그룹 ${i}</label><select id="product_name_bulk_adgroup_${i}" class="product-name-bulk-adgroup-select"></select></div>
-                    <div class="form-group"><label>노출용 상품명 ${i}</label><input type="text" id="product_name_bulk_value_${i}" maxlength="${PRODUCT_NAME_MAX_LENGTH}" placeholder="최대 ${PRODUCT_NAME_MAX_LENGTH}자" oninput="updateProductNameBulkCharCount(${i})"></div>
-                </div>
-            </div>
-        `);
-    }
-    root.innerHTML = slots.join('');
-    for(let i=1; i<=getProductNameBulkSlotCount(); i++) {
-        const input = document.getElementById(`product_name_bulk_value_${i}`);
-        if(input) input.value = prevState[i]?.product_name || '';
-        updateProductNameBulkCharCount(i);
-    }
-    syncProductNameBulkSlotUi();
-}
-
-function restoreProductNameBulkSlotState(prevState) {
-    for(let i=1; i<=getProductNameBulkSlotCount(); i++) {
-        const adgroupEl = document.getElementById(`product_name_bulk_adgroup_${i}`);
-        const input = document.getElementById(`product_name_bulk_value_${i}`);
-        if(adgroupEl) adgroupEl.value = prevState[i]?.adgroup_id || currentAdgroupId || '';
-        if(input) input.value = prevState[i]?.product_name || '';
-        updateProductNameBulkCharCount(i);
-    }
-}
-
-function applyProductNameBulkSlotCount(value) {
-    const prevState = snapshotProductNameBulkSlotState();
-    const rangeEl = document.getElementById('product_name_bulk_slot_range');
-    if(rangeEl) rangeEl.value = String(clampProductNameBulkSlotCount(value));
-    syncProductNameBulkSlotUi();
-    buildProductNameBulkSlots();
-    updateSelectOptions();
-    restoreProductNameBulkSlotState(prevState);
-}
-
-function changeProductNameBulkSlotCount(delta) {
-    applyProductNameBulkSlotCount(getProductNameBulkSlotCount() + delta);
-}
-
-function fillProductNameBulkSlotsFromChecked() {
-    const ids = getCheckedAdgroupIdsInViewOrder().slice(0, PRODUCT_NAME_BULK_MAX_SLOTS);
-    if(!ids.length) { showToast('좌측에서 광고그룹을 1개 이상 체크해주세요.', 'error'); return; }
-    const prevState = snapshotProductNameBulkSlotState();
-    const rangeEl = document.getElementById('product_name_bulk_slot_range');
-    if(rangeEl) rangeEl.value = String(ids.length);
-    buildProductNameBulkSlots();
-    updateSelectOptions();
-    ids.forEach((id, idx) => {
-        const slot = idx + 1;
-        const adgroupEl = document.getElementById(`product_name_bulk_adgroup_${slot}`);
-        const input = document.getElementById(`product_name_bulk_value_${slot}`);
-        if(adgroupEl) adgroupEl.value = String(id);
-        if(input) input.value = prevState[slot]?.product_name || '';
-        updateProductNameBulkCharCount(slot);
-    });
-    showToast(`체크한 광고그룹 ${ids.length}개를 슬롯에 채웠습니다.`, 'success');
-}
-
-function collectProductNameBulkRows() {
-    const rows = [];
-    const seen = new Set();
-    for(let i=1; i<=getProductNameBulkSlotCount(); i++) {
-        const adgroupId = String(document.getElementById(`product_name_bulk_adgroup_${i}`)?.value || '').trim();
-        const productName = String(document.getElementById(`product_name_bulk_value_${i}`)?.value || '').trim();
-        if(!adgroupId && !productName) continue;
-        if(!adgroupId) throw new Error(`슬롯 ${i}의 광고그룹을 선택해주세요.`);
-        if(!productName) throw new Error(`슬롯 ${i}의 노출용 상품명을 입력해주세요.`);
-        if(productName.length > PRODUCT_NAME_MAX_LENGTH) throw new Error(`슬롯 ${i}의 상품명은 최대 ${PRODUCT_NAME_MAX_LENGTH}자입니다.`);
-        if(seen.has(adgroupId)) throw new Error(`같은 광고그룹이 중복 선택되었습니다. 슬롯 ${i}를 확인해주세요.`);
-        seen.add(adgroupId);
-        rows.push({ adgroup_id: adgroupId, product_name: productName });
-    }
-    return rows;
-}
-
-function renderProductNameBulkResult(data) {
-    const box = document.getElementById('product_name_bulk_result');
-    if(!box) return;
-    const lines = [data?.message || '처리 완료'];
-    (data?.results || []).slice(0, 30).forEach(row => {
-        const name = adgroups.find(x => String(x.id) === String(row.adgroup_id))?.name || row.adgroup_id || '-';
-        lines.push(`[${name}] 성공 ${num(row.success)} / 실패 ${num(row.fail)} / 건너뜀 ${num(row.skipped)} - ${row.message || ''}`);
-    });
-    box.value = lines.join('\n');
-}
-
-async function updateProductNamesBulk() {
-    const c = ensureReady(true); if(!c) return;
-    let rows = [];
-    try {
-        rows = collectProductNameBulkRows();
-    } catch(err) {
-        showToast(err.message, 'error');
-        return;
-    }
-    if(!rows.length) { showToast('변경할 광고그룹과 상품명을 1개 이상 입력해주세요.', 'error'); return; }
-    try {
-        const data = await postJson('/update_ad_product_names_bulk', { ...c, rows }, '노출용 상품명 대량 변경 중...');
-        renderProductNameBulkResult(data);
-        showToast(data.message || '노출용 상품명 대량 변경을 완료했습니다.', resolveOperationToastTone(data));
-        if(currentAdgroupId && (data.updated_adgroup_ids || []).some(id => String(id) === String(currentAdgroupId))) await loadAdgroupDetails();
-    } catch(err) {
-        const box = document.getElementById('product_name_bulk_result');
-        if(box) box.value = err.message || '노출용 상품명 대량 변경 실패';
-        showToast(`노출용 상품명 대량 변경 실패: ${err.message}`, 'error');
-    }
-}
-
-syncProductNameBulkSlotUi();
-buildProductNameBulkSlots();
-
 function updateSelectOptions() {
     const campaignIdSet = new Set(campaigns.map(x => String(x.id)));
     const adgroupIdSet = new Set(adgroups.map(x => String(x.id)));
@@ -12155,12 +10934,6 @@ function updateSelectOptions() {
         if(el.innerHTML !== nextHtml) el.innerHTML = nextHtml;
         el.value = (prev && adgroupIdSet.has(String(prev))) ? prev : (currentAdgroupId || '');
     });
-    document.querySelectorAll('.product-name-bulk-adgroup-select').forEach(el => {
-        const prev = el.value;
-        const nextHtml = adgHtml || adgEmptyHtml;
-        if(el.innerHTML !== nextHtml) el.innerHTML = nextHtml;
-        el.value = (prev && adgroupIdSet.has(String(prev))) ? prev : (currentAdgroupId || '');
-    });
 }
 
 // --- 4. Workspace UI Sync ---
@@ -12172,12 +10945,11 @@ function openWorkspaceTab(mainTabId, subTabId=null) {
         b_delete: 'delete',
         b_bid: 'change',
         b_time: 'change',
-        b_status: 'change',
-        b_media_restrict: 'change'
+        b_status: 'change'
     };
     if (mainTabId === 'tab_bulk' && subTabId && workflowBySub[subTabId]) {
         switchWorkflowTab(workflowBySub[subTabId]);
-        if (['b_time', 'b_status', 'b_media_restrict'].includes(subTabId)) {
+        if (['b_time', 'b_status'].includes(subTabId)) {
             const subBtn = document.querySelector(`#tab_bulk > .workflow-sub-tabs .tab-btn[onclick*="${subTabId}"]`);
             if (subBtn) switchSubTab(subTabId, subBtn, '#tab_bulk');
         }
@@ -12204,22 +10976,6 @@ function switchSubTab(tabId, btn, parentId) {
     requestAnimationFrame(() => { if (typeof refreshUiPolish === 'function') refreshUiPolish(); });
 }
 
-function toggleDetailSubTab(tabId, btn) {
-    const parent = document.getElementById('tab_data');
-    const target = document.getElementById(tabId);
-    if(!parent || !target || !btn) return;
-    const tabButtons = parent.querySelectorAll('.card:nth-of-type(2) > .sub-tabs .tab-btn');
-    const panels = parent.querySelectorAll('#sub_kw, #sub_ad, #sub_ext, #sub_neg');
-    const isOpen = btn.classList.contains('active') && target.classList.contains('active');
-    tabButtons.forEach(el => el.classList.remove('active'));
-    panels.forEach(el => el.classList.remove('active'));
-    if(!isOpen) {
-        btn.classList.add('active');
-        target.classList.add('active');
-    }
-    requestAnimationFrame(() => { if (typeof refreshUiPolish === 'function') refreshUiPolish(); });
-}
-
 
 
 function setActiveWorkflowButton(workflow) {
@@ -12232,43 +10988,13 @@ function setActiveWorkflowButton(workflow) {
 function setBulkWorkflowSubTabs(workflow) {
     const subTabs = document.querySelector('#tab_bulk > .workflow-sub-tabs');
     if (!subTabs) return;
-    const showSubNav = workflow === 'change' || workflow === 'change-restricted-media';
+    const showSubNav = workflow === 'change';
     subTabs.classList.toggle('is-hidden', !showSubNav);
     subTabs.querySelectorAll('.tab-btn').forEach(btn => {
         const group = btn.dataset.workflowGroup || '';
         const visible = showSubNav && group === 'change';
         btn.dataset.workflowHidden = visible ? '0' : '1';
         btn.style.display = visible ? '' : 'none';
-    });
-}
-
-function ensureBulkAdPanelInCreate() {
-    const panel = document.getElementById('b_headline_bulk');
-    const createTab = document.getElementById('tab_create');
-    if (!panel || !createTab) return null;
-    if (panel.parentElement !== createTab) createTab.appendChild(panel);
-    return panel;
-}
-
-function switchCreateBulkAdTab(btn=null) {
-    const panel = ensureBulkAdPanelInCreate();
-    const createTab = document.getElementById('tab_create');
-    if (!panel || !createTab) return;
-    document.querySelectorAll('.workspace-content > .tab-content').forEach(el => el.classList.remove('active'));
-    createTab.classList.add('active');
-    setActiveWorkflowButton('create');
-    setBulkWorkflowSubTabs('create');
-    updateWorkflowGuide('create');
-    updateWorkflowQuickCards('create');
-    updateWorkflowNextActionCard('create');
-    document.querySelectorAll('#tab_create > .sub-tabs .tab-btn').forEach(el => el.classList.remove('active'));
-    const tabBtn = btn || Array.from(document.querySelectorAll('#tab_create > .sub-tabs .tab-btn')).find(el => (el.textContent || '').trim() === '소재 대량');
-    if (tabBtn) tabBtn.classList.add('active');
-    document.querySelectorAll('#tab_create > .tab-content').forEach(el => el.classList.remove('active'));
-    panel.classList.add('active');
-    requestAnimationFrame(() => {
-        if (typeof refreshUiPolish === 'function') refreshUiPolish();
-        if (typeof refreshStickyUiStabilizer === 'function') refreshStickyUiStabilizer();
     });
 }
 
@@ -12350,10 +11076,6 @@ function openWorkflowQuick(action, targetSelector=null) {
             switchWorkflowTab('change');
             runAfterSwitch(() => { workflowActivateSubTab('#tab_bulk', 'b_status'); workflowFocusTarget('#b_status'); });
             break;
-        case 'change-restricted-media':
-            switchWorkflowTab('change');
-            runAfterSwitch(() => { workflowActivateSubTab('#tab_bulk', 'b_media_restrict'); workflowFocusTarget('#b_media_restrict'); });
-            break;
         case 'copy':
             switchWorkflowTab('copy');
             workflowFocusTarget('#b_copy');
@@ -12394,12 +11116,11 @@ function updateWorkflowQuickCards(workflow) {
         },
         change: {
             title: '무엇을 변경할까요?',
-            sub: '입찰·시간·상태/예산·노출 제한매체처럼 운영 중 자주 쓰는 변경 작업입니다.',
+            sub: '입찰·시간·상태/예산처럼 운영 중 자주 쓰는 변경 작업입니다.',
             cards: [
                 ['입찰가', '고정 입찰가·기기별 가중치·순위 기준 변경', 'change-bid', 'change'],
                 ['시간대 설정', '요일/시간대 노출 및 입찰 가중치 설정', 'change-time', 'change'],
-                ['상태/예산', 'ON/OFF·예산·매체·타겟 설정 변경', 'change-status', 'change'],
-                ['노출 제한매체', '파워링크 제한 매체 추가·복사·덮어쓰기', 'change-restricted-media', 'change']
+                ['상태/예산', 'ON/OFF·예산·매체·타겟 설정 변경', 'change-status', 'change']
             ]
         },
         copy: {
@@ -12451,8 +11172,8 @@ function updateWorkflowGuide(workflow) {
         change: {
             cls: 'is-change',
             kicker: '변경',
-            title: '입찰가·시간대·상태/예산·제한매체를 한 흐름에서 바꾸세요',
-            desc: '선택한 캠페인/광고그룹을 기준으로 입찰가, 요일·시간대, 매체, 상태, 예산, 노출 제한매체 관련 설정을 변경합니다.',
+            title: '입찰가·시간대·상태/예산을 한 흐름에서 바꾸세요',
+            desc: '선택한 캠페인/광고그룹을 기준으로 입찰가, 요일·시간대, 매체, 상태, 예산 관련 설정을 변경합니다.',
             steps: ['변경 항목 선택', '적용 범위 확인', '값 입력', '변경 실행']
         },
         copy: {
@@ -12487,15 +11208,14 @@ function updateWorkflowGuide(workflow) {
 }
 
 function switchWorkflowTab(workflow, btn=null) {
-    if (workflow === 'bulkad') return switchCreateBulkAdTab();
     const config = {
         lookup: { parent: 'tab_data', sub: null, main: 'lookup' },
         create: { parent: 'tab_create', sub: null, main: 'create' },
         change: { parent: 'tab_bulk', sub: 'b_bid', main: 'change' },
-        'change-restricted-media': { parent: 'tab_bulk', sub: 'b_media_restrict', main: 'change' },
         copy: { parent: 'tab_bulk', sub: 'b_copy', main: 'copy' },
         delete: { parent: 'tab_bulk', sub: 'b_delete', main: 'delete' },
-        keyword: { parent: 'tab_bulk', sub: 'b_keyword_inspect', main: 'lookup' }
+        keyword: { parent: 'tab_bulk', sub: 'b_keyword_inspect', main: 'lookup' },
+        bulkad: { parent: 'tab_bulk', sub: 'b_headline_bulk', main: 'create' }
     }[workflow] || { parent: 'tab_data', sub: null, main: 'lookup' };
 
     document.querySelectorAll('.workspace-content > .tab-content').forEach(el => el.classList.remove('active'));
@@ -12669,41 +11389,6 @@ function getAdDescription(ad) {
         body?.description2,
         body?.longDescription
     );
-}
-
-function getAdProductName(ad) {
-    const body = getAdBody(ad);
-    return firstTextValue(
-        ad?.productName,
-        body?.productName,
-        ad?.mallProductName,
-        body?.mallProductName
-    );
-}
-
-function isAdProductNameEditable(ad) {
-    const body = getAdBody(ad);
-    const type = String(ad?.type || ad?.adType || body?.type || body?.adType || '').toUpperCase();
-    return type.includes('SHOPPING') || type.includes('CATALOG') || !!getAdProductName(ad);
-}
-
-function getProductNameInputId(adId) {
-    return `ad_product_name_${String(adId || '').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-}
-
-function renderAdProductNameControl(ad) {
-    const adId = getAdIdentifier(ad);
-    const value = getAdProductName(ad);
-    if (!adId) return escapeHtml(value || '-');
-    const editable = isAdProductNameEditable(ad);
-    const inputId = getProductNameInputId(adId);
-    const title = editable ? '노출용 상품명 수정' : '쇼핑/카탈로그 소재만 수정 가능합니다.';
-    return `
-      <div class="product-name-edit" data-ad-id="${escapeAttr(adId)}">
-        <input id="${escapeAttr(inputId)}" type="text" value="${escapeAttr(value)}" placeholder="노출용 상품명" maxlength="25" ${editable ? '' : 'disabled'}
-          onkeydown="if(event.key==='Enter'){ updateAdProductNameFromRow(this); }" aria-label="노출용 상품명">
-        <button class="btn btn-sub" type="button" ${editable ? '' : 'disabled'} title="${escapeAttr(title)}" onclick="updateAdProductNameFromRow(this)">수정</button>
-      </div>`;
 }
 
 function getAdFinalUrl(ad, device='pc') {
@@ -12884,7 +11569,6 @@ function renderAccountAdsPreview() {
         {k:'type', l:'소재유형'},
         {k:'status', l:'상태'},
         {k:'headline', l:'소재 제목', f:(v,r)=>firstTextValue(v, getAdHeadline(r))},
-        {k:'productName', l:'노출용 상품명', f:(v,r)=>firstTextValue(v, getAdProductName(r))},
         {k:'description', l:'소재 설명', f:(v,r)=>firstTextValue(v, getAdDescription(r))},
         {k:'pcFinalUrl', l:'PC URL', f:(v,r)=>firstTextValue(v, getAdFinalUrl(r, 'pc'))},
         {k:'mobileFinalUrl', l:'MO URL', f:(v,r)=>firstTextValue(v, getAdFinalUrl(r, 'mobile'))},
@@ -13122,7 +11806,6 @@ function renderAdgroupDetailTables() {
         {k:'type', l:'유형', f:v=>(v==='TEXT_45'?'기본소재':String(v||'').includes('SHOPPING')?'쇼핑소재':v)},
         {k:'status', l:'상태', f:(v,r)=>getEntityStatusLabel(r)},
         {k:'ad', l:'소재 제목', f:(v,r)=>getAdHeadline(r)},
-        {k:'ad', l:'노출용 상품명', f:(v,r)=>renderAdProductNameControl(r), html:true},
         {k:'ad', l:'소재 설명', f:(v,r)=>getAdDescription(r)},
         {k:'ad', l:'요약', f:(v,r)=>summarizeAd(r)}
     ], getFilteredDetailAssetRows('ads'), 'ad', 'nccAdId', {stateKey:'ads', label:'소재'});
@@ -13223,33 +11906,11 @@ function renderTable(targetId, cols, rows, typeStr, idKey, options = {}) {
         if(typeStr === 'restricted_keyword') delArgs += `, '${escapeAttr(r.matchType || r.type || r.restrictType)}'`;
 
         return `<tr>
-            ${cols.map(c => {
-                const cellValue = c.f ? c.f(r[c.k], r) : r[c.k];
-                const cellHtml = c.html ? String(cellValue ?? '') : escapeHtml(cellValue);
-                return `<td>${cellHtml}</td>`;
-            }).join('')}
+            ${cols.map(c => `<td>${escapeHtml(c.f ? c.f(r[c.k], r) : r[c.k])}</td>`).join('')}
             <td><button class="btn btn-red" style="padding:4px 8px;font-size:11px;" onclick="deleteSingleEntity(${delArgs})">삭제</button></td>
         </tr>`;
     }).join('');
     el.innerHTML = `<div class="detail-table-shell" data-detail-table="${escapeAttr(stateKey)}">${toolbar}<table><thead>${thead}</thead><tbody>${tbody}</tbody></table></div>`;
-}
-
-async function updateAdProductNameFromRow(trigger) {
-    const root = trigger?.closest ? trigger.closest('.product-name-edit') : null;
-    const adId = String(root?.dataset?.adId || '').trim();
-    const input = root?.querySelector('input');
-    const productName = String(input?.value || '').trim();
-    if(!adId) { showToast('수정할 소재 ID를 확인할 수 없습니다.', 'error'); return; }
-    if(!productName) { showToast('노출용 상품명을 입력해주세요.', 'error'); input?.focus(); return; }
-    if(productName.length > PRODUCT_NAME_MAX_LENGTH) { showToast(`노출용 상품명은 최대 ${PRODUCT_NAME_MAX_LENGTH}자입니다.`, 'error'); input?.focus(); return; }
-    const c = ensureReady(); if(!c) return;
-    try {
-        const data = await postJson('/update_ad_product_name', { ...c, ad_id: adId, product_name: productName }, '노출용 상품명 수정 중...');
-        showToast(data.message || '노출용 상품명을 수정했습니다.', 'success');
-        await loadAdgroupDetails();
-    } catch(err) {
-        showToast(`노출용 상품명 수정 실패: ${err.message}`, 'error');
-    }
 }
 
 async function deleteSingleEntity(type, id, matchType='') {
@@ -14538,107 +13199,14 @@ async function loadCopyEntityTargetAdgroups(showLoading=true) {
     const targetCampId = document.getElementById('copy_entity_target_campaign_select')?.value;
     const el = document.getElementById('copy_entity_target_adgroup_select');
     if(!el) return;
-    if(!targetCampId) {
-        el.innerHTML = '';
-        copyEntityTargetAdgroups = [];
-        selectedCopyEntityTargetAdgroupIds.clear();
-        renderCopyEntityTargetChecklist();
-        return;
-    }
+    if(!targetCampId) { el.innerHTML = ''; return; }
     const c = ensureReady(); if(!c) return;
     try {
         const payload = {...c, campaign_id: targetCampId, force:false};
         const adgs = await fetchJsonCached('/get_adgroups', payload, { loadingText: showLoading ? '목록 로딩...' : '', ttlMs:LIST_API_CACHE_TTL_MS });
-        copyEntityTargetAdgroups = Array.isArray(adgs) ? adgs : [];
-        const sourceSet = new Set(getCheckedAdgroupIdsInViewOrder().map(String));
-        selectedCopyEntityTargetAdgroupIds = new Set(Array.from(selectedCopyEntityTargetAdgroupIds || []).filter(id => copyEntityTargetAdgroups.some(x => String(x.id || '') === String(id)) && !sourceSet.has(String(id))));
-        const selectableAdgs = copyEntityTargetAdgroups.filter(x => !sourceSet.has(String(x.id || '')));
-        const html = selectableAdgs.map(x=>`<option value="${escapeAttr(x.id)}">${escapeHtml(x.name)}</option>`).join('') || '<option value="">선택 가능한 대상 없음</option>';
+        const html = (Array.isArray(adgs) ? adgs : []).map(x=>`<option value="${escapeAttr(x.id)}">${escapeHtml(x.name)}</option>`).join('') || '<option value="">없음</option>';
         if(el.innerHTML !== html) el.innerHTML = html;
-        renderCopyEntityTargetChecklist();
     } catch(err) { showToast(err.message, 'error'); }
-}
-
-function renderCopyEntityTargetChecklist() {
-    const wrap = document.getElementById('copy_entity_target_adgroup_checks');
-    const countEl = document.getElementById('copy_entity_target_count');
-    const campaignAll = document.getElementById('copy_entity_target_campaign_all');
-    const rows = Array.isArray(copyEntityTargetAdgroups) ? copyEntityTargetAdgroups : [];
-    const sourceSet = new Set(getCheckedAdgroupIdsInViewOrder().map(String));
-    const selectableRows = rows.filter(x => !sourceSet.has(String(x.id || '')));
-    selectedCopyEntityTargetAdgroupIds = new Set(Array.from(selectedCopyEntityTargetAdgroupIds || []).filter(id => selectableRows.some(x => String(x.id || '') === String(id))));
-    if(campaignAll) {
-        campaignAll.disabled = selectableRows.length <= 0;
-        campaignAll.checked = selectableRows.length > 0 && selectableRows.every(x => selectedCopyEntityTargetAdgroupIds.has(String(x.id || '')));
-        campaignAll.indeterminate = selectableRows.some(x => selectedCopyEntityTargetAdgroupIds.has(String(x.id || ''))) && !campaignAll.checked;
-    }
-    if(countEl) countEl.textContent = `선택 ${num(selectedCopyEntityTargetAdgroupIds.size)}개`;
-    if(!wrap) return;
-    if(!rows.length) {
-        wrap.innerHTML = '<div class="field-note" style="grid-column:1/-1; margin:0;">대상 캠페인에 광고그룹이 없습니다.</div>';
-        return;
-    }
-    wrap.innerHTML = rows.map(row => {
-        const id = String(row.id || '');
-        const isSource = sourceSet.has(id);
-        const checked = selectedCopyEntityTargetAdgroupIds.has(id) ? 'checked' : '';
-        const disabled = isSource ? 'disabled' : '';
-        const tone = isSource ? 'background:#f8fafc; color:#9ca3af;' : 'background:#fff;';
-        const status = getEntityStatusLabel(row);
-        return `
-            <label style="display:flex; gap:7px; align-items:flex-start; padding:7px 8px; border:1px solid #e5e7eb; border-radius:6px; ${tone} font-size:12px; min-width:0;">
-                <input type="checkbox" value="${escapeAttr(id)}" ${checked} ${disabled} onchange="toggleCopyEntityTargetAdgroup(this.value, this.checked)" style="margin-top:2px;">
-                <span style="min-width:0;">
-                    <span style="display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(row.name || id)}</span>
-                    <span class="field-note" style="margin:2px 0 0;">${isSource ? '원본 그룹이라 대상 선택 불가' : `${escapeHtml(status)} · ${escapeHtml(id)}`}</span>
-                </span>
-            </label>`;
-    }).join('');
-}
-
-function toggleCopyEntityTargetAdgroup(id, checked) {
-    const key = String(id || '').trim();
-    if(!key) return;
-    const sourceSet = new Set(getCheckedAdgroupIdsInViewOrder().map(String));
-    if(sourceSet.has(key)) {
-        selectedCopyEntityTargetAdgroupIds.delete(key);
-        renderCopyEntityTargetChecklist();
-        return;
-    }
-    if(checked) selectedCopyEntityTargetAdgroupIds.add(key);
-    else selectedCopyEntityTargetAdgroupIds.delete(key);
-    const countEl = document.getElementById('copy_entity_target_count');
-    if(countEl) countEl.textContent = `선택 ${num(selectedCopyEntityTargetAdgroupIds.size)}개`;
-    const campaignAll = document.getElementById('copy_entity_target_campaign_all');
-    const selectableRows = (copyEntityTargetAdgroups || []).filter(x => !sourceSet.has(String(x.id || '')));
-    if(campaignAll) {
-        campaignAll.checked = selectableRows.length > 0 && selectableRows.every(x => selectedCopyEntityTargetAdgroupIds.has(String(x.id || '')));
-        campaignAll.indeterminate = selectableRows.some(x => selectedCopyEntityTargetAdgroupIds.has(String(x.id || ''))) && !campaignAll.checked;
-    }
-}
-
-function selectAllCopyEntityTargets(checked) {
-    selectedCopyEntityTargetAdgroupIds.clear();
-    if(checked) {
-        const sourceSet = new Set(getCheckedAdgroupIdsInViewOrder().map(String));
-        (copyEntityTargetAdgroups || []).forEach(row => {
-            const id = String(row.id || '').trim();
-            if(id && !sourceSet.has(id)) selectedCopyEntityTargetAdgroupIds.add(id);
-        });
-    }
-    renderCopyEntityTargetChecklist();
-}
-
-function toggleCopyEntityTargetCampaign(checked) {
-    selectAllCopyEntityTargets(checked);
-}
-
-function getCopyEntityTargetAdgroupIds() {
-    const sourceSet = new Set(getCheckedAdgroupIdsInViewOrder().map(String));
-    const selected = Array.from(selectedCopyEntityTargetAdgroupIds || []).filter(id => id && !sourceSet.has(String(id)));
-    if(selected.length) return selected;
-    const single = String(document.getElementById('copy_entity_target_adgroup_select')?.value || '').trim();
-    return single && !sourceSet.has(single) ? [single] : [];
 }
 
 function setKeywordBidSearchMatchMode(mode) {
@@ -15919,23 +14487,22 @@ async function downloadPowerlinkDuplicateKeywordsExcel() {
 
 async function execCopyEntities() {
     const c = ensureReady(); if(!c) return;
-    const sourceIds = getCheckedAdgroupIdsInViewOrder();
-    const targetAdgroupIds = getCopyEntityTargetAdgroupIds();
+    const sourceIds = Array.from(checkedAdgroupIds);
+    const targetAdgroupId = document.getElementById('copy_entity_target_adgroup_select').value;
     if(!sourceIds.length) { showToast('좌측에서 복사 원본(광고그룹)을 체크해주세요.', 'error'); return; }
-    if(!targetAdgroupIds.length) { showToast('대상 광고그룹을 1개 이상 선택해주세요.', 'error'); return; }
+    if(!targetAdgroupId) { showToast('대상 광고그룹을 선택해주세요.', 'error'); return; }
 
     try {
         const data = await postJson('/copy_entities_to_adgroups', {
-            ...c, source_ids: sourceIds, target_adgroup_ids: targetAdgroupIds,
+            ...c, source_ids: sourceIds, target_adgroup_ids: [targetAdgroupId],
             include_keywords: document.getElementById('copy_include_keywords').checked,
             include_ads: document.getElementById('copy_include_ads').checked,
             include_extensions: document.getElementById('copy_include_extensions').checked,
             include_negatives: document.getElementById('copy_include_negatives').checked,
             exclude_off_assets: document.getElementById('copy_exclude_off_assets')?.checked || false
         }, '항목 복사 중...');
-        showToast(formatOperationToastMessage(data, '항목 복사 완료'), resolveOperationToastTone(data));
-        await loadActionLogs(false);
-        if(currentAdgroupId && targetAdgroupIds.some(id => String(id) === String(currentAdgroupId))) await loadAdgroupDetails();
+        showToast(data.message, 'success');
+        if(currentAdgroupId === targetAdgroupId) await loadAdgroupDetails();
     } catch(err) { showToast(err.message, 'error'); }
 }
 

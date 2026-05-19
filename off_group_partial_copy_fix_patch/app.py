@@ -163,8 +163,6 @@ LOG_ACTION_LABELS = {
     "/set_ads_state_by_scope": "소재 상태 변경",
     "/set_ad_extensions_state_by_scope": "확장소재 상태 변경",
     "/set_asset_state_by_ids": "ID별 소재/확장소재 상태 변경",
-    "/update_ad_product_name": "노출용 상품명 수정",
-    "/update_ad_product_names_bulk": "노출용 상품명 대량 변경",
     "/delete_selected": "선택 삭제",
     "/clear_action_logs": "로그 비우기",
 }
@@ -234,11 +232,6 @@ def _action_summary(path: str, payload: Dict[str, Any]) -> str:
         enabled_label = "ON" if _boolish(payload.get('enabled'), True) else "OFF"
         entity_label = "확장소재" if str(payload.get('entity_type') or '').strip().lower() in {"ad_extension", "extension", "ext"} else "소재"
         return f"{entity_label} {enabled_label} | ID={len(ids)}"
-    if path == "/update_ad_product_name":
-        return f"소재ID={str(payload.get('ad_id') or '').strip()} | 상품명={str(payload.get('product_name') or '').strip()[:40]}"
-    if path == "/update_ad_product_names_bulk":
-        rows = payload.get("rows") or []
-        return f"그룹={len(rows)} | 상품명 대량 변경"
     if path in {"/set_ads_state_by_scope", "/set_ad_extensions_state_by_scope", "/set_asset_state_by_ids"}:
         camp_ids = payload.get('campaign_ids') or []
         adg_ids = payload.get('adgroup_ids') or []
@@ -1694,219 +1687,66 @@ def _scan_powerlink_keywords_by_search(api_key: str, secret_key: str, cid: str, 
         "exclude_groups": exclude_groups,
         "boundary_match": bool(boundary_match),
     }
-def _extract_enabled_from_entity(entity: Dict[str, Any] | None, _depth: int = 0) -> bool | None:
+def _extract_enabled_from_entity(entity: Dict[str, Any] | None) -> bool | None:
     src = entity or {}
-    if not isinstance(src, dict):
-        return None
 
     # Naver API/list responses are not consistent across campaign/adgroup/ad/ad-extension.
     # Some rows use bools, others use 0/1 or strings such as "true", "false", "ON", "OFF".
-    # Detail/list rows can contain both owner-level fields and the actual asset state in nested
-    # objects such as adExtension/statusInfo. Treat any explicit OFF signal as authoritative so an
-    # OFF creative/extension cannot be copied back as ON just because another container says active.
-    def _direct_state(obj: Dict[str, Any]) -> bool | None:
-        seen_enabled = False
-        for key in ("delFlag", "deleted", "isDeleted", "removed", "isRemoved"):
-            if key in obj:
-                val = _bool_or_none(obj.get(key))
-                if val is True:
-                    return False
-        for key in (
-            "userLock", "user_lock", "userLocked", "isUserLocked", "isLocked", "locked",
-            "adUserLock", "adExtensionUserLock", "extensionUserLock",
-        ):
-            if key in obj:
-                val = _bool_or_none(obj.get(key))
-                if val is True:
-                    return False
-                if val is False:
-                    seen_enabled = True
+    for key in ("userLock", "user_lock", "isLocked", "locked"):
+        if key in src:
+            val = _bool_or_none(src.get(key))
+            if val is not None:
+                return not val
 
-        for key in (
-            "enable", "enabled", "isEnabled", "active", "isActive", "use", "used",
-            "isUsed", "useYn", "isUse", "serving", "isServing",
-        ):
-            if key in obj:
-                val = _bool_or_none(obj.get(key))
-                if val is False:
-                    return False
-                if val is True:
-                    seen_enabled = True
+    for key in ("enable", "enabled", "isEnabled", "active", "isActive", "use", "used"):
+        if key in src:
+            val = _bool_or_none(src.get(key))
+            if val is not None:
+                return val
 
-        for key in ("paused", "pause", "isPaused", "isPause", "stopped", "isStopped", "disabled", "isDisabled", "off", "isOff"):
-            if key in obj:
-                val = _bool_or_none(obj.get(key))
-                if val is True:
-                    return False
-                if val is False:
-                    seen_enabled = True
+    for key in ("paused", "pause", "isPaused"):
+        if key in src:
+            val = _bool_or_none(src.get(key))
+            if val is not None:
+                return not val
 
-        for key in ("onOff", "onoff", "on_off", "on", "isOn", "stateOn"):
-            if key in obj:
-                val = _bool_or_none(obj.get(key))
-                if val is False:
-                    return False
-                if val is True:
-                    seen_enabled = True
+    for key in ("onOff", "onoff", "on_off", "on", "isOn"):
+        if key in src:
+            val = _bool_or_none(src.get(key))
+            if val is not None:
+                return val
 
-        status_candidates = [
-            obj.get("status"),
-            obj.get("statusReason"),
-            obj.get("servingStatus"),
-            obj.get("displayStatus"),
-            obj.get("state"),
-            obj.get("adStatus"),
-            obj.get("adExtensionStatus"),
-            obj.get("extensionStatus"),
-            obj.get("adExtStatus"),
-            obj.get("operationStatus"),
-            obj.get("deliveryStatus"),
-            obj.get("deliveryState"),
-            obj.get("servingState"),
-            obj.get("displayState"),
-            obj.get("statusCode"),
-            obj.get("statusName"),
-        ]
-        disabled_statuses = {
-            "OFF", "PAUSE", "PAUSED", "STOP", "STOPPED", "SUSPEND", "SUSPENDED",
-            "DISABLE", "DISABLED", "INACTIVE", "NOTUSED", "UNUSED", "LOCKED",
-            "USERLOCK", "USERLOCKED", "OFFBYUSER", "PAUSEBYUSER", "STOPBYUSER",
-            "중지", "비활성", "미사용", "사용중지", "OFF상태",
-        }
-        enabled_statuses = {
-            "ON", "ACTIVE", "ENABLE", "ENABLED", "ELIGIBLE", "RUNNING", "SERVING",
-            "USED", "사용", "활성", "운영", "노출가능",
-        }
-        disabled_fragments = (
-            "OFF", "PAUSE", "STOP", "SUSPEND", "DISABLE", "INACTIVE", "NOTUSED", "UNUSED", "LOCKED",
-            "USERLOCK", "중지", "비활성", "미사용", "사용중지",
-        )
-        for raw_status in status_candidates:
-            status = str(raw_status or "").strip()
-            if not status:
-                continue
-            normalized = re.sub(r"[\s_\-./]+", "", status).upper()
-            if normalized in disabled_statuses:
-                return False
-            if any(fragment in normalized for fragment in disabled_fragments):
-                return False
-            if normalized in enabled_statuses:
-                seen_enabled = True
-        return True if seen_enabled else None
-
-    direct_state = _direct_state(src)
-
-    if _depth < 2:
-        nested_keys = (
-            "ad", "adExtension", "extension", "adExt", "asset", "creative",
-            "statusInfo", "statusDetail", "serving", "delivery", "target", "raw",
-        )
-        nested_states: List[bool] = []
-        for key in nested_keys:
-            nested = src.get(key)
-            if isinstance(nested, dict):
-                nested_state = _extract_enabled_from_entity(nested, _depth + 1)
-                if nested_state is False:
-                    return False
-                if nested_state is True:
-                    nested_states.append(True)
-    else:
-        nested_states = []
-
-    if direct_state is False:
-        return False
-    if direct_state is True:
-        return True
-    if nested_states:
-        return True
-
+    status_candidates = [
+        src.get("status"),
+        src.get("statusReason"),
+        src.get("servingStatus"),
+        src.get("displayStatus"),
+        src.get("state"),
+    ]
+    disabled_statuses = {
+        "OFF", "PAUSE", "PAUSED", "STOP", "STOPPED", "SUSPEND", "SUSPENDED",
+        "DISABLE", "DISABLED", "INACTIVE", "NOT_USED", "NOTUSED", "LOCKED",
+        "LIMITEDBYBUDGET", "중지", "비활성", "미사용", "사용중지",
+    }
+    enabled_statuses = {
+        "ON", "ACTIVE", "ENABLE", "ENABLED", "ELIGIBLE", "RUNNING", "SERVING",
+        "USED", "사용", "활성", "운영",
+    }
+    for raw_status in status_candidates:
+        status = str(raw_status or "").strip()
+        if not status:
+            continue
+        normalized = re.sub(r"[\s_\-]+", "", status).upper()
+        if normalized in disabled_statuses:
+            return False
+        if normalized in enabled_statuses:
+            return True
     return None
 def _should_skip_off_copy_asset(entity: Dict[str, Any] | None, exclude_off_assets: bool = False) -> bool:
     """Return True only when the user explicitly asked to exclude OFF assets."""
     if not exclude_off_assets:
         return False
-    return _extract_enabled_for_copy_off_filter(entity) is False
-
-def _extract_enabled_for_copy_off_filter(entity: Dict[str, Any] | None, _depth: int = 0) -> bool | None:
-    """ON/OFF copy filter state aligned with the UI status badge.
-
-    `statusReason` and delivery/serving reasons can describe parent/budget/inspection
-    conditions and caused active rows to be treated as OFF. For copy exclusion, only
-    explicit asset/group state fields should decide.
-    """
-    src = entity or {}
-    if not isinstance(src, dict):
-        return None
-
-    seen_enabled = False
-    for key in ("delFlag", "deleted", "isDeleted", "removed", "isRemoved"):
-        if key in src:
-            val = _bool_or_none(src.get(key))
-            if val is True:
-                return False
-
-    for key in (
-        "userLock", "user_lock", "userLocked", "isUserLocked", "isLocked", "locked",
-        "adUserLock", "adExtensionUserLock", "extensionUserLock",
-    ):
-        if key in src:
-            val = _bool_or_none(src.get(key))
-            if val is True:
-                return False
-            if val is False:
-                seen_enabled = True
-
-    for key in (
-        "enable", "enabled", "isEnabled", "active", "isActive", "use", "used",
-        "isUsed", "useYn", "isUse",
-    ):
-        if key in src:
-            val = _bool_or_none(src.get(key))
-            if val is False:
-                return False
-            if val is True:
-                seen_enabled = True
-
-    for key in ("paused", "pause", "isPaused", "isPause", "stopped", "isStopped", "disabled", "isDisabled", "off", "isOff"):
-        if key in src:
-            val = _bool_or_none(src.get(key))
-            if val is True:
-                return False
-            if val is False:
-                seen_enabled = True
-
-    for key in ("onOff", "onoff", "on_off", "on", "isOn", "stateOn"):
-        if key in src:
-            val = _bool_or_none(src.get(key))
-            if val is False:
-                return False
-            if val is True:
-                seen_enabled = True
-
-    for key in ("status", "state", "adStatus", "adExtensionStatus", "extensionStatus", "adExtStatus", "statusName"):
-        status = str(src.get(key) or "").strip()
-        if not status:
-            continue
-        normalized = re.sub(r"[\s_\-./]+", "", status).upper()
-        if normalized in {
-            "OFF", "PAUSE", "PAUSED", "STOP", "STOPPED", "SUSPEND", "SUSPENDED",
-            "DISABLE", "DISABLED", "INACTIVE", "NOTUSED", "UNUSED", "LOCKED",
-            "USERLOCK", "USERLOCKED", "중지", "비활성", "미사용", "사용중지",
-        }:
-            return False
-        seen_enabled = True
-
-    if _depth < 2:
-        for key in ("ad", "adExtension", "extension", "adExt", "asset", "creative", "statusInfo", "statusDetail", "raw"):
-            nested = src.get(key)
-            if isinstance(nested, dict):
-                nested_state = _extract_enabled_for_copy_off_filter(nested, _depth + 1)
-                if nested_state is False:
-                    return False
-                if nested_state is True:
-                    seen_enabled = True
-
-    return True if seen_enabled else None
+    return _extract_enabled_from_entity(entity) is False
 
 def _should_skip_off_copy_asset_with_detail(
     api_key: str,
@@ -1919,13 +1759,13 @@ def _should_skip_off_copy_asset_with_detail(
     """OFF 제외 옵션용 보강 판별.
 
     목록 응답에 상태값이 없고 상세 응답에만 userLock/onOff가 있는 계정이 있어,
-    목록이 ON처럼 보이는 경우에도 상세를 한 번 더 확인한다.
+    상태를 모를 때만 상세를 한 번 더 확인한다.
     """
     if not exclude_off_assets:
         return False
-    state = _extract_enabled_for_copy_off_filter(entity)
-    if state is False:
-        return True
+    state = _extract_enabled_from_entity(entity)
+    if state is not None:
+        return state is False
     entity_id = ""
     if entity_type == "ad":
         entity_id = _extract_ad_id(entity)
@@ -1937,66 +1777,17 @@ def _should_skip_off_copy_asset_with_detail(
         _, detail = _fetch_entity_detail(api_key, secret_key, cid, entity_type, entity_id)
     except Exception:
         detail = None
-    if _extract_enabled_for_copy_off_filter(detail) is False:
-        return True
-    if entity_type == "ad_extension":
-        for detail_candidate in _fetch_ad_extension_state_candidates(api_key, secret_key, cid, entity, entity_id):
-            if _extract_enabled_for_copy_off_filter(detail_candidate) is False:
-                return True
-    return False
+    return _extract_enabled_from_entity(detail) is False
 
 def _copy_payload_preserve_source_state(payload: Dict[str, Any], src: Dict[str, Any] | None) -> Dict[str, Any]:
     """소스가 OFF이면 복사본도 OFF로 생성되도록 userLock을 보존한다.
 
     OFF 제외 옵션을 쓰지 않는 경우에도 기존 OFF 소재/확장소재가 ON으로 살아나는 것을 막기 위한 안전장치다.
     """
-    state = _extract_enabled_for_copy_off_filter(src)
+    state = _extract_enabled_from_entity(src)
     if state is False:
         payload["userLock"] = True
     return payload
-
-def _extract_enabled_for_source_adgroup_skip(entity: Dict[str, Any] | None) -> bool | None:
-    """Return source adgroup ON/OFF for the 'OFF source adgroup exclude' option.
-
-    Adgroup detail responses often include serving/status fields that can be PAUSED
-    because of budget, parent, schedule, or inspection reasons while the user lock
-    itself is ON. For this option we only skip a source adgroup when the adgroup is
-    explicitly user-locked/off.
-    """
-    src = entity or {}
-    if not isinstance(src, dict):
-        return None
-
-    for obj in [src, src.get("raw") if isinstance(src.get("raw"), dict) else None]:
-        if not isinstance(obj, dict):
-            continue
-        for key in ("userLock", "user_lock", "userLocked", "isUserLocked", "isLocked", "locked"):
-            if key in obj:
-                val = _bool_or_none(obj.get(key))
-                if val is True:
-                    return False
-                if val is False:
-                    return True
-
-    for obj in [src, src.get("raw") if isinstance(src.get("raw"), dict) else None]:
-        if not isinstance(obj, dict):
-            continue
-        for key in ("enable", "enabled", "isEnabled", "active", "isActive", "useYn", "isUse"):
-            if key in obj:
-                val = _bool_or_none(obj.get(key))
-                if val is False:
-                    return False
-                if val is True:
-                    return True
-        for key in ("paused", "pause", "isPaused", "isPause", "stopped", "isStopped", "disabled", "isDisabled"):
-            if key in obj:
-                val = _bool_or_none(obj.get(key))
-                if val is True:
-                    return False
-                if val is False:
-                    return True
-
-    return None
 
 def _should_skip_off_source_adgroup(
     api_key: str,
@@ -2008,14 +1799,14 @@ def _should_skip_off_source_adgroup(
 ) -> bool:
     if not exclude_off_assets:
         return False
-    state = _extract_enabled_for_source_adgroup_skip(adgroup_obj)
+    state = _extract_enabled_from_entity(adgroup_obj)
     if state is not None:
         return state is False
     try:
         _, detail = _fetch_adgroup_detail(api_key, secret_key, cid, str(adgroup_id))
     except Exception:
         detail = None
-    return _extract_enabled_for_source_adgroup_skip(detail) is False
+    return _extract_enabled_from_entity(detail) is False
 def _set_keyword_state(api_key: str, secret_key: str, cid: str, keyword_id: str, enabled: bool) -> Tuple[bool, str]:
     keyword_id = str(keyword_id or "").strip()
     if not keyword_id:
@@ -2904,68 +2695,6 @@ def _extract_ad_extension_id(ext_item: Dict[str, Any] | None) -> str:
         if text:
             return text
     return ""
-
-def _extract_ad_extension_owner_id(ext_item: Dict[str, Any] | None) -> str:
-    if not isinstance(ext_item, dict):
-        return ""
-    candidates = [
-        ext_item.get("ownerId"),
-        ext_item.get("nccAdgroupId"),
-        ext_item.get("nccAdId"),
-        ext_item.get("adId"),
-    ]
-    nested = ext_item.get("adExtension")
-    if isinstance(nested, dict):
-        candidates.extend([
-            nested.get("ownerId"),
-            nested.get("nccAdgroupId"),
-            nested.get("nccAdId"),
-            nested.get("adId"),
-        ])
-    for value in candidates:
-        text = str(value or "").strip()
-        if text:
-            return text
-    return ""
-
-def _fetch_ad_extension_state_candidates(
-    api_key: str,
-    secret_key: str,
-    cid: str,
-    ext_item: Dict[str, Any] | None,
-    ext_id: str | None = None,
-) -> List[Dict[str, Any]]:
-    """Fetch owner-scoped extension rows for OFF filtering.
-
-    Some accounts do not expose the mutable ON/OFF state on the plain
-    /ncc/ad-extensions/{id} detail response. Re-reading by ownerId and matching
-    the extension id gives the same shape as the list/detail UI uses.
-    """
-    ext_id = str(ext_id or _extract_ad_extension_id(ext_item) or "").strip()
-    owner_id = _extract_ad_extension_owner_id(ext_item)
-    if not ext_id or not owner_id:
-        return []
-    candidates: List[Dict[str, Any]] = []
-    try:
-        res_detail = _do_req("GET", api_key, secret_key, cid, f"/ncc/ad-extensions/{ext_id}", params={"ownerId": owner_id})
-        if res_detail.status_code == 200:
-            obj = res_detail.json()
-            if isinstance(obj, dict):
-                candidates.append(obj)
-            elif isinstance(obj, list):
-                candidates.extend([x for x in obj if isinstance(x, dict)])
-    except Exception:
-        pass
-    try:
-        res_list = _do_req("GET", api_key, secret_key, cid, "/ncc/ad-extensions", params={"ownerId": owner_id})
-        if res_list.status_code == 200:
-            rows = res_list.json() or []
-            for row in rows if isinstance(rows, list) else []:
-                if isinstance(row, dict) and _extract_ad_extension_id(row) == ext_id:
-                    candidates.append(row)
-    except Exception:
-        pass
-    return candidates
 def _extract_extension_image_ids(ext_item: Dict[str, Any] | None) -> str:
     """Extract image identifiers from image-type ad-extension responses.
 
@@ -2983,8 +2712,7 @@ def _extract_extension_image_ids(ext_item: Dict[str, Any] | None) -> str:
     exact_compact_keys = {
         "imageid", "nccimageid", "imageassetid", "imagefileid", "imageresourceid",
         "creativeimageid", "pcimageid", "mobileimageid", "imgid", "imgno",
-        "imageno", "imageuid", "imageurl", "imagepath", "image", "imgurl",
-        "fileid", "assetid", "id",
+        "imageno", "imageuid", "fileid", "assetid", "id",
     }
     generic_compact_keys = {"fileid", "assetid", "id"}
     found: List[str] = []
@@ -3045,108 +2773,6 @@ def _extract_extension_image_ids(ext_item: Dict[str, Any] | None) -> str:
 
     walk(ext_item)
     return ", ".join(found)
-
-def _extract_extension_link_items(ext_item: Dict[str, Any] | None) -> List[Dict[str, Any]]:
-    """Return SUB_LINKS / IMAGE_SUB_LINKS items from common response shapes."""
-    if not isinstance(ext_item, dict):
-        return []
-    ad_ext = ext_item.get("adExtension")
-    candidates: List[Any] = []
-    if isinstance(ad_ext, list):
-        candidates.append(ad_ext)
-    elif isinstance(ad_ext, dict):
-        for key in (
-            "subLinks", "subLink", "subLinksExtension", "subLinkExtension",
-            "links", "linkList", "items", "imageSubLinks", "imageSubLink",
-        ):
-            value = ad_ext.get(key)
-            if isinstance(value, list):
-                candidates.append(value)
-        candidates.append(ad_ext)
-    for key in ("subLinks", "links", "items", "imageSubLinks"):
-        value = ext_item.get(key)
-        if isinstance(value, list):
-            candidates.append(value)
-
-    def compact_key(key: Any) -> str:
-        return re.sub(r"[^a-z0-9]", "", str(key or "").lower())
-
-    def pick(item: Dict[str, Any], keys: set[str]) -> str:
-        for key, value in item.items():
-            if isinstance(value, (dict, list, tuple)) or value is None or isinstance(value, bool):
-                continue
-            if compact_key(key) in keys:
-                text = str(value).strip()
-                if text and text.lower() not in {"none", "null", "undefined"}:
-                    return text
-        return _extension_first_deep_text(item, keys)
-
-    image_keys = {"imageid", "nccimageid", "imageassetid", "imagefileid", "imageresourceid", "imageurl", "imagepath", "image", "imgurl", "imgid", "imgno", "imageno"}
-    name_keys = {"name", "title", "linkname", "linktitle", "headline", "text", "label"}
-    url_keys = {"final", "finalurl", "url", "linkurl", "pcurl", "pcfinalurl", "landingurl", "mobileurl", "mobilefinalurl"}
-
-    links: List[Dict[str, Any]] = []
-    seen: set[Tuple[str, str, str]] = set()
-    for candidate in candidates:
-        iterable = candidate if isinstance(candidate, list) else [candidate]
-        for item in iterable:
-            if not isinstance(item, dict):
-                continue
-            name = pick(item, name_keys)
-            final_url = pick(item, url_keys)
-            image_id = pick(item, image_keys)
-            if not image_id:
-                for key, value in item.items():
-                    if compact_key(key) in {"image", "imageinfo", "imageasset", "img"} and isinstance(value, dict):
-                        image_id = _extension_first_deep_text(value, {"imageid", "nccimageid", "id", "url", "path", "imageurl", "imagepath"})
-                        if image_id:
-                            break
-            if not (name or final_url or image_id):
-                continue
-            key = (image_id, name, final_url)
-            if key in seen:
-                continue
-            seen.add(key)
-            links.append({"imageId": image_id, "name": name, "url": final_url})
-    return links
-
-def _extension_first_deep_text(value: Any, keys: set[str]) -> str:
-    def compact_key(key: Any) -> str:
-        return re.sub(r"[^a-z0-9]", "", str(key or "").lower())
-    if isinstance(value, dict):
-        for key, raw in value.items():
-            if compact_key(key) in keys and raw is not None and not isinstance(raw, (dict, list, tuple, bool)):
-                text = str(raw).strip()
-                if text and text.lower() not in {"none", "null", "undefined"}:
-                    return text
-        for nested in value.values():
-            found = _extension_first_deep_text(nested, keys)
-            if found:
-                return found
-    elif isinstance(value, list):
-        for item in value:
-            found = _extension_first_deep_text(item, keys)
-            if found:
-                return found
-    return ""
-
-def _flatten_image_sublink_export_fields(ext_item: Dict[str, Any] | None) -> Dict[str, Any]:
-    links = _extract_extension_link_items(ext_item)
-    fields: Dict[str, Any] = {"linkCount": len(links)}
-    for idx in range(1, 4):
-        item = links[idx - 1] if idx <= len(links) else {}
-        fields[f"link{idx}ImageId"] = str(item.get("imageId") or "").strip()
-        fields[f"link{idx}Name"] = str(item.get("name") or "").strip()
-        fields[f"link{idx}Url"] = str(item.get("url") or "").strip()
-    image_ids = [str(item.get("imageId") or "").strip() for item in links if str(item.get("imageId") or "").strip()]
-    if image_ids:
-        fields["imageId"] = ", ".join(dict.fromkeys(image_ids))
-    start = _extension_first_deep_text(ext_item, {"periodstartdate", "periodstartdt", "startdate", "startdt", "begindate", "begindt"})
-    end = _extension_first_deep_text(ext_item, {"periodenddate", "periodenddt", "enddate", "enddt", "finishdate", "finishdt"})
-    fields["periodSetting"] = "설정" if (start or end) else "설정안함"
-    fields["periodStartDate"] = start
-    fields["periodEndDate"] = end
-    return fields
 
 def _normalize_lookup_scope(value: Any) -> str:
     scope = str(value or "account").strip().lower()
@@ -3532,8 +3158,6 @@ def _collect_lookup_extensions_for_contexts(api_key: str, secret_key: str, cid: 
                 continue
             for ext in (ext_rows or []):
                 ext = ext if isinstance(ext, dict) else {}
-                link_fields = _flatten_image_sublink_export_fields(ext)
-                image_id_value = link_fields.get("imageId") or _extract_extension_image_ids(ext)
                 rows.append({
                     "campaignId": str(ctx.get("campaign_id") or ""),
                     "campaignName": str(ctx.get("campaign_name") or ""),
@@ -3544,11 +3168,10 @@ def _collect_lookup_extensions_for_contexts(api_key: str, secret_key: str, cid: 
                     "ownerId": owner_id,
                     "ownerScope": "소재" if owner_scope == "AD" else "광고그룹",
                     "adExtensionId": _extract_ad_extension_id(ext),
-                    "imageId": image_id_value,
+                    "imageId": _extract_extension_image_ids(ext),
                     "type": str(ext.get("type") or ext.get("adExtensionType") or ""),
                     "status": "ON" if _extract_enabled_from_entity(ext) is not False else "OFF",
                     "summary": _summarize_lookup_extension(ext),
-                    **link_fields,
                 })
     rows.sort(key=lambda x: (x.get("campaignName") or "", x.get("adgroupName") or "", x.get("ownerScope") or "", x.get("type") or "", x.get("summary") or ""))
     return rows, warnings
@@ -3638,9 +3261,7 @@ def _ensure_asset_lookup_ad_export_columns(columns: List[Tuple[str, str]]) -> Li
     return normalized[:insert_at] + extra + normalized[insert_at:]
 
 def _build_asset_lookup_workbook(rows: List[Dict[str, Any]], title: str, scope_label: str, columns: List[Tuple[str, str]]):
-    title_text = str(title or "")
-    is_ad_export = "소재" in title_text and "확장소재" not in title_text
-    if is_ad_export:
+    if "소재" in str(title or ""):
         rows = _prepare_asset_lookup_ad_export_rows(rows)
         columns = _ensure_asset_lookup_ad_export_columns(columns)
 
@@ -3667,10 +3288,6 @@ def _build_asset_lookup_workbook(rows: List[Dict[str, Any]], title: str, scope_l
         "pcFinalUrl": 42, "mobileFinalUrl": 42, "referenceKey": 28,
         "effectiveBidAmt": 14, "adBidAmt": 14, "adUseGroupBidAmt": 16, "adgroupBidAmt": 16, "adId": 24,
         "adExtensionId": 24, "imageId": 34, "imageIdCount": 12, "imageIdDetail": 36,
-        "periodSetting": 12, "periodStartDate": 14, "periodEndDate": 14,
-        "link1ImageId": 46, "link1Name": 22, "link1Url": 52,
-        "link2ImageId": 46, "link2Name": 22, "link2Url": 52,
-        "link3ImageId": 46, "link3Name": 22, "link3Url": 52,
         "extensionTypeLabel": 18, "resolvedExtensionType": 18, "ownerId": 24, "campaignId": 20, "adgroupId": 22, "ownerScope": 12,
     }
     widths = {
@@ -3683,7 +3300,7 @@ def _build_asset_lookup_workbook(rows: List[Dict[str, Any]], title: str, scope_l
         metadata=[
             f"생성시각: {generated_at}",
             f"조회범위: {scope_label}",
-            *( ["컬럼버전: ad-export-title-description-v3"] if is_ad_export else [] ),
+            *( ["컬럼버전: ad-export-title-description-v3"] if "소재" in str(title or "") else [] ),
         ],
         headers=headers,
         rows=data_rows,
@@ -6430,11 +6047,6 @@ def _build_copy_extension_payload(api_key: str, secret_key: str, cid: str, ext_i
     if ext_type == "SHOPPING_EXTRA":
         payload.pop("adExtension", None)
     payload = _copy_payload_preserve_source_state(payload, src)
-    if _extract_enabled_from_entity(src) is not False:
-        for state_candidate in _fetch_ad_extension_state_candidates(api_key, secret_key, cid, ext_item, ext_id):
-            if _extract_enabled_from_entity(state_candidate) is False:
-                payload["userLock"] = True
-                break
     return _strip_empty(payload)
 def _extract_created_ad_id_from_response(res: Any) -> str:
     if res is None:
@@ -6566,8 +6178,6 @@ def _copy_ad_owner_extensions(api_key: str, secret_key: str, cid: str, old_owner
     for ext in (r_ext.json() or []):
         if not isinstance(ext, dict):
             continue
-        ext = copy.deepcopy(ext)
-        ext.setdefault("ownerId", old_owner_id)
         if _should_skip_off_copy_asset_with_detail(api_key, secret_key, cid, "ad_extension", ext, exclude_off_assets):
             stats["skipped_off"] += 1
             continue
@@ -6719,13 +6329,7 @@ def _copy_adgroup_children(api_key, secret_key, cid, old_adg_id, new_adg_id, biz
     else:
         r_ext = None
     if r_ext is not None and r_ext.status_code == 200:
-        all_group_exts = []
-        for x in (r_ext.json() or []):
-            if not isinstance(x, dict):
-                continue
-            item = copy.deepcopy(x)
-            item.setdefault("ownerId", old_adg_id)
-            all_group_exts.append(item)
+        all_group_exts = [x for x in (r_ext.json() or []) if isinstance(x, dict)]
         skipped_off_group_exts = []
         group_exts = []
         for ext in all_group_exts:
@@ -8412,7 +8016,7 @@ def copy_entities_to_adgroups():
     include_ads = _boolish(d.get("include_ads"), True)
     include_extensions = _boolish(d.get("include_extensions"), True)
     include_negatives = _boolish(d.get("include_negatives"), True)
-    exclude_off_assets = _boolish(d.get("exclude_off_assets"), True)
+    exclude_off_assets = _boolish(d.get("exclude_off_assets"), False)
     if not source_ids:
         return jsonify({"error": "복사 원본 광고그룹을 선택해주세요."}), 400
     if not target_adgroup_ids:
@@ -13292,197 +12896,6 @@ def set_asset_state_by_ids():
         "patch": "asset-state-by-id-v1-20260504",
     })
 
-AD_PRODUCT_NAME_MAX_LEN = 25
-AD_PRODUCT_NAME_BULK_MAX_GROUPS = 10
-
-def _extract_ad_product_name(ad_item: Dict[str, Any] | None) -> str:
-    item = ad_item or {}
-    ad_obj = item.get("ad") if isinstance(item.get("ad"), dict) else {}
-    return str(_first_non_empty(ad_obj.get("productName"), item.get("productName"), item.get("mallProductName")) or "").strip()
-
-def _ad_allows_product_name_update(ad_item: Dict[str, Any] | None) -> bool:
-    item = ad_item or {}
-    ad_obj = item.get("ad") if isinstance(item.get("ad"), dict) else {}
-    ad_type = str(item.get("type") or item.get("adType") or ad_obj.get("type") or ad_obj.get("adType") or "").upper()
-    return ad_type in SHOPPING_AD_TYPES or "SHOPPING" in ad_type or "CATALOG" in ad_type or bool(_extract_ad_product_name(item))
-
-def _put_single_ad_product_name(api_key: str, secret_key: str, cid: str, ad_item: Dict[str, Any], product_name: str):
-    ad_id = _extract_ad_id(ad_item)
-    item = copy.deepcopy(ad_item or {})
-    target = item.get("ad") if isinstance(item.get("ad"), dict) else item
-    target["productName"] = product_name
-    if target is not item:
-        item["ad"] = target
-    if "productName" in item:
-        item["productName"] = product_name
-    cleanup_keys = ['regTm', 'editTm', 'status', 'statusReason', 'inspectStatus', 'delFlag', 'referenceKey', 'referenceData', 'referenceKeyData']
-    for k in cleanup_keys:
-        item.pop(k, None)
-    attempts = [
-        (f"/ncc/ads/{ad_id}", {"fields": "ad"}, item),
-        (f"/ncc/ads/{ad_id}", {"fields": "productName"}, item),
-        (f"/ncc/ads/{ad_id}", None, item),
-    ]
-    last_res = None
-    for uri, params, body in attempts:
-        last_res = _do_req("PUT", api_key, secret_key, cid, uri, params=params, json_body=body)
-        if last_res.status_code in [200, 201]:
-            return last_res
-    return last_res
-
-def update_ad_product_name():
-    d = request.json or {}
-    api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
-    ad_id = str(d.get("ad_id") or d.get("nccAdId") or "").strip()
-    product_name = str(d.get("product_name") or d.get("productName") or "").strip()
-    if not api_key or not secret_key or not cid:
-        return jsonify({"error": "API Key / Secret Key / Customer ID가 필요합니다."}), 400
-    if not ad_id:
-        return jsonify({"error": "수정할 소재 ID가 필요합니다."}), 400
-    if not product_name:
-        return jsonify({"error": "노출용 상품명을 입력해주세요."}), 400
-    if len(product_name) > AD_PRODUCT_NAME_MAX_LEN:
-        return jsonify({"error": f"노출용 상품명은 최대 {AD_PRODUCT_NAME_MAX_LEN}자까지 입력할 수 있습니다."}), 400
-    res = _do_req("GET", api_key, secret_key, cid, f"/ncc/ads/{ad_id}")
-    if res.status_code != 200:
-        return jsonify({"error": f"소재 조회 실패: {res.text}"}), res.status_code
-    ad_item = res.json() or {}
-    if not isinstance(ad_item, dict):
-        return jsonify({"error": "소재 응답 형식을 확인할 수 없습니다."}), 500
-    if not _ad_allows_product_name_update(ad_item):
-        return jsonify({"error": "노출용 상품명 수정은 쇼핑/카탈로그 소재에서만 지원합니다."}), 400
-    old_product_name = _extract_ad_product_name(ad_item)
-    put_res = _put_single_ad_product_name(api_key, secret_key, cid, ad_item, product_name)
-    if not put_res or put_res.status_code not in [200, 201]:
-        detail = put_res.text if put_res is not None else "응답 없음"
-        return jsonify({"error": f"노출용 상품명 수정 실패: {detail}"}), 500
-    _cache_invalidate(api_key, secret_key, cid)
-    return jsonify({
-        "ok": True,
-        "ad_id": ad_id,
-        "oldProductName": old_product_name,
-        "productName": product_name,
-        "message": f"노출용 상품명 수정 완료: {old_product_name or '-'} → {product_name}",
-        "patch": "ad-product-name-edit-v1-20260519",
-    })
-
-def update_ad_product_names_bulk():
-    d = request.json or {}
-    api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
-    raw_rows = d.get("rows") or []
-    if not api_key or not secret_key or not cid:
-        return jsonify({"error": "API Key / Secret Key / Customer ID가 필요합니다."}), 400
-    if not isinstance(raw_rows, list):
-        return jsonify({"error": "변경 목록 형식을 확인해주세요."}), 400
-
-    rows: List[Dict[str, str]] = []
-    seen_adgroups: set[str] = set()
-    for raw in raw_rows:
-        if not isinstance(raw, dict):
-            continue
-        adgroup_id = str(raw.get("adgroup_id") or raw.get("nccAdgroupId") or "").strip()
-        product_name = str(raw.get("product_name") or raw.get("productName") or "").strip()
-        if not adgroup_id and not product_name:
-            continue
-        if not adgroup_id:
-            return jsonify({"error": "광고그룹을 선택하지 않은 행이 있습니다."}), 400
-        if not product_name:
-            return jsonify({"error": "노출용 상품명을 입력하지 않은 행이 있습니다."}), 400
-        if len(product_name) > AD_PRODUCT_NAME_MAX_LEN:
-            return jsonify({"error": f"노출용 상품명은 최대 {AD_PRODUCT_NAME_MAX_LEN}자까지 입력할 수 있습니다. ({product_name})"}), 400
-        if adgroup_id in seen_adgroups:
-            return jsonify({"error": f"같은 광고그룹이 중복 선택되었습니다: {adgroup_id}"}), 400
-        seen_adgroups.add(adgroup_id)
-        rows.append({"adgroup_id": adgroup_id, "product_name": product_name})
-
-    if not rows:
-        return jsonify({"error": "변경할 광고그룹과 노출용 상품명을 1개 이상 입력해주세요."}), 400
-    if len(rows) > AD_PRODUCT_NAME_BULK_MAX_GROUPS:
-        return jsonify({"error": f"한 번에 최대 {AD_PRODUCT_NAME_BULK_MAX_GROUPS}개 광고그룹까지 변경할 수 있습니다."}), 400
-
-    success = fail = skipped = 0
-    group_results: List[Dict[str, Any]] = []
-    updated_adgroup_ids: List[str] = []
-
-    for row in rows:
-        adgroup_id = row["adgroup_id"]
-        product_name = row["product_name"]
-        res_ads, ads = _fetch_ads(api_key, secret_key, cid, adgroup_id)
-        if res_ads.status_code != 200:
-            fail += 1
-            group_results.append({
-                "ok": False,
-                "adgroup_id": adgroup_id,
-                "productName": product_name,
-                "success": 0,
-                "fail": 1,
-                "skipped": 0,
-                "message": f"소재 조회 실패: {res_ads.text}",
-            })
-            continue
-
-        group_success = group_fail = group_skipped = 0
-        group_messages: List[str] = []
-        for ad_item in (ads or []):
-            ad_id = _extract_ad_id(ad_item)
-            if not ad_id:
-                group_skipped += 1
-                continue
-            if not _ad_allows_product_name_update(ad_item):
-                group_skipped += 1
-                continue
-            old_product_name = _extract_ad_product_name(ad_item)
-            if old_product_name == product_name:
-                group_skipped += 1
-                continue
-            put_res = _put_single_ad_product_name(api_key, secret_key, cid, ad_item, product_name)
-            if put_res and put_res.status_code in [200, 201]:
-                group_success += 1
-                if len(group_messages) < 3:
-                    group_messages.append(f"{ad_id}: {old_product_name or '-'} → {product_name}")
-            else:
-                group_fail += 1
-                detail = put_res.text if put_res is not None else "응답 없음"
-                if len(group_messages) < 3:
-                    group_messages.append(f"{ad_id}: 변경 실패 ({detail})")
-
-        success += group_success
-        fail += group_fail
-        skipped += group_skipped
-        if group_success:
-            updated_adgroup_ids.append(adgroup_id)
-        if group_success or group_fail:
-            message = " / ".join(group_messages)
-        else:
-            message = "변경 가능한 쇼핑/카탈로그 소재가 없거나 이미 동일 상품명입니다."
-        group_results.append({
-            "ok": group_success > 0 and group_fail == 0,
-            "adgroup_id": adgroup_id,
-            "productName": product_name,
-            "success": group_success,
-            "fail": group_fail,
-            "skipped": group_skipped,
-            "message": message,
-        })
-
-    if success:
-        _cache_invalidate(api_key, secret_key, cid)
-    message = f"노출용 상품명 대량 변경 완료 (성공 {success}건 / 실패 {fail}건 / 건너뜀 {skipped}건)"
-    if not success and fail:
-        message = f"노출용 상품명 대량 변경 실패 (실패 {fail}건 / 건너뜀 {skipped}건)"
-    elif not success:
-        message = f"변경된 소재가 없습니다. (건너뜀 {skipped}건)"
-    return jsonify({
-        "ok": success > 0,
-        "message": message,
-        "success": success,
-        "fail": fail,
-        "skipped": skipped,
-        "results": group_results,
-        "updated_adgroup_ids": updated_adgroup_ids,
-        "patch": "ad-product-name-bulk-v1-20260519",
-    }), (200 if success > 0 else 400)
-
 def set_ads_state_by_scope():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
@@ -13759,8 +13172,6 @@ _CHANGE_SERVICE = ChangeService({
     "set_ads_state_by_scope": set_ads_state_by_scope,
     "set_ad_extensions_state_by_scope": set_ad_extensions_state_by_scope,
     "set_asset_state_by_ids": set_asset_state_by_ids,
-    "update_ad_product_name": update_ad_product_name,
-    "update_ad_product_names_bulk": update_ad_product_names_bulk,
 })
 app.register_blueprint(create_change_blueprint(_CHANGE_SERVICE))
 

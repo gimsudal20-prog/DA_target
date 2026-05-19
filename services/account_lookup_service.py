@@ -288,6 +288,9 @@ class AccountLookupService:
             row_copy["extensionTypeLabel"] = AD_EXTENSION_TYPE_LABELS.get(resolved_type, row.get("type") or resolved_type)
             row_copy["imageIdCount"] = len(image_ids) if image_ids else ""
             row_copy["imageIdDetail"] = "\n".join([f"이미지 {idx}: {image_id}" for idx, image_id in enumerate(image_ids, start=1)])
+            row_copy.setdefault("periodSetting", "설정안함")
+            row_copy.setdefault("periodStartDate", "")
+            row_copy.setdefault("periodEndDate", "")
             prepared.append(row_copy)
         return prepared
 
@@ -412,6 +415,24 @@ class AccountLookupService:
         columns, while IMAGE_SUB_LINKS and POWER_LINK_IMAGE do.
         """
         target = cls._normalize_extension_type_filter(extension_type)
+        if target == "IMAGE_SUB_LINKS":
+            columns = [
+                ("campaignName", "캠페인 이름"),
+                ("adgroupName", "광고그룹 이름"),
+                ("adgroupId", "광고그룹 ID"),
+                ("adExtensionId", "확장소재 ID"),
+                ("periodSetting", "기간 설정"),
+                ("periodStartDate", "기간 시작일"),
+                ("periodEndDate", "기간 종료일"),
+            ]
+            for idx in range(1, 4):
+                columns.extend([
+                    (f"link{idx}ImageId", f"링크{idx} 이미지ID"),
+                    (f"link{idx}Name", f"링크{idx} 이름"),
+                    (f"link{idx}Url", f"링크{idx} URL"),
+                ])
+            return columns
+
         base_columns = [
             ("campaignType", "캠페인유형"), ("campaignName", "캠페인명"),
             ("adgroupType", "광고그룹유형"), ("adgroupName", "광고그룹명"),
