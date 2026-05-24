@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -96,15 +97,51 @@ def normalize_adgroup_item(item: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+URL_RE = re.compile(r"https?://[^\s\"'<>)\]}]+", re.I)
+
+
+def _extract_url_like(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return ""
+        match = URL_RE.search(text)
+        return match.group(0).rstrip(".,;") if match else ""
+    if isinstance(value, dict):
+        preferred_keys = (
+            "siteUrl", "url", "homepageUrl", "mallUrl", "storeUrl", "channelUrl",
+            "pcUrl", "mobileUrl", "finalUrl", "displayUrl", "landingUrl",
+            "channelContents",
+        )
+        for key in preferred_keys:
+            if key in value:
+                found = _extract_url_like(value.get(key))
+                if found:
+                    return found
+        for child in value.values():
+            found = _extract_url_like(child)
+            if found:
+                return found
+    if isinstance(value, list):
+        for child in value:
+            found = _extract_url_like(child)
+            if found:
+                return found
+    return ""
+
+
 def normalize_channel_item(item: Dict[str, Any]) -> Dict[str, Any]:
     item = item if isinstance(item, dict) else {}
     channel_id = item.get("nccBusinessChannelId") or item.get("bizChannelId") or item.get("nccChannelId") or item.get("channelId") or ""
-    name = item.get("name") or item.get("channelContents") or item.get("siteUrl") or channel_id
+    site_url = _extract_url_like(item)
+    name = item.get("name") or item.get("channelName") or item.get("businessName") or item.get("channelContents") or site_url or channel_id
     return {
         "id": channel_id,
         "name": name,
         "channelTp": item.get("channelTp") or item.get("bizChannelType") or item.get("channelType") or "",
-        "siteUrl": item.get("siteUrl") or "",
+        "siteUrl": site_url,
         "raw": item,
     }
 
@@ -256,6 +293,33 @@ class LookupService:
         if res.status_code != 200:
             return res, []
         rows = [normalize_channel_item(item) for item in (res.json() or [])]
+        missing_url_indices = [idx for idx, row in enumerate(rows) if row.get("id") and not row.get("siteUrl")]
+        if missing_url_indices:
+            max_workers = min(5, len(missing_url_indices))
+
+            def _fetch_detail(row_index: int):
+                channel_id = str(rows[row_index].get("id") or "").strip()
+                detail_res = self.request_func("GET", api_key, secret_key, cid, f"/ncc/channels/{channel_id}")
+                if detail_res.status_code != 200:
+                    return row_index, None
+                try:
+                    detail = detail_res.json()
+                except Exception:
+                    detail = None
+                return row_index, detail if isinstance(detail, dict) else None
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_map = {executor.submit(_fetch_detail, idx): idx for idx in missing_url_indices}
+                for fut in as_completed(future_map):
+                    try:
+                        idx, detail = fut.result()
+                    except Exception:
+                        continue
+                    if not detail:
+                        continue
+                    merged = copy.deepcopy(rows[idx].get("raw") if isinstance(rows[idx].get("raw"), dict) else {})
+                    merged.update(detail)
+                    rows[idx] = normalize_channel_item(merged)
         return res, rows
 
     def fetch_first_biz_channel_id(self, api_key: str, secret_key: str, cid: str) -> str:

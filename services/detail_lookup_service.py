@@ -67,9 +67,9 @@ class DetailLookupService:
         preview_limit_raw = d.get("preview_limit")
         if preview_limit_raw is not None:
             try:
-                preview_limit = max(0, int(preview_limit_raw))
+                preview_limit = max(0, min(1000, int(preview_limit_raw)))
             except Exception:
-                preview_limit = 10
+                preview_limit = 200
             total_count = len(filtered_rows or [])
             preview_rows = (filtered_rows or [])[:preview_limit]
             return {
