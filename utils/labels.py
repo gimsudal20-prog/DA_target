@@ -57,8 +57,8 @@ AD_TYPE_LABELS = {
 AD_EXTENSION_TYPE_LABELS = {
     "HEADLINE": "추가 제목",
     "SUB_LINKS": "서브링크",
-    "DESCRIPTION": "추가 설명문구",
-    "DESCRIPTION_EXTRA": "설명 확장문구",
+    "DESCRIPTION": "홍보문구",
+    "DESCRIPTION_EXTRA": "추가설명",
     "SHOPPING_PROMO_TEXT": "쇼핑 추가홍보문구",
     "SHOPPING_EXTRA": "쇼핑상품부가정보",
     "PHONE": "전화번호",
