@@ -1274,6 +1274,8 @@
       justify-content: center;
     }
     .app-layout.account-sidebar-collapsed .brand h1,
+    .app-layout.account-sidebar-collapsed .connection-info-toggle,
+    .app-layout.account-sidebar-collapsed .connection-info-panel,
     .app-layout.account-sidebar-collapsed .auth-card,
     .app-layout.account-sidebar-collapsed .sidebar .list-group-title,
     .app-layout.account-sidebar-collapsed .sidebar > .form-group,
@@ -1323,6 +1325,8 @@
       pointer-events: none;
     }
     .app-layout.account-sidebar-collapsed .auth-card,
+    .app-layout.account-sidebar-collapsed .connection-info-toggle,
+    .app-layout.account-sidebar-collapsed .connection-info-panel,
     .app-layout.account-sidebar-collapsed .sidebar .list-group-title,
     .app-layout.account-sidebar-collapsed .sidebar > .form-group,
     .app-layout.account-sidebar-collapsed #account_list {
@@ -4071,6 +4075,109 @@
     .log-count-chip.success { background: var(--design-green-soft) !important; color: #047857 !important; border-color: #bbf7d0 !important; }
     .log-count-chip.fail { background: var(--design-red-soft) !important; color: #b91c1c !important; border-color: #fecaca !important; }
     .log-count-chip.skip { background: var(--design-amber-soft) !important; color: #92400e !important; border-color: #fde68a !important; }
+    button.log-count-chip {
+      font: inherit;
+      cursor: pointer;
+      appearance: none;
+    }
+    button.log-count-chip.fail:hover {
+      background: #fee2e2 !important;
+      border-color: #fca5a5 !important;
+      color: #991b1b !important;
+    }
+    .log-status-btn {
+      font: inherit;
+      cursor: pointer;
+      appearance: none;
+    }
+    .log-status-btn:focus-visible,
+    .log-fail-preview:focus-visible {
+      outline: 2px solid rgba(220, 38, 38, .38);
+      outline-offset: 2px;
+    }
+    .log-status-fail-btn:hover {
+      background: #fee2e2 !important;
+      border-color: #fca5a5 !important;
+      color: #991b1b !important;
+    }
+    .log-item.has-fail-details {
+      cursor: pointer;
+    }
+    .log-item.has-fail-details.is-detail-open {
+      border-left-color: #dc2626 !important;
+      box-shadow: inset 0 0 0 1px rgba(220, 38, 38, .08);
+    }
+    .log-fail-preview {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      width: 100%;
+      border: 1px solid #fecaca;
+      background: linear-gradient(180deg, #fff7f7 0%, #fff 100%);
+      color: #991b1b;
+      border-radius: 12px;
+      padding: 10px 12px;
+      text-align: left;
+      font: inherit;
+      cursor: pointer;
+      box-shadow: inset 3px 0 0 #ef4444;
+    }
+    .log-fail-preview:hover {
+      background: #fef2f2;
+      border-color: #fca5a5;
+    }
+    .log-fail-preview-main {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+    .log-fail-preview span,
+    .log-fail-preview-label {
+      flex: 0 0 auto;
+      font-size: 11px;
+      font-weight: 820;
+      white-space: nowrap;
+    }
+    .log-fail-preview-label {
+      align-self: flex-start;
+      padding: 3px 7px;
+      border-radius: 999px;
+      background: #fee2e2;
+      color: #b91c1c;
+      border: 1px solid #fecaca;
+    }
+    .log-fail-preview strong,
+    .log-fail-preview-target {
+      min-width: 0;
+      color: #7f1d1d;
+      font-size: 12px;
+      font-weight: 850;
+      line-height: 1.45;
+      word-break: break-word;
+    }
+    .log-fail-preview-detail {
+      color: #475467;
+      font-size: 12px;
+      line-height: 1.45;
+      word-break: break-word;
+    }
+    .log-fail-preview-action {
+      flex: 0 0 auto;
+      align-self: center;
+      color: #b91c1c;
+      font-size: 11px;
+      font-weight: 820;
+      white-space: nowrap;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #fff;
+      border: 1px solid #fecaca;
+    }
+    .log-item.is-detail-open .log-fail-preview-action {
+      background: #fee2e2;
+      color: #991b1b;
+    }
     .log-detail-fold {
       border-color: var(--design-line) !important;
       border-radius: 12px !important;
@@ -4147,6 +4254,13 @@
       padding: 0 1px;
     }
     .log-detail-section.fail .log-detail-section-title { color: #b91c1c; }
+    .log-detail-section.fail.is-highlighted {
+      animation: logFailDetailPulse 1.25s ease;
+    }
+    @keyframes logFailDetailPulse {
+      0% { background: rgba(254, 226, 226, .95); box-shadow: 0 0 0 0 rgba(220, 38, 38, .22); }
+      100% { background: transparent; box-shadow: 0 0 0 8px rgba(220, 38, 38, 0); }
+    }
     .log-detail-section.warning .log-detail-section-title,
     .log-detail-section.skip .log-detail-section-title { color: #92400e; }
     .log-detail-section-title span {
@@ -4411,6 +4525,338 @@
     .log-panel #action_log_list .log-detail-copy {
       flex: 0 0 auto !important;
       align-self: center !important;
+    }
+
+    /* 작업 이력 실패 상세 최종 표시 보정
+       뒤쪽 밀도/겹침 패치가 로그 카드를 overflow:hidden으로 다시 덮어써 실패 상세가 잘리는 문제를 막는다. */
+    body .workspace-content .log-panel #action_log_list .log-item,
+    body .workspace-content .log-panel #action_log_list .log-item.has-fail-details,
+    body .workspace-content .log-panel #action_log_list .log-item.is-detail-open {
+      height: auto !important;
+      min-height: 0 !important;
+      max-height: none !important;
+      overflow: visible !important;
+      display: flex !important;
+      flex: 0 0 auto !important;
+      flex-direction: column !important;
+      align-items: stretch !important;
+    }
+    body .workspace-content .log-panel #action_log_list .log-detail-fold,
+    body .workspace-content .log-panel #action_log_list .log-detail-fold[open] {
+      display: block !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      height: auto !important;
+      max-height: none !important;
+      overflow: visible !important;
+      position: relative !important;
+      z-index: 2 !important;
+    }
+    body .workspace-content .log-panel #action_log_list .log-fail-preview,
+    body .workspace-content .log-panel #action_log_list .log-detail-fold[open] .log-detail-list,
+    body .workspace-content .log-panel #action_log_list .log-detail-section,
+    body .workspace-content .log-panel #action_log_list .log-detail-row {
+      display: flex !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      height: auto !important;
+      max-height: none !important;
+      overflow: visible !important;
+      position: relative !important;
+      z-index: 2 !important;
+    }
+    body .workspace-content .log-panel #action_log_list .log-detail-fold:not([open]) .log-detail-list {
+      display: none !important;
+    }
+    body .workspace-content .log-panel #action_log_list .log-item.has-fail-details .log-detail-fold:not([open]) {
+      display: none !important;
+    }
+    body .workspace-content .log-panel #action_log_list .log-detail-list,
+    body .workspace-content .log-panel #action_log_list .log-detail-section {
+      flex-direction: column !important;
+    }
+    body .workspace-content .log-panel #action_log_list .log-detail-row {
+      display: grid !important;
+    }
+    body .workspace-content .log-panel #action_log_list .log-fail-preview {
+      margin-top: 2px !important;
+      flex-direction: row !important;
+      align-items: flex-start !important;
+    }
+
+    /* 대량등록 탭 가독성 보정 */
+    #b_headline_bulk {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    #b_headline_bulk .bulk-upload-overview {
+      border: 1px solid var(--clean-line, var(--line));
+      border-radius: 14px;
+      background: #ffffff;
+      padding: 14px;
+      box-shadow: 0 1px 2px rgba(16, 24, 40, .04);
+    }
+    #b_headline_bulk .bulk-overview-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    #b_headline_bulk .bulk-overview-title {
+      color: var(--clean-text, var(--text));
+      font-size: 16px;
+      font-weight: 900;
+      line-height: 1.25;
+    }
+    #b_headline_bulk .bulk-overview-sub {
+      margin-top: 4px;
+      color: var(--clean-muted, var(--muted));
+      font-size: 12px;
+      font-weight: 650;
+      line-height: 1.45;
+    }
+    #b_headline_bulk .bulk-overview-badges,
+    #b_headline_bulk .bulk-quick-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+    #b_headline_bulk .bulk-overview-badges span {
+      padding: 5px 8px;
+      border-radius: 999px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      color: #475467;
+      font-size: 11px;
+      font-weight: 820;
+    }
+    #b_headline_bulk .bulk-quick-links button {
+      min-height: 32px;
+      padding: 7px 10px;
+      border: 1px solid #d8dee8;
+      border-radius: 999px;
+      background: #f8fafc;
+      color: #344054;
+      font-size: 12px;
+      font-weight: 820;
+      cursor: pointer;
+    }
+    #b_headline_bulk .bulk-quick-links button:hover {
+      background: #eff6ff;
+      border-color: #bfdbfe;
+      color: #1d4ed8;
+    }
+    #b_headline_bulk .bulk-upload-card {
+      --bulk-accent: #2563eb;
+      position: relative;
+      overflow: visible !important;
+      scroll-margin-top: 148px;
+      border-radius: 14px !important;
+      border-color: #e2e8f0 !important;
+      padding: 16px !important;
+      margin-bottom: 0 !important;
+      background: #ffffff !important;
+    }
+    #b_headline_bulk .bulk-upload-card::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 12px;
+      bottom: 12px;
+      width: 4px;
+      border-radius: 0 999px 999px 0;
+      background: var(--bulk-accent);
+    }
+    #b_headline_bulk .bulk-card-shopping { --bulk-accent: #059669; }
+    #b_headline_bulk .bulk-card-powerlink,
+    #b_headline_bulk .bulk-card-ad,
+    #b_headline_bulk .bulk-card-rsa,
+    #b_headline_bulk .bulk-card-headline { --bulk-accent: #2563eb; }
+    #b_headline_bulk .bulk-card-product-name { --bulk-accent: #7c3aed; }
+    #b_headline_bulk .bulk-extension-card { --bulk-accent: #0f766e; }
+    #b_headline_bulk .card-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px !important;
+      padding-bottom: 10px !important;
+      color: #111827 !important;
+      font-size: 15px !important;
+      line-height: 1.35;
+      border-bottom: 1px solid #edf1f7 !important;
+    }
+    #b_headline_bulk .card-title::before {
+      content: '';
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--bulk-accent, #2563eb);
+      box-shadow: 0 0 0 4px color-mix(in srgb, var(--bulk-accent, #2563eb) 14%, transparent);
+      flex: 0 0 auto;
+    }
+    #b_headline_bulk .field-help {
+      margin-bottom: 12px !important;
+      padding: 11px 12px;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      background: #f8fafc;
+      color: #344054;
+      font-size: 12px;
+      line-height: 1.7;
+      overflow-wrap: anywhere;
+    }
+    #b_headline_bulk .bulk-card-shopping .field-help {
+      max-height: 158px;
+      overflow: auto;
+      padding-right: 14px;
+    }
+    #b_headline_bulk .field-help strong {
+      color: #111827;
+      font-weight: 850;
+    }
+    #b_headline_bulk .grid-2 {
+      gap: 12px !important;
+    }
+    #b_headline_bulk .form-group {
+      min-width: 0;
+    }
+    #b_headline_bulk .form-group > label {
+      margin-bottom: 6px;
+      color: #344054;
+      font-size: 12px;
+      font-weight: 850;
+    }
+    #b_headline_bulk input[type="file"],
+    #b_headline_bulk input[type="number"],
+    #b_headline_bulk input[type="text"],
+    #b_headline_bulk select {
+      min-height: 38px;
+      border-color: #d8dee8 !important;
+      background-color: #fff !important;
+    }
+    #b_headline_bulk input[type="file"] {
+      padding: 10px;
+      background: #f8fafc !important;
+      border-style: dashed !important;
+    }
+    #b_headline_bulk .btn-row {
+      gap: 8px !important;
+      align-items: stretch;
+    }
+    #b_headline_bulk .btn-row .btn {
+      min-height: 40px;
+      white-space: normal;
+      line-height: 1.25;
+    }
+    #b_headline_bulk .form-group:has(> textarea[readonly]) {
+      margin-top: 12px !important;
+      padding: 10px;
+      border: 1px solid #edf1f7;
+      border-radius: 12px;
+      background: #fbfdff;
+    }
+    #b_headline_bulk textarea[readonly] {
+      min-height: 86px !important;
+      max-height: 260px;
+      border-color: #d8dee8 !important;
+      background: #f8fafc !important;
+      color: #334155 !important;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      line-height: 1.55;
+      resize: vertical;
+    }
+    #b_headline_bulk textarea[readonly]:placeholder-shown {
+      height: 76px !important;
+      min-height: 76px !important;
+      color: #667085 !important;
+      font-family: var(--app-font-stack);
+    }
+    #b_headline_bulk textarea[readonly]:not(:placeholder-shown) {
+      min-height: 150px !important;
+    }
+    #b_headline_bulk .bulk-extension-grid {
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)) !important;
+      gap: 14px !important;
+      margin-top: 0 !important;
+    }
+    #b_headline_bulk .bulk-extension-card {
+      padding: 14px !important;
+    }
+    @media (max-width: 760px) {
+      #b_headline_bulk .bulk-overview-head {
+        flex-direction: column;
+      }
+      #b_headline_bulk .bulk-quick-links button {
+        flex: 1 1 calc(50% - 7px);
+      }
+      #b_headline_bulk .bulk-extension-grid {
+        grid-template-columns: 1fr !important;
+      }
+    }
+
+    /* 대량등록 재정리: 좁은 카드 안에 파일/버튼이 끼어 보이지 않게 밀도 낮춤 */
+    #b_headline_bulk .bulk-upload-card {
+      padding: 16px 18px !important;
+    }
+    #b_headline_bulk input[type="file"] {
+      width: 100%;
+      padding: 8px 10px !important;
+      border-style: solid !important;
+      background: #ffffff !important;
+    }
+    #b_headline_bulk .field-help {
+      background: #fbfdff;
+      line-height: 1.62;
+    }
+    #b_headline_bulk .bulk-extension-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      gap: 16px !important;
+    }
+    #b_headline_bulk .bulk-extension-card {
+      min-width: 0;
+      padding: 16px 18px !important;
+    }
+    #b_headline_bulk .bulk-extension-card .grid-2 {
+      display: grid !important;
+      grid-template-columns: 1fr !important;
+      gap: 10px !important;
+    }
+    #b_headline_bulk .bulk-extension-card .btn-row {
+      display: grid !important;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+      gap: 8px !important;
+    }
+    #b_headline_bulk .bulk-extension-card .btn-row .btn {
+      width: 100%;
+      min-width: 0;
+      padding-left: 10px !important;
+      padding-right: 10px !important;
+      overflow-wrap: anywhere;
+    }
+    #b_headline_bulk .bulk-extension-card .form-group:has(> textarea[readonly]) {
+      padding: 0;
+      border: 0;
+      background: transparent;
+    }
+    #b_headline_bulk .bulk-extension-card textarea[readonly]:placeholder-shown {
+      height: 58px !important;
+      min-height: 58px !important;
+    }
+    @media (max-width: 1180px) {
+      #b_headline_bulk .bulk-extension-grid {
+        grid-template-columns: 1fr !important;
+      }
+      #b_headline_bulk .bulk-extension-card .btn-row {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+    @media (max-width: 640px) {
+      #b_headline_bulk .bulk-extension-card .btn-row {
+        grid-template-columns: 1fr;
+      }
     }
 
 
@@ -8099,13 +8545,15 @@
       cursor: pointer !important;
     }
     .quick-state-actions,
-    .quick-budget-actions {
+    .quick-budget-actions,
+    .quick-bid-actions {
       display: inline-flex !important;
       align-items: center !important;
       gap: 3px !important;
     }
     .quick-state-btn,
-    .quick-budget-btn {
+    .quick-budget-btn,
+    .quick-bid-btn {
       min-height: 20px !important;
       padding: 3px 6px !important;
       border-radius: 6px !important;
@@ -8132,6 +8580,15 @@
       color: #1d4ed8 !important;
       background: #eff6ff !important;
       max-width: 96px !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      white-space: nowrap !important;
+    }
+    .quick-bid-btn {
+      border-color: #bfdbfe !important;
+      color: #1d4ed8 !important;
+      background: #eff6ff !important;
+      max-width: 82px !important;
       overflow: hidden !important;
       text-overflow: ellipsis !important;
       white-space: nowrap !important;
@@ -9848,12 +10305,176 @@
     }
 
     /* Soft expression emojis only in feedback/empty states. */
+    body .workflow-help-hub-label .workflow-help-arrow {
+      display: none !important;
+    }
     body .workflow-help-hub-label::before {
-      content: "🙂" !important;
+      content: "🐥" !important;
       font-family: var(--emoji-font-stack) !important;
-      font-size: 14px !important;
+      font-size: 16px !important;
       line-height: 1 !important;
       margin-right: 2px !important;
+    }
+
+    body .workspace-content > .workflow-main-tabs {
+      --workflow-pill-x: 4px;
+      --workflow-pill-w: 0px;
+      --workflow-pill-bg: #2563eb;
+      isolation: isolate !important;
+    }
+    body .workspace-content > .workflow-main-tabs .workflow-active-pill {
+      position: absolute !important;
+      top: 4px !important;
+      bottom: 4px !important;
+      left: 0 !important;
+      width: var(--workflow-pill-w) !important;
+      transform: translateX(var(--workflow-pill-x)) !important;
+      border-radius: 10px !important;
+      background: var(--workflow-pill-bg) !important;
+      box-shadow: 0 8px 18px rgba(37, 99, 235, .24) !important;
+      pointer-events: none !important;
+      z-index: 0 !important;
+      transition: transform 240ms cubic-bezier(.2,.8,.2,1), width 240ms cubic-bezier(.2,.8,.2,1), background-color 160ms ease, box-shadow 160ms ease !important;
+    }
+    body .workspace-content > .workflow-main-tabs.is-danger-active .workflow-active-pill {
+      background: #dc2626 !important;
+      box-shadow: 0 8px 18px rgba(220, 38, 38, .22) !important;
+    }
+    body .workspace-content > .workflow-main-tabs .tab-btn {
+      position: relative !important;
+      z-index: 1 !important;
+      background: transparent !important;
+      border-color: transparent !important;
+      transition: color 160ms ease, background-color 160ms ease !important;
+    }
+    body .workspace-content > .workflow-main-tabs .tab-btn.active,
+    body .workspace-content > .workflow-main-tabs .danger-tab.active {
+      color: #ffffff !important;
+      background: transparent !important;
+      border-color: transparent !important;
+    }
+    body .workspace-content > .workflow-main-tabs .tab-btn:not(.active):hover {
+      color: #111827 !important;
+      background: rgba(15, 23, 42, .04) !important;
+    }
+    body .workspace-content > .workflow-main-tabs .danger-tab:not(.active) {
+      color: #dc2626 !important;
+    }
+
+    body #tab_data .detail-main-sub-tabs {
+      --detail-pill-x: 4px;
+      --detail-pill-y: 4px;
+      --detail-pill-w: 0px;
+      --detail-pill-h: 32px;
+      position: relative !important;
+      isolation: isolate !important;
+      overflow-y: hidden !important;
+    }
+    body #tab_data .detail-main-sub-tabs .detail-active-pill {
+      position: absolute !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: var(--detail-pill-w) !important;
+      height: var(--detail-pill-h) !important;
+      transform: translate(var(--detail-pill-x), var(--detail-pill-y)) !important;
+      border-radius: 999px !important;
+      background: #eff6ff !important;
+      box-shadow: inset 0 0 0 1px #dbeafe !important;
+      pointer-events: none !important;
+      z-index: 0 !important;
+      transition: transform 220ms cubic-bezier(.2,.8,.2,1), width 220ms cubic-bezier(.2,.8,.2,1) !important;
+    }
+    body #tab_data .detail-main-sub-tabs .tab-btn {
+      position: relative !important;
+      z-index: 1 !important;
+      background: transparent !important;
+      border-color: transparent !important;
+      transition: color 150ms ease, background-color 150ms ease !important;
+    }
+    body #tab_data .detail-main-sub-tabs .tab-btn.active {
+      background: transparent !important;
+      border-color: transparent !important;
+      color: #0b5fce !important;
+    }
+    body #tab_data .detail-main-sub-tabs .tab-btn:not(.active):hover {
+      background: rgba(15, 23, 42, .04) !important;
+      color: #111827 !important;
+    }
+
+    body #tab_data .account-preview-sub-tabs {
+      --account-pill-x: 4px;
+      --account-pill-y: 4px;
+      --account-pill-w: 0px;
+      --account-pill-h: 32px;
+      position: relative !important;
+      isolation: isolate !important;
+      overflow-y: hidden !important;
+    }
+    body #tab_data .account-preview-sub-tabs .account-preview-active-pill {
+      position: absolute !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: var(--account-pill-w) !important;
+      height: var(--account-pill-h) !important;
+      transform: translate(var(--account-pill-x), var(--account-pill-y)) !important;
+      border-radius: 999px !important;
+      background: #eff6ff !important;
+      box-shadow: inset 0 0 0 1px #dbeafe !important;
+      pointer-events: none !important;
+      z-index: 0 !important;
+      transition: transform 220ms cubic-bezier(.2,.8,.2,1), width 220ms cubic-bezier(.2,.8,.2,1), height 220ms cubic-bezier(.2,.8,.2,1) !important;
+    }
+    body #tab_data .account-preview-sub-tabs .account-asset-preview-tab {
+      position: relative !important;
+      z-index: 1 !important;
+      background: transparent !important;
+      border-color: transparent !important;
+      transition: color 150ms ease, background-color 150ms ease !important;
+    }
+    body #tab_data .account-preview-sub-tabs .account-asset-preview-tab.active {
+      background: transparent !important;
+      border-color: transparent !important;
+      color: #0b5fce !important;
+    }
+    body #tab_data .account-preview-sub-tabs .account-asset-preview-tab:not(.active):hover {
+      background: rgba(15, 23, 42, .04) !important;
+      color: #111827 !important;
+    }
+    body .workflow-command-group-filter {
+      display: flex !important;
+      align-items: center !important;
+      gap: 6px !important;
+      padding: 8px 10px 7px !important;
+      border-bottom: 1px solid #edf2f7 !important;
+      background: #ffffff !important;
+      position: sticky !important;
+      top: 0 !important;
+      z-index: 2 !important;
+    }
+    body .workflow-command-group-btn {
+      min-height: 28px !important;
+      border: 1px solid transparent !important;
+      border-radius: 999px !important;
+      padding: 0 10px !important;
+      background: #f3f6fb !important;
+      color: #475467 !important;
+      font-size: 12px !important;
+      font-weight: 850 !important;
+      cursor: pointer !important;
+      white-space: nowrap !important;
+      transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease !important;
+    }
+    body .workflow-command-group-btn.active {
+      background: #2563eb !important;
+      color: #ffffff !important;
+      border-color: #2563eb !important;
+    }
+    body .workflow-command-group-btn[data-group="삭제"].active {
+      background: #dc2626 !important;
+      border-color: #dc2626 !important;
+    }
+    body .workflow-command-list {
+      padding: 4px 0 !important;
     }
     body .log-empty {
       display: flex !important;
@@ -10113,6 +10734,18 @@
     body #account_list .account-item.is-unavailable .name {
       color: #cbd5e1 !important;
     }
+    body #account_list .account-item .name {
+      display: flex !important;
+      align-items: center !important;
+      gap: 0 !important;
+      min-width: 0 !important;
+    }
+    body #account_list .account-item .account-name-text {
+      min-width: 0 !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      white-space: nowrap !important;
+    }
     body #account_list .account-item.is-unavailable .sub {
       color: #94a3b8 !important;
     }
@@ -10130,6 +10763,132 @@
       line-height: 1 !important;
       vertical-align: 1px !important;
       white-space: nowrap !important;
+      flex: 0 0 auto !important;
+    }
+    /* Stable, modern advertiser-row hover: fixed border, subtle inner overlay only. */
+    body #account_list .account-item,
+    body #account_list .account-item:hover,
+    body #account_list .account-item.active,
+    body #account_list .account-item.is-unavailable,
+    body #account_list .account-item.is-unavailable:hover {
+      position: relative !important;
+      transform: none !important;
+      filter: none !important;
+      contain: none !important;
+      box-sizing: border-box !important;
+      box-shadow: none !important;
+      transition: none !important;
+      overflow: hidden !important;
+      isolation: isolate !important;
+    }
+    body #account_list .account-item::before {
+      display: none !important;
+      content: none !important;
+    }
+    body #account_list .account-item::after {
+      content: "" !important;
+      position: absolute !important;
+      inset: 0 !important;
+      z-index: 0 !important;
+      pointer-events: none !important;
+      border-radius: inherit !important;
+      background: rgba(255,255,255,0.035) !important;
+      opacity: 0 !important;
+      transition: opacity .28s ease .08s !important;
+    }
+    body #account_list .account-item.is-hover-stable::after {
+      opacity: 1 !important;
+      transition: opacity .12s ease !important;
+    }
+    body #account_list .account-item.active::after {
+      background: rgba(3,199,90,0.05) !important;
+    }
+    body #account_list .account-item.is-unavailable::after {
+      background: rgba(148,163,184,0.035) !important;
+    }
+    body #account_list .account-item .row {
+      position: relative !important;
+      z-index: 1 !important;
+    }
+    body #account_list .account-item:not(.active):not(.is-unavailable),
+    body #account_list .account-item:not(.active):not(.is-unavailable):hover {
+      background: rgba(255,255,255,0.085) !important;
+      border-color: rgba(255,255,255,0.18) !important;
+    }
+    body #account_list .account-item.active,
+    body #account_list .account-item.active:hover {
+      background: rgba(3,199,90,0.22) !important;
+      border-color: rgba(3,199,90,0.62) !important;
+    }
+    body #account_list .account-item.is-unavailable,
+    body #account_list .account-item.is-unavailable:hover {
+      background: rgba(255,255,255,.018) !important;
+      border-color: rgba(148,163,184,.22) !important;
+    }
+    body #account_list .account-pin,
+    body #account_list .account-pin:hover,
+    body #account_list .account-pin.active,
+    body #account_list .account-pin.active:hover {
+      transform: none !important;
+      filter: none !important;
+      transition: none !important;
+    }
+    body .connection-info-toggle {
+      width: 100% !important;
+      min-height: 32px !important;
+      margin: 10px 0 12px !important;
+      padding: 7px 10px !important;
+      border: 1px solid rgba(148, 163, 184, .38) !important;
+      border-radius: 999px !important;
+      background: rgba(255,255,255,.06) !important;
+      color: #dbeafe !important;
+      font-size: 12px !important;
+      font-weight: 800 !important;
+      cursor: pointer !important;
+    }
+    body .connection-info-toggle:hover {
+      background: rgba(255,255,255,.10) !important;
+      border-color: rgba(191, 219, 254, .55) !important;
+    }
+    body .connection-info-panel {
+      display: none;
+      margin: -2px 0 12px;
+      padding: 10px;
+      border: 1px solid rgba(148, 163, 184, .28);
+      border-radius: 12px;
+      background: rgba(15, 23, 42, .38);
+    }
+    body .connection-info-panel.active {
+      display: block;
+    }
+    body .connection-info-row {
+      display: grid;
+      grid-template-columns: 58px minmax(0, 1fr);
+      gap: 8px;
+      align-items: start;
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(148, 163, 184, .16);
+      color: #e5e7eb;
+      font-size: 11px;
+      line-height: 1.35;
+    }
+    body .connection-info-row:last-child {
+      border-bottom: 0;
+    }
+    body .connection-info-label {
+      color: #93a4bc;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    body .connection-info-value {
+      min-width: 0;
+      color: #f8fafc;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      overflow-wrap: anywhere;
+      word-break: break-all;
+    }
+    body .sidebar .auth-card {
+      display: none !important;
     }
     @media (max-width: 760px) {
       body #tab_data > .card:first-child .lookup-diagnosis-card {
@@ -10146,6 +10905,100 @@
       body #b_time .schedule-block-row {
         grid-template-columns: 1fr !important;
       }
+    }
+    /* Account lookup result tabs: keep the active pill fully contained. */
+    body #tab_data > .card:first-child > .account-preview-sub-tabs {
+      position: relative !important;
+      display: inline-flex !important;
+      width: fit-content !important;
+      max-width: 100% !important;
+      min-height: 40px !important;
+      margin-top: 12px !important;
+      margin-bottom: 0 !important;
+      padding: 4px !important;
+      gap: 4px !important;
+      align-items: center !important;
+      border: 1px solid #d8e2ef !important;
+      border-radius: 10px !important;
+      background: #f8fafc !important;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.92) !important;
+      overflow-x: auto !important;
+      overflow-y: hidden !important;
+    }
+    body #tab_data > .card:first-child > .account-preview-sub-tabs .account-preview-active-pill {
+      display: block !important;
+      box-sizing: border-box !important;
+      border-radius: 8px !important;
+      background: #ffffff !important;
+      box-shadow: 0 1px 2px rgba(15,23,42,.08), inset 0 0 0 1px #bfdbfe !important;
+    }
+    body #tab_data > .card:first-child > .account-preview-sub-tabs .account-asset-preview-tab {
+      min-height: 30px !important;
+      padding: 0 12px !important;
+      border-radius: 8px !important;
+      line-height: 30px !important;
+      color: #475467 !important;
+      white-space: nowrap !important;
+    }
+    body #tab_data > .card:first-child > .account-preview-sub-tabs .account-asset-preview-tab.active {
+      color: #0b5fce !important;
+      font-weight: 900 !important;
+    }
+    body #tab_data > .card:first-child > .account-preview-sub-tabs .account-asset-preview-tab:not(.active):hover {
+      background: rgba(15,23,42,.05) !important;
+      color: #111827 !important;
+    }
+    body #tab_create .create-keyword-helper-row {
+      padding: 8px !important;
+      border: 1px solid #d9e4f2 !important;
+      border-radius: 10px !important;
+      background: #f8fafc !important;
+    }
+    body #tab_create .create-keyword-helper-row .keyword-helper-btn {
+      min-height: 34px !important;
+      padding: 0 14px !important;
+      border: 1px solid #9dbaf0 !important;
+      border-radius: 8px !important;
+      background: #ffffff !important;
+      color: #0b5fce !important;
+      font-weight: 900 !important;
+      box-shadow: 0 1px 2px rgba(15,23,42,.08) !important;
+    }
+    body #tab_create .create-keyword-helper-row .keyword-helper-btn:not(.keyword-helper-btn-muted) {
+      background: #eff6ff !important;
+    }
+    body #tab_create .create-keyword-helper-row .keyword-helper-btn:hover:not(:disabled) {
+      border-color: #2563eb !important;
+      background: #dbeafe !important;
+      color: #084fb4 !important;
+    }
+    body #tab_create .create-keyword-helper-row .keyword-helper-btn-muted {
+      border-color: #cbd5e1 !important;
+      color: #334155 !important;
+    }
+    body #tab_create .keyword-token-insert-btn {
+      border: 1px solid #93c5fd !important;
+      background: #eff6ff !important;
+      color: #1d4ed8 !important;
+      font-weight: 900 !important;
+      box-shadow: 0 1px 2px rgba(15,23,42,.08) !important;
+    }
+    body #tab_create .keyword-token-insert-btn:hover:not(:disabled) {
+      border-color: #2563eb !important;
+      background: #dbeafe !important;
+      color: #1e40af !important;
+    }
+    body #tab_create .create-ad-keep-btn {
+      border: 1px solid #93c5fd !important;
+      background: #eff6ff !important;
+      color: #1d4ed8 !important;
+      font-weight: 900 !important;
+      box-shadow: 0 1px 2px rgba(15,23,42,.08) !important;
+    }
+    body #tab_create .create-ad-keep-btn:hover:not(:disabled) {
+      border-color: #2563eb !important;
+      background: #dbeafe !important;
+      color: #1e40af !important;
     }
   </style>
 </head>
@@ -10165,6 +11018,21 @@
         <div class="brand-row">
           <h1>검색광고 툴</h1>
           <button type="button" class="sidebar-toggle-btn" id="sidebar_toggle_btn" onclick="toggleAccountSidebar()" aria-label="계정 패널 접기" title="계정 패널 접기">‹</button>
+        </div>
+      </div>
+      <button type="button" class="connection-info-toggle" id="connection_info_toggle" onclick="toggleConnectionInfoPanel()" aria-expanded="false">연결 정보 보기</button>
+      <div class="connection-info-panel" id="connection_info_panel" aria-live="polite">
+        <div class="connection-info-row">
+          <span class="connection-info-label">API</span>
+          <span class="connection-info-value" id="connection_api_value">미입력</span>
+        </div>
+        <div class="connection-info-row">
+          <span class="connection-info-label">Secret</span>
+          <span class="connection-info-value" id="connection_secret_value">미입력</span>
+        </div>
+        <div class="connection-info-row">
+          <span class="connection-info-label">라이센스</span>
+          <span class="connection-info-value" id="connection_license_value">광고주 미선택</span>
         </div>
       </div>
       <details class="side-card auth-card">
@@ -10256,7 +11124,7 @@
           <div class="workspace-actions">
             <section class="workflow-help-hub" id="workflow_help_hub" aria-label="기능 검색 및 도움말">
               <div class="workflow-help-hub-label">
-                <span class="workflow-help-arrow emoji-glyph" aria-hidden="true">→</span>
+                <span class="workflow-help-arrow emoji-glyph" aria-hidden="true">🐥</span>
                 <span>처음이라면 여기서 확인</span>
               </div>
               <div class="workflow-command-wrap">
@@ -10271,6 +11139,7 @@
           </div>
         </div>
         <div class="tabs main-tabs workflow-main-tabs" aria-label="작업 목적 선택">
+          <span class="workflow-active-pill" aria-hidden="true"></span>
           <button class="tab-btn active" data-workflow="lookup" onclick="switchWorkflowTab('lookup', this)">조회</button>
           <button class="tab-btn" data-workflow="create" onclick="switchWorkflowTab('create', this)">등록</button>
           <button class="tab-btn" data-workflow="change" onclick="switchWorkflowTab('change', this)">변경</button>
@@ -10400,7 +11269,8 @@
                 </div>
               </div>
             </div>
-            <div class="tabs sub-tabs" style="margin-top:12px; margin-bottom:0; border:none;">
+            <div class="tabs sub-tabs account-preview-sub-tabs" style="margin-top:12px; margin-bottom:0; border:none;">
+              <span class="account-preview-active-pill" aria-hidden="true"></span>
               <button class="tab-btn active account-asset-preview-tab" onclick="switchAccountAssetPreview('keywords', this)">키워드 (<span id="cnt_account_keywords">0</span>)</button>
               <button class="tab-btn account-asset-preview-tab" onclick="switchAccountAssetPreview('ads', this)">소재 (<span id="cnt_account_ads">0</span>)</button>
               <button class="tab-btn account-asset-preview-tab" onclick="switchAccountAssetPreview('exts', this)">확장소재 (<span id="cnt_account_exts">0</span>)</button>
@@ -10416,7 +11286,8 @@
               <span>선택 그룹 상세</span>
               <button class="btn btn-sub" style="padding: 4px 10px; font-size: 12px;" onclick="loadAdgroupDetails()" data-require="adgroup-current">새로고침</button>
             </div>
-            <div class="tabs sub-tabs" style="margin-bottom: 0; border: none;">
+            <div class="tabs sub-tabs detail-main-sub-tabs" style="margin-bottom: 0; border: none;">
+              <span class="detail-active-pill" aria-hidden="true"></span>
               <button class="tab-btn active" onclick="toggleDetailSubTab('sub_kw', this)">키워드 (<span id="cnt_kw">0</span>)</button>
               <button class="tab-btn" onclick="toggleDetailSubTab('sub_ad', this)">소재 (<span id="cnt_ad">0</span>)</button>
               <button class="tab-btn" onclick="toggleDetailSubTab('sub_ext', this)">확장소재 (<span id="cnt_ext">0</span>)</button>
@@ -10573,9 +11444,9 @@
                         <div id="create_keyword_slot_count_badge" style="min-width:72px; text-align:center; font-size:12px; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:7px 10px; white-space:nowrap;">10개</div>
                     </div>
                     <div id="create_keyword_total_count_badge" class="keyword-input-count" style="margin-top:-2px; margin-bottom:10px;">전체 입력 키워드 0개</div>
-                    <div class="btn-row" style="margin-top:-2px; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
-                        <button type="button" class="btn btn-sub" onclick="autoDistributeKeywordInputs()">입력칸 자동 분배 (칸당 1000개)</button>
-                        <button type="button" class="btn btn-sub" onclick="clearKeywordInputs()">입력칸 전체 비우기</button>
+                    <div class="btn-row create-keyword-helper-row" style="margin-top:-2px; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+                        <button type="button" class="btn btn-sub keyword-helper-btn" onclick="autoDistributeKeywordInputs()">입력칸 자동 분배 (칸당 1000개)</button>
+                        <button type="button" class="btn btn-sub keyword-helper-btn keyword-helper-btn-muted" onclick="clearKeywordInputs()">입력칸 전체 비우기</button>
                     </div>
                     <div class="field-note" id="keyword_batch_mode_note" style="margin-bottom:12px;">기본은 슬롯 1개만 열립니다. 대량 입력을 체크하면 광고그룹 선택칸 10개와 키워드 입력칸 10개가 열리고, 자동 분배 버튼으로 1000개 단위 분배가 가능합니다.</div>
                     <div id="keyword_batch_slots" style="display:flex; flex-direction:column; gap:12px;"></div>
@@ -10597,8 +11468,8 @@
                             <input type="text" id="create_ad_desc" placeholder="예: 빠르고 정확한 서비스를 제공합니다.">
                         </div>
                         <div class="btn-row" style="margin-top:-6px; margin-bottom:12px;">
-                            <button type="button" class="btn btn-sub" style="padding:6px 10px; font-size:12px;" onclick="insertKeywordToken('create_ad_headline')">제목 키워드삽입</button>
-                            <button type="button" class="btn btn-sub" style="padding:6px 10px; font-size:12px;" onclick="insertKeywordToken('create_ad_desc')">설명 키워드삽입</button>
+                            <button type="button" class="btn btn-sub keyword-token-insert-btn" style="padding:6px 10px; font-size:12px;" onclick="insertKeywordToken('create_ad_headline')">제목 키워드삽입</button>
+                            <button type="button" class="btn btn-sub keyword-token-insert-btn" style="padding:6px 10px; font-size:12px;" onclick="insertKeywordToken('create_ad_desc')">설명 키워드삽입</button>
                         </div>
                         <div class="form-group">
                             <label>대체키워드 (키워드삽입용)</label>
@@ -10612,7 +11483,7 @@
                         <label style="display:flex; gap:6px; font-size:12px; margin-bottom:12px; color:var(--muted);"><input type="checkbox" id="create_ad_multi"> 좌측에서 선택(체크)한 광고그룹 전체에 동일 소재 등록</label>
                         <div class="btn-row">
                             <button class="btn btn-primary" style="flex:1;" onclick="createTextAd(false)">소재 등록</button>
-                            <button class="btn btn-sub" style="flex:1;" onclick="createTextAd(true)">소재 등록 후 입력 유지</button>
+                            <button class="btn btn-sub create-ad-keep-btn" style="flex:1;" onclick="createTextAd(true)">소재 등록 후 입력 유지</button>
                         </div>
                     </div>
                     
@@ -11276,7 +12147,27 @@
             </div>
 
             <div id="b_headline_bulk" class="tab-content">
-                <div class="card" style="margin-bottom:16px;">
+                <div class="bulk-upload-overview">
+                    <div class="bulk-overview-head">
+                        <div>
+                            <div class="bulk-overview-title">대량 등록</div>
+                            <div class="bulk-overview-sub">템플릿 다운로드 → 파일 선택 → 실행 → 결과 확인</div>
+                        </div>
+                        <div class="bulk-overview-badges">
+                            <span>CSV</span><span>XLS</span><span>XLSX</span>
+                        </div>
+                    </div>
+                    <div class="bulk-quick-links" aria-label="대량등록 빠른 이동">
+                        <button type="button" onclick="document.getElementById('bulk_card_shopping')?.scrollIntoView({block:'start', behavior:'smooth'})">쇼핑상품</button>
+                        <button type="button" onclick="document.getElementById('bulk_card_powerlink_bundle')?.scrollIntoView({block:'start', behavior:'smooth'})">파워링크 묶음</button>
+                        <button type="button" onclick="document.getElementById('bulk_card_text_ad')?.scrollIntoView({block:'start', behavior:'smooth'})">소재</button>
+                        <button type="button" onclick="document.getElementById('bulk_card_rsa')?.scrollIntoView({block:'start', behavior:'smooth'})">반응형</button>
+                        <button type="button" onclick="document.getElementById('bulk_card_headline')?.scrollIntoView({block:'start', behavior:'smooth'})">추가제목</button>
+                        <button type="button" onclick="document.getElementById('bulk_extension_grid')?.scrollIntoView({block:'start', behavior:'smooth'})">확장소재</button>
+                    </div>
+                </div>
+
+                <div id="bulk_card_shopping" class="card bulk-upload-card bulk-card-shopping" style="margin-bottom:16px;">
                     <div class="card-title">쇼핑검색 상품 대량등록</div>
                     <div class="field-help" style="margin-bottom:14px;">
                         업로드 열: <strong>캠페인명, 캠페인상태, 캠페인일예산, 광고그룹명, 광고그룹유형, 네이버쇼핑상품ID, 노출용 상품명, 광고그룹입찰가, 소재입찰가, 상태, 추가홍보문구1, 추가홍보문구2</strong><br>
@@ -11311,7 +12202,7 @@
                     </div>
                 </div>
 
-                <div class="card" style="margin-bottom:16px;">
+                <div id="bulk_card_powerlink_bundle" class="card bulk-upload-card bulk-card-powerlink" style="margin-bottom:16px;">
                     <div class="card-title">파워링크 캠페인/그룹/키워드/소재 대량등록</div>
                     <div class="field-help" style="margin-bottom:14px;">
                         업로드 열: <strong>캠페인명, 그룹명, 키워드, 키워드 입찰가, 소재 제목 15자, 설명 45자, 연결URL PC, 연결URL M</strong><br>
@@ -11348,7 +12239,7 @@
                     </div>
                 </div>
 
-                <div class="card" style="margin-bottom:16px;">
+                <div id="bulk_card_text_ad" class="card bulk-upload-card bulk-card-ad" style="margin-bottom:16px;">
                     <div class="card-title">파워링크 소재 대량등록</div>
                     <div class="field-help" style="margin-bottom:14px;">
                         업로드 열: <strong>그룹id, 소재제목, 설명, pc연결url, mo연결url</strong><br>
@@ -11375,7 +12266,7 @@
                     </div>
                 </div>
 
-                <div class="card" style="margin-bottom:16px;">
+                <div id="bulk_card_rsa" class="card bulk-upload-card bulk-card-rsa" style="margin-bottom:16px;">
                     <div class="card-title">파워링크 반응형 소재 대량등록</div>
                     <div class="field-help" style="margin-bottom:14px;">
                         업로드 열: <strong>광고그룹ID, PC URL, 모바일 URL, 제목1~15, 설명1~4, 위치 고정</strong><br>
@@ -11402,7 +12293,7 @@
                     </div>
                 </div>
 
-                <div class="card" style="margin-bottom:16px;">
+                <div id="bulk_card_product_name" class="card bulk-upload-card bulk-card-product-name" style="margin-bottom:16px;">
                     <div class="card-title">노출용 상품명 대량 변경</div>
                     <div id="product_name_bulk_slot_control_wrap" style="display:flex; align-items:center; gap:10px; margin-top:-2px; margin-bottom:12px; width:100%;">
                         <button type="button" class="btn btn-sub" style="width:34px; min-width:34px; height:34px; padding:0; font-size:18px; line-height:1;" onclick="changeProductNameBulkSlotCount(-1)" aria-label="슬롯 수 줄이기">−</button>
@@ -11419,7 +12310,7 @@
                     <textarea id="product_name_bulk_result" rows="6" readonly placeholder="실행 결과가 여기에 표시됩니다." style="margin-top:12px;"></textarea>
                 </div>
 
-                <div class="card">
+                <div id="bulk_card_headline" class="card bulk-upload-card bulk-card-headline">
                     <div class="card-title">추가제목 대량등록</div>
                     <div class="field-help" style="margin-bottom:14px;">
                         업로드 열: <strong>그룹id, 추가제목, pin</strong><br>
@@ -11446,8 +12337,8 @@
                     </div>
                 </div>
 
-                <div class="grid-2 bulk-extension-grid" style="margin-top:16px;">
-                    <div class="card bulk-extension-card">
+                <div id="bulk_extension_grid" class="grid-2 bulk-extension-grid" style="margin-top:16px;">
+                    <div id="bulk_card_description" class="card bulk-extension-card bulk-upload-card">
                         <div class="card-title">추가설명 대량등록</div>
                         <div class="field-help" style="margin-bottom:14px;">업로드 열: <strong>그룹id 또는 소재ID, 추가설명</strong><br><span class="field-note">그룹ID를 넣으면 해당 그룹의 파워링크 소재ID를 찾아 소재별로 등록합니다.</span></div>
                         <div class="grid-2">
@@ -11457,7 +12348,7 @@
                         <div class="form-group" style="margin-top:8px;"><label>처리 결과</label><textarea id="bulk_description_result" rows="8" readonly placeholder="실행 결과가 여기에 표시됩니다."></textarea></div>
                     </div>
 
-                    <div class="card bulk-extension-card">
+                    <div id="bulk_card_promo" class="card bulk-extension-card bulk-upload-card">
                         <div class="card-title">홍보문구 대량등록</div>
                         <div class="field-help" style="margin-bottom:14px;">업로드 열: <strong>그룹id, 홍보문구</strong></div>
                         <div class="grid-2">
@@ -11467,7 +12358,7 @@
                         <div class="form-group" style="margin-top:8px;"><label>처리 결과</label><textarea id="bulk_description_extra_result" rows="8" readonly placeholder="실행 결과가 여기에 표시됩니다."></textarea></div>
                     </div>
 
-                    <div class="card bulk-extension-card">
+                    <div id="bulk_card_sublinks" class="card bulk-extension-card bulk-upload-card">
                         <div class="card-title">서브링크 대량등록</div>
                         <div class="field-help" style="margin-bottom:14px;">업로드 열: <strong>그룹id, 링크명1, 링크URL1, 링크명2, 링크URL2, 링크명3, 링크URL3</strong></div>
                         <div class="grid-2">
@@ -11477,7 +12368,7 @@
                         <div class="form-group" style="margin-top:8px;"><label>처리 결과</label><textarea id="bulk_sublinks_result" rows="8" readonly placeholder="실행 결과가 여기에 표시됩니다."></textarea></div>
                     </div>
 
-                    <div class="card bulk-extension-card">
+                    <div id="bulk_card_image_sublinks" class="card bulk-extension-card bulk-upload-card">
                         <div class="card-title">이미지형 서브링크 대량등록</div>
                         <div class="field-help" style="margin-bottom:14px;">업로드 열: <strong>그룹id, 링크명1, 링크URL1, 이미지ID1</strong> 형태로 입력합니다.</div>
                         <div class="grid-2">
@@ -11521,10 +12412,10 @@
                         <div class="card-title">캠페인/광고그룹 예산 일괄 변경</div>
                         <div class="form-group"><label>캠페인 일예산 (선택된 캠페인 대상)</label><input type="number" id="campaign_budget_val" value="50000"></div>
                         <label style="display:flex; gap:6px; font-size:12px; margin-top:-4px; margin-bottom:12px; color:var(--muted);"><input type="checkbox" id="campaign_budget_unlimited" onchange="toggleBudgetInput('campaign_budget_unlimited', 'campaign_budget_val')"> 제한없음</label>
-                        <button class="btn btn-sub" onclick="saveBudgetBulk('campaign')" style="margin-bottom:16px;">선택 캠페인 예산 변경</button>
+                        <button class="btn btn-primary" onclick="saveBudgetBulk('campaign')" style="margin-bottom:16px;">선택 캠페인 예산 변경</button>
                         <div class="form-group"><label>광고그룹 일예산 (선택된 광고그룹 대상)</label><input type="number" id="adgroup_budget_val" value="10000"></div>
                         <label style="display:flex; gap:6px; font-size:12px; margin-top:-4px; margin-bottom:12px; color:var(--muted);"><input type="checkbox" id="adgroup_budget_unlimited" onchange="toggleBudgetInput('adgroup_budget_unlimited', 'adgroup_budget_val')"> 제한없음</label>
-                        <button class="btn btn-sub" onclick="saveBudgetBulk('adgroup')">선택 광고그룹 예산 변경</button>
+                        <button class="btn btn-primary" onclick="saveBudgetBulk('adgroup')">선택 광고그룹 예산 변경</button>
                     </div>
                     <div class="card">
                         <div class="card-title">상태 / 광고그룹 매체 변경</div>
@@ -11927,6 +12818,7 @@ let currentCustomerId = null; let currentCampaignId = null; let currentAdgroupId
 let accountSelectionSeq = 0;
 let campaigns = []; let adgroups = []; let channels = [];
 let campaignUiOverrides = new Map();
+let adgroupUiOverrides = new Map();
 let detailState = { keywords:[], ads:[], exts:[], negatives:[] };
 const DETAIL_KEYWORD_PAGE_SIZE_OPTIONS = [50, 100, 200, 500, 1000];
 const DETAIL_KEYWORD_MAX_LIMIT = 1000;
@@ -11984,6 +12876,36 @@ function toggleAccountSidebar() {
     const nextCollapsed = !app.classList.contains('account-sidebar-collapsed');
     applyAccountSidebarState(nextCollapsed);
     safeStorageSet(localStorage, ACCOUNT_SIDEBAR_COLLAPSED_KEY, nextCollapsed ? '1' : '0');
+}
+function getCurrentAccountLabel() {
+    const cid = String(currentCustomerId || '').trim();
+    if(!cid) return '광고주 미선택';
+    const acc = (Array.isArray(accountsData) ? accountsData : []).find(x => String(x?.customer_id || '') === cid);
+    return acc?.account_name ? `${acc.account_name} / ${cid}` : cid;
+}
+function updateConnectionInfoDisplay() {
+    const apiEl = document.getElementById('api_key');
+    const secretEl = document.getElementById('secret_key');
+    const apiValue = document.getElementById('connection_api_value');
+    const secretValue = document.getElementById('connection_secret_value');
+    const licenseValue = document.getElementById('connection_license_value');
+    const api = String(apiEl?.value || '').trim();
+    const secret = String(secretEl?.value || '').trim();
+    if(apiValue) apiValue.textContent = api || '미입력';
+    if(secretValue) secretValue.textContent = secret || '미입력';
+    if(licenseValue) licenseValue.textContent = getCurrentAccountLabel();
+}
+function toggleConnectionInfoPanel() {
+    const panel = document.getElementById('connection_info_panel');
+    const btn = document.getElementById('connection_info_toggle');
+    if(!panel) return;
+    const active = !panel.classList.contains('active');
+    panel.classList.toggle('active', active);
+    if(btn) {
+        btn.textContent = active ? '연결 정보 숨기기' : '연결 정보 보기';
+        btn.setAttribute('aria-expanded', active ? 'true' : 'false');
+    }
+    if(active) updateConnectionInfoDisplay();
 }
 function applyTargetPanelState(collapsed) {
     const app = document.querySelector('.app-layout');
@@ -12045,6 +12967,7 @@ function persistAuthState(forceLocal=false) {
         safeStorageRemove(localStorage, CUSTOMER_ID_STORAGE_KEY);
         safeStorageRemove(localStorage, SAVE_KEYS_STORAGE_KEY);
     }
+    updateConnectionInfoDisplay();
 }
 function restoreAuthState() {
     const saved = getSavedAuthState();
@@ -12054,6 +12977,7 @@ function restoreAuthState() {
     if(apiEl && saved.apiKey) apiEl.value = saved.apiKey;
     if(secretEl && saved.secretKey) secretEl.value = saved.secretKey;
     if(rememberEl) rememberEl.checked = !!saved.remember;
+    window.setTimeout(updateConnectionInfoDisplay, 0);
     return saved;
 }
 function bindAuthPersistence() {
@@ -12179,6 +13103,43 @@ function renderCampaignStatusToggle(campaign) {
     const cid = String(campaign?.id || '');
     const title = current === 'ON' ? '클릭하면 OFF로 변경' : '클릭하면 ON으로 변경';
     return `<button type="button" class="status-badge ${cls} is-clickable" title="${escapeAttr(title)}" onclick="quickSetCampaignState('${escapeAttr(cid)}', ${targetEnabled ? 'true' : 'false'}, event)">${escapeHtml(current)}</button>`;
+}
+function applyAdgroupUiOverrides(list) {
+    return (Array.isArray(list) ? list : []).map(row => {
+        const id = String(row?.id || '');
+        const override = id ? adgroupUiOverrides.get(id) : null;
+        if(!override) return row;
+        const raw = { ...(row.raw || {}) };
+        if(Object.prototype.hasOwnProperty.call(override, 'enabled')) {
+            raw.userLock = !override.enabled;
+            raw.enable = !!override.enabled;
+            raw.status = override.enabled ? 'ON' : 'OFF';
+        }
+        if(Object.prototype.hasOwnProperty.call(override, 'bidAmt')) raw.bidAmt = override.bidAmt;
+        return { ...row, raw, status: raw.status, userLock: raw.userLock, enable: raw.enable, bidAmt: raw.bidAmt };
+    });
+}
+function setAdgroupUiState(adgroupId, enabled) {
+    const id = String(adgroupId || '').trim();
+    if(!id) return;
+    adgroupUiOverrides.set(id, { ...(adgroupUiOverrides.get(id) || {}), enabled: !!enabled });
+    adgroups = applyAdgroupUiOverrides(adgroups);
+    renderMasterList();
+}
+function setAdgroupUiBid(adgroupId, bidAmt) {
+    const id = String(adgroupId || '').trim();
+    if(!id) return;
+    adgroupUiOverrides.set(id, { ...(adgroupUiOverrides.get(id) || {}), bidAmt });
+    adgroups = applyAdgroupUiOverrides(adgroups);
+    renderMasterList();
+}
+function renderAdgroupStatusToggle(adgroup) {
+    const current = getEntityStatusLabel(adgroup);
+    const targetEnabled = current !== 'ON';
+    const cls = current === 'ON' ? 'is-on' : (current === 'OFF' ? 'is-off' : 'is-unknown');
+    const aid = String(adgroup?.id || '');
+    const title = current === 'ON' ? '클릭하면 OFF로 변경' : '클릭하면 ON으로 변경';
+    return `<button type="button" class="status-badge ${cls} is-clickable" title="${escapeAttr(title)}" onclick="quickSetAdgroupState('${escapeAttr(aid)}', ${targetEnabled ? 'true' : 'false'}, event)">${escapeHtml(current)}</button>`;
 }
 function getMediaDetailPayload(prefix) {
     return {
@@ -13275,6 +14236,16 @@ function formatActionLogTime(ts) {
     return s || '-';
 }
 
+function formatActionLogSummaryText(value) {
+    return String(value || '')
+        .replace(/(^|\s*\|\s*)슬롯\s*=\s*1\s*(?=\||$)/g, '$1')
+        .replace(/슬롯\s*=\s*(\d+)/g, '입력묶음=$1')
+        .replace(/^\s*\|\s*/, '')
+        .replace(/\s*\|\s*$/, '')
+        .replace(/\s*\|\s*\|/g, ' | ')
+        .trim();
+}
+
 function escapeMaybe(value) {
     return escapeHtml(value == null ? '' : String(value));
 }
@@ -13327,6 +14298,10 @@ function renderActionLogCounts(row) {
         if(value === null || value === undefined || value === '') return;
         const numValue = Number(value);
         const text = Number.isFinite(numValue) ? num(numValue) : String(value);
+        if(cls === 'fail' && Number.isFinite(numValue) && numValue > 0) {
+            chips.push(`<button type="button" class="log-count-chip ${cls}" onclick="openActionLogFailureDetails(event, this)" title="실패 항목 보기">${label} ${escapeMaybe(text)}</button>`);
+            return;
+        }
         chips.push(`<span class="log-count-chip ${cls}">${label} ${escapeMaybe(text)}</span>`);
     };
     addChip('대상', row.total, '');
@@ -13353,10 +14328,52 @@ function inferActionLogDetailLevel(item) {
     const text = `${(item && item.target) || ''} ${(item && item.detail) || ''} ${(item && item.message) || ''}`;
     if(actionLogTextLooksLikeFailure(text)) return 'fail';
     if(rawLevel === 'fail') {
-        return actionLogTextLooksLikeSuccess(text) ? 'success' : 'info';
+        return actionLogTextLooksLikeSuccess(text) ? 'success' : 'fail';
     }
     if(['fail','warning','skip','success','info'].includes(rawLevel)) return rawLevel;
     return 'info';
+}
+
+function normalizeActionLogDetailText(value) {
+    return String(value || '').replace(/\s+/g, '').toLowerCase();
+}
+
+function getActionLogDetailItems(row) {
+    const rawItems = Array.isArray(row?.detail_items) ? row.detail_items : [];
+    const mapped = rawItems.map(item => ({...item, level: inferActionLogDetailLevel(item)}));
+    if(!mapped.length) {
+        const failCount = Number(row?.fail || row?.fail_count || row?.failed_count || row?.error_count || 0);
+        if(Number.isFinite(failCount) && failCount > 0) {
+            return [{
+                level: 'fail',
+                target: '실패 항목',
+                detail: String(row?.message || row?.summary || '세부 실패 항목이 저장되지 않은 과거 로그입니다.').trim()
+            }];
+        }
+    }
+    const resultFailureTexts = mapped
+        .filter(item => item.level === 'fail' && String(item?.source || '') === 'results')
+        .map(item => normalizeActionLogDetailText(`${item.target || ''} ${item.detail || item.message || ''}`))
+        .filter(Boolean);
+    const seen = new Set();
+    return mapped.filter(item => {
+        const level = item.level || 'info';
+        const targetText = normalizeActionLogDetailText(item.target);
+        const detailText = normalizeActionLogDetailText(item.detail || item.message);
+        const key = `${level}|${targetText}|${detailText}`;
+        if(seen.has(key)) return false;
+        seen.add(key);
+        const source = String(item?.source || '');
+        if(source === 'results') return true;
+        if(!resultFailureTexts.length || !detailText) return true;
+        if(level !== 'fail' && level !== 'info') return true;
+        const duplicatesResultFailure = resultFailureTexts.some(text => text && (text.includes(detailText) || detailText.includes(text)));
+        return !duplicatesResultFailure;
+    });
+}
+
+function getActionLogFailureItems(row) {
+    return getActionLogDetailItems(row).filter(item => item.level === 'fail');
 }
 
 function getActionLogFailureCount(row) {
@@ -13365,8 +14382,8 @@ function getActionLogFailureCount(row) {
         const n = Number(value);
         if(Number.isFinite(n) && n > 0) return n;
     }
-    const detailItems = Array.isArray(row?.detail_items) ? row.detail_items : [];
-    if(detailItems.some(item => inferActionLogDetailLevel(item) === 'fail')) return 1;
+    const detailItems = getActionLogFailureItems(row);
+    if(detailItems.length) return detailItems.length;
     const joined = [row?.summary, row?.message, row?.details, row?.error].filter(Boolean).join(' ');
     return actionLogTextLooksLikeFailure(joined) ? 1 : 0;
 }
@@ -13377,8 +14394,8 @@ function getActionLogSuccessCount(row) {
         const n = Number(value);
         if(Number.isFinite(n) && n > 0) return n;
     }
-    const detailItems = Array.isArray(row?.detail_items) ? row.detail_items : [];
-    if(detailItems.some(item => inferActionLogDetailLevel(item) === 'success')) return 1;
+    const detailItems = getActionLogDetailItems(row);
+    if(detailItems.some(item => item.level === 'success')) return 1;
     const joined = [row?.summary, row?.message].filter(Boolean).join(' ');
     return actionLogTextLooksLikeSuccess(joined) ? 1 : 0;
 }
@@ -13408,7 +14425,7 @@ function renderActionLogDetailRow(item) {
 }
 
 function renderActionLogDetails(row) {
-    const items = (Array.isArray(row.detail_items) ? row.detail_items : []).map(item => ({...item, level: inferActionLogDetailLevel(item)}));
+    const items = getActionLogDetailItems(row);
     if(!items.length) return '';
     const failures = items.filter(item => item.level === 'fail');
     const warnings = items.filter(item => item.level === 'warning');
@@ -13416,7 +14433,7 @@ function renderActionLogDetails(row) {
     const info = items.filter(item => item.level === 'info');
     const successes = items.filter(item => item.level === 'success');
     const issueCount = failures.length + warnings.length + skipped.length;
-    const detailCount = Number(row.detail_count || items.length) || items.length;
+    const detailCount = items.length;
     const displayLimit = ACTION_LOG_DETAIL_DISPLAY_LIMIT;
     let displayedCount = 0;
     const sections = [];
@@ -13445,7 +14462,7 @@ function renderActionLogDetails(row) {
     const hiddenByDisplay = Math.max(0, items.length - displayedCount);
     const more = `${hiddenByDisplay > 0 ? `<div class="log-detail-note">화면 렉 방지를 위해 ${escapeMaybe(num(hiddenByDisplay))}건은 접힌 목록에서도 생략했습니다. 전체 내역은 엑셀 다운로드의 세부내역 시트에서 확인하세요.</div>` : ''}${row.detail_truncated ? '<div class="log-detail-note">저장 가능한 세부내역이 많아 일부만 저장되었습니다.</div>' : ''}`;
     const summaryLabel = failures.length
-        ? `실패 목록 ${num(failures.length)}건 보기`
+        ? `전체 실패 상세 ${num(failures.length)}건`
         : (issueCount ? `경고/제외 ${num(issueCount)}건 보기` : `상세 ${num(detailCount)}건 보기`);
     const summaryMeta = [
         failures.length ? `실패 ${num(failures.length)}` : '',
@@ -13454,13 +14471,105 @@ function renderActionLogDetails(row) {
         successes.length ? `성공 ${num(successes.length)}` : ''
     ].filter(Boolean).join(' · ');
     return `
-        <details class="log-detail-fold">
+        <details class="log-detail-fold" ontoggle="syncActionLogFailureToggleFromDetails(this)">
           <summary>
             <span class="log-detail-summary-label">${escapeMaybe(summaryLabel)}${summaryMeta ? `<small>${escapeMaybe(summaryMeta)}</small>` : ''}</span>
             <button type="button" class="log-detail-copy" onclick="copyActionLogDetail(event, this)">복사</button>
           </summary>
           <div class="log-detail-list">${rows}${more}</div>
         </details>`;
+}
+
+function renderActionLogFailurePreview(failures) {
+    if(!failures || !failures.length) return '';
+    const labels = [];
+    const seen = new Set();
+    failures.forEach(item => {
+        const text = String(item.target || item.detail || item.message || '실패 항목').trim();
+        const key = normalizeActionLogDetailText(text);
+        if(!key || seen.has(key)) return;
+        seen.add(key);
+        labels.push(text);
+    });
+    const visible = labels.slice(0, 3);
+    const more = Math.max(0, failures.length - visible.length);
+    const targetText = `${visible.join(' · ')}${more ? ` 외 ${num(more)}건` : ''}`;
+    const firstDetail = String(failures[0]?.detail || failures[0]?.message || '').trim();
+    return `<button type="button" class="log-fail-preview" onclick="toggleActionLogFailureDetails(event, this)" title="실패 상세 보기">
+        <span class="log-fail-preview-label">실패 원인</span>
+        <span class="log-fail-preview-main">
+            <strong class="log-fail-preview-target">${escapeMaybe(targetText)}</strong>
+            ${firstDetail ? `<span class="log-fail-preview-detail">${escapeMaybe(firstDetail)}</span>` : ''}
+        </span>
+        <span class="log-fail-preview-action">상세 보기</span>
+    </button>`;
+}
+
+function updateActionLogFailureToggleState(item) {
+    if(!item) return;
+    const fold = item.querySelector('.log-detail-fold');
+    const action = item.querySelector('.log-fail-preview-action');
+    const isOpen = !!fold?.open;
+    item.classList.toggle('is-detail-open', isOpen);
+    if(action) action.textContent = isOpen ? '상세 접기' : '상세 보기';
+}
+
+function syncActionLogFailureToggleFromDetails(detailsEl) {
+    updateActionLogFailureToggleState(detailsEl ? detailsEl.closest('.log-item') : null);
+}
+
+function toggleActionLogFailureDetails(event, trigger) {
+    if(event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    const item = trigger ? trigger.closest('.log-item') : null;
+    const fold = item ? item.querySelector('.log-detail-fold') : null;
+    if(!fold) {
+        showToast('이 로그에는 표시할 실패 세부항목이 없습니다.', 'info');
+        return;
+    }
+    fold.open = !fold.open;
+    updateActionLogFailureToggleState(item);
+}
+
+function openActionLogFailureDetails(event, trigger) {
+    if(event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    const item = trigger ? trigger.closest('.log-item') : null;
+    const fold = item ? item.querySelector('.log-detail-fold') : null;
+    if(!fold) {
+        showToast('이 로그에는 표시할 실패 세부항목이 없습니다.', 'info');
+        return;
+    }
+    fold.open = true;
+    updateActionLogFailureToggleState(item);
+    const failSection = fold.querySelector('.log-detail-section.fail');
+    if(failSection) {
+        failSection.classList.remove('is-highlighted');
+        void failSection.offsetWidth;
+        failSection.classList.add('is-highlighted');
+        failSection.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+}
+
+function handleActionLogFailureRowClick(event, item) {
+    if(event.target.closest('button, summary, details, a, input, textarea, select, label')) return;
+    openActionLogFailureDetails(event, item);
+}
+
+function handleActionLogFailureRowKeydown(event, item) {
+    if(event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    openActionLogFailureDetails(event, item);
+}
+
+function isGenericActionLogMessage(message) {
+    const text = String(message || '').trim();
+    if(!text) return false;
+    return /(처리\s*완료|완료)[\s\S]*성공\s*\d+\s*건\s*\/\s*실패\s*\d+\s*건/.test(text);
 }
 
 function renderActionLogs(rows) {
@@ -13474,20 +14583,34 @@ function renderActionLogs(rows) {
         const status = resolveActionLogDisplayStatus(row);
         const badgeClass = status === 'error' ? 'red' : (status === 'partial' ? 'yellow' : 'green');
         const badgeText = status === 'error' ? '실패' : (status === 'partial' ? '부분실패' : '성공');
-        const summary = row.summary ? `<div class="log-summary">${escapeMaybe(row.summary)}</div>` : '';
-        const msg = row.message ? `<div class="log-msg">${escapeMaybe(row.message)}</div>` : '';
+        const summaryText = formatActionLogSummaryText(row.summary);
+        const summary = summaryText ? `<div class="log-summary">${escapeMaybe(summaryText)}</div>` : '';
         const cid = row.customer_id ? `광고주 ID: ${escapeMaybe(row.customer_id)}` : '광고주 ID: -';
         const countHtml = renderActionLogCounts(row);
         const detailHtml = renderActionLogDetails(row);
+        const failureItems = getActionLogFailureItems(row);
+        const hasFailureDetails = failureItems.length > 0;
+        const msg = row.message && !(hasFailureDetails && isGenericActionLogMessage(row.message))
+            ? `<div class="log-msg">${escapeMaybe(row.message)}</div>`
+            : '';
+        const badgeHtml = hasFailureDetails
+            ? `<button type="button" class="badge ${badgeClass} log-status-btn log-status-fail-btn" onclick="openActionLogFailureDetails(event, this)" title="실패 항목 보기">${escapeMaybe(badgeText)} ${escapeMaybe(num(failureItems.length))}건</button>`
+            : `<span class="badge ${badgeClass}">${badgeText}</span>`;
+        const failPreview = renderActionLogFailurePreview(failureItems);
+        const itemClass = `log-item ${status}${hasFailureDetails ? ' has-fail-details' : ''}`;
+        const itemAttrs = hasFailureDetails
+            ? ` role="button" tabindex="0" aria-label="실패 항목 ${escapeMaybe(num(failureItems.length))}건 보기" onclick="handleActionLogFailureRowClick(event, this)" onkeydown="handleActionLogFailureRowKeydown(event, this)"`
+            : '';
         return `
-            <div class="log-item ${status}">
+            <div class="${itemClass}"${itemAttrs}>
               <div class="log-top">
                 <div class="log-title">${escapeMaybe(row.action || '작업')}</div>
-                <span class="badge ${badgeClass}">${badgeText}</span>
+                ${badgeHtml}
               </div>
               <div class="log-meta">${escapeMaybe(formatActionLogTime(row.ts))} · ${cid}</div>
               ${summary}
               ${countHtml}
+              ${failPreview}
               ${msg}
               ${detailHtml}
             </div>`;
@@ -13625,15 +14748,19 @@ const WORKFLOW_COMMANDS = [
     { label: '복사 작업', desc: '캠페인/그룹/키워드/소재/확장소재 복사', action: 'copy', group: '복사', keywords: '복사 캠페인 그룹 키워드 소재 확장소재 제외키워드' },
     { label: '삭제 작업', desc: '캠페인·그룹·키워드·소재·확장소재 삭제', action: 'delete', group: '삭제', keywords: '삭제 캠페인 그룹 키워드 소재 확장소재 제외키워드' }
 ].map((item, idx) => ({ ...item, index: idx }));
+const WORKFLOW_COMMAND_GROUPS = ['전체', '조회', '등록', '변경', '복사', '삭제'];
+let workflowCommandGroupFilter = '전체';
 
 function normalizeWorkflowCommandText(value) {
     return String(value || '').toLowerCase().replace(/[\s\-_/.,()\[\]{}]+/g, '');
 }
 
-function getWorkflowCommandMatches(query, force=false) {
+function getWorkflowCommandMatches(query, force=false, groupFilter=workflowCommandGroupFilter) {
     const q = normalizeWorkflowCommandText(query);
-    if (!q) return force ? WORKFLOW_COMMANDS.slice(0, 8) : [];
-    return WORKFLOW_COMMANDS
+    const group = WORKFLOW_COMMAND_GROUPS.includes(groupFilter) ? groupFilter : '전체';
+    const scoped = group === '전체' ? WORKFLOW_COMMANDS : WORKFLOW_COMMANDS.filter(cmd => cmd.group === group);
+    if (!q) return force ? scoped.slice() : [];
+    return scoped
         .map(cmd => {
             const hay = normalizeWorkflowCommandText(`${cmd.label} ${cmd.desc} ${cmd.group} ${cmd.keywords}`);
             let score = 0;
@@ -13644,7 +14771,7 @@ function getWorkflowCommandMatches(query, force=false) {
         })
         .filter(x => x.score > 0)
         .sort((a, b) => b.score - a.score || a.index - b.index)
-        .slice(0, 8);
+        .slice(0, 12);
 }
 
 
@@ -13732,9 +14859,10 @@ function renderWorkflowCommandResults(force=false) {
     const box = document.getElementById('workflow_command_results');
     if (!input || !box) return;
     const matches = getWorkflowCommandMatches(input.value, force);
+    const filterHtml = renderWorkflowCommandGroupFilter();
     if (!matches.length) {
-        if ((input.value || '').trim()) {
-            box.innerHTML = '<div class="workflow-command-empty">검색 결과가 없습니다</div>';
+        if ((input.value || '').trim() || force) {
+            box.innerHTML = `${filterHtml}<div class="workflow-command-empty">검색 결과가 없습니다</div>`;
             box.classList.add('active');
             updateWorkflowCommandResultsPosition();
         } else {
@@ -13743,7 +14871,7 @@ function renderWorkflowCommandResults(force=false) {
         }
         return;
     }
-    box.innerHTML = matches.map((cmd, idx) => {
+    const listHtml = matches.map((cmd, idx) => {
         const fav = isWorkflowFavorite(cmd.action);
         return `
         <div class="workflow-command-row">
@@ -13755,8 +14883,21 @@ function renderWorkflowCommandResults(force=false) {
           <button type="button" class="workflow-command-fav-btn emoji-glyph${fav ? ' active' : ''}" title="${fav ? '즐겨찾기 해제' : '즐겨찾기 추가'}" onmousedown="event.preventDefault()" onclick="toggleWorkflowFavorite('${escapeAttr(cmd.action)}', event)">${fav ? '★' : '☆'}</button>
         </div>`;
     }).join('');
+    box.innerHTML = `${filterHtml}<div class="workflow-command-list">${listHtml}</div>`;
     box.classList.add('active');
     updateWorkflowCommandResultsPosition();
+}
+
+function renderWorkflowCommandGroupFilter() {
+    return `<div class="workflow-command-group-filter" role="tablist" aria-label="기능 그룹 선택">${WORKFLOW_COMMAND_GROUPS.map(group => {
+        const active = workflowCommandGroupFilter === group;
+        return `<button type="button" class="workflow-command-group-btn${active ? ' active' : ''}" data-group="${escapeAttr(group)}" aria-pressed="${active ? 'true' : 'false'}" onmousedown="event.preventDefault()" onclick="setWorkflowCommandGroupFilter('${escapeAttr(group)}')">${escapeHtml(group)}</button>`;
+    }).join('')}</div>`;
+}
+
+function setWorkflowCommandGroupFilter(group) {
+    workflowCommandGroupFilter = WORKFLOW_COMMAND_GROUPS.includes(group) ? group : '전체';
+    renderWorkflowCommandResults(true);
 }
 
 function hideWorkflowCommandResults() {
@@ -13791,7 +14932,7 @@ function handleWorkflowCommandKeydown(event) {
     }
     if (event.key === 'Enter') {
         event.preventDefault();
-        const matches = getWorkflowCommandMatches(input.value, true);
+        const matches = getWorkflowCommandMatches(input.value, true, workflowCommandGroupFilter);
         if (matches.length) selectWorkflowCommand(matches[0].index);
     }
 }
@@ -14011,6 +15152,7 @@ window.onload = async function() {
     accountStatusMap = loadAccountStatusMap();
     const restoredAuth = restoreAuthState();
     bindAuthPersistence();
+    updateConnectionInfoDisplay();
     restoreAccountSidebarState();
     restoreTargetPanelState();
     restoreCompactHelpMode();
@@ -14119,7 +15261,7 @@ function renderAccounts() {
         <div class="account-item${active ? ' active' : ''}${unavailable ? ' is-unavailable' : ''}" data-customer-id="${escapeAttr(cid)}" aria-selected="${active ? 'true' : 'false'}" onclick="selectAccountByCustomerId('${escapeAttr(cid)}')">
             <div class="row">
                 <div class="main">
-                    <div class="name">${escapeHtml(acc.account_name)}${unavailable ? `<span class="account-status-badge" title="${escapeAttr(unavailableTitle)}">확인 불가</span>` : ''}</div>
+                    <div class="name"><span class="account-name-text">${escapeHtml(acc.account_name)}</span>${unavailable ? `<span class="account-status-badge" title="${escapeAttr(unavailableTitle)}">확인 불가</span>` : ''}</div>
                     <div class="sub">ID: ${escapeHtml(cid)}${unavailable ? ' · 연결 확인 필요' : ''}</div>
                 </div>
                 <button type="button" class="account-pin ${fav ? 'active' : ''}" title="${fav ? '즐겨찾기 해제' : '즐겨찾기 추가'}" onclick="toggleFavoriteAccount('${escapeAttr(cid)}', event)">${fav ? '★' : '☆'}</button>
@@ -14136,12 +15278,14 @@ async function selectAccount(acc) {
     currentCustomerId = nextCustomerId;
     bumpLookupCacheVersion();
     persistAuthState(false);
+    updateConnectionInfoDisplay();
     document.getElementById('bc_account').textContent = acc.account_name || nextCustomerId;
     document.getElementById('master_header_title').textContent = `${acc.account_name || nextCustomerId} 캠페인`;
 
     currentCampaignId = null; currentAdgroupId = null; 
     checkedCampaignIds.clear(); checkedAdgroupIds.clear();
     campaignUiOverrides.clear();
+    adgroupUiOverrides.clear();
     campaigns = []; adgroups = []; channels = [];
 
     renderAccounts();
@@ -14182,6 +15326,15 @@ async function refreshCampaigns(force=false) {
 }
 
 async function refreshAdgroups(force=false) {
+    if(!currentCampaignId) {
+        adgroups = [];
+        currentAdgroupId = null;
+        checkedAdgroupIds.clear();
+        clearAdgroupDetailView();
+        renderMasterList();
+        updateSelectOptions();
+        return;
+    }
     const c = ensureReady(true); if(!c) return;
     const requestCustomerId = String(c.customer_id || '');
     const requestCampaignId = String(currentCampaignId || '');
@@ -14192,7 +15345,7 @@ async function refreshAdgroups(force=false) {
             ? await postJson('/get_adgroups', payload, '광고그룹 목록 조회 중...')
             : await fetchJsonCached('/get_adgroups', payload, { loadingText:'광고그룹 목록 조회 중...', ttlMs:LIST_API_CACHE_TTL_MS });
         if(String(currentCustomerId || '') !== requestCustomerId || String(currentCampaignId || '') !== requestCampaignId) return;
-        adgroups = Array.isArray(nextAdgroups) ? nextAdgroups : [];
+        adgroups = applyAdgroupUiOverrides(Array.isArray(nextAdgroups) ? nextAdgroups : []);
         masterListShowAll.adgroup = false;
         if(currentAdgroupId && !adgroups.some(x => String(x.id) === String(currentAdgroupId))) {
             currentAdgroupId = null;
@@ -14412,7 +15565,15 @@ function renderMasterList() {
                     <div><input type="checkbox" ${isChecked} onclick="event.stopPropagation(); toggleListCheck('adgroup', '${escapeAttr(aid)}')"></div>
                     <div class="main" onclick="selectAdgroup('${escapeAttr(aid)}')">
                         <div class="title">${escapeHtml(a.name)}</div>
-                        <div class="meta"><span class="badge type-badge ${escapeAttr(getAdgroupTypeBadgeColor(a))}">${escapeHtml(getAdgroupTypeLabel(a))}</span>${renderStatusBadge(a)}<span>예산: ${formatBudget(a.raw?.useDailyBudget, a.raw?.dailyBudget)}</span><span>입찰가: ${formatWon(a.raw?.bidAmt)}</span><span>매체: ${getMediaLabel(a.raw)}</span></div>
+                        <div class="meta">
+                            <span class="badge type-badge ${escapeAttr(getAdgroupTypeBadgeColor(a))}">${escapeHtml(getAdgroupTypeLabel(a))}</span>
+                            ${renderAdgroupStatusToggle(a)}
+                            <span>예산: ${formatBudget(a.raw?.useDailyBudget, a.raw?.dailyBudget)}</span>
+                            <span class="quick-bid-actions">
+                                <button type="button" class="quick-bid-btn" title="입찰가 변경" onclick="quickUpdateAdgroupBid('${escapeAttr(aid)}', '${escapeAttr(a.raw?.bidAmt ?? '')}', event)">입찰가: ${formatWon(a.raw?.bidAmt)}</button>
+                            </span>
+                            <span>매체: ${getMediaLabel(a.raw)}</span>
+                        </div>
                     </div>
                 </div>`;
             }).join('');
@@ -14624,8 +15785,12 @@ function getKeywordTextareaValue(slotIndex) {
     return el ? el.value : '';
 }
 
+function normalizeKeywordForCreate(value) {
+    return String(value || '').replace(/\s+/g, '').trim();
+}
+
 function parseKeywordLines(textValue) {
-    return String(textValue || '').replace(/,/g, "\n").split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+    return String(textValue || '').replace(/,/g, "\n").split(/\r?\n/).map(normalizeKeywordForCreate).filter(Boolean);
 }
 
 function updateKeywordBatchTotalCount() {
@@ -14690,15 +15855,18 @@ function collectKeywordBatchPayloads() {
         const adgroupEl = document.getElementById(`create_keyword_adgroup_${i}`);
         const textEl = document.getElementById(`create_keywords_text_${i}`);
         if(!adgroupEl || !textEl) continue;
-        const keywordCount = parseKeywordLines(textEl.value).length;
+        const normalizedKeywords = parseKeywordLines(textEl.value);
+        const keywordCount = normalizedKeywords.length;
         if(!keywordCount) continue;
+        textEl.value = normalizedKeywords.join("\n");
         batches.push({
             slot_index: i,
             adgroup_id: adgroupEl.value,
-            keywords: textEl.value,
+            keywords: normalizedKeywords.join("\n"),
             keyword_count: keywordCount,
         });
     }
+    refreshAllKeywordTextareaCounts();
     return batches;
 }
 
@@ -14978,7 +16146,19 @@ function toggleDetailSubTab(tabId, btn) {
         btn.classList.add('active');
         target.classList.add('active');
     }
-    requestAnimationFrame(() => { if (typeof refreshUiPolish === 'function') refreshUiPolish(); });
+    requestAnimationFrame(() => { updateDetailMainSubTabPill(); if (typeof refreshUiPolish === 'function') refreshUiPolish(); });
+}
+
+function updateDetailMainSubTabPill() {
+    const tabs = document.querySelector('#tab_data .detail-main-sub-tabs');
+    if(!tabs) return;
+    const active = tabs.querySelector('.tab-btn.active') || tabs.querySelector('.tab-btn');
+    const pill = tabs.querySelector('.detail-active-pill');
+    if(!active || !pill) return;
+    tabs.style.setProperty('--detail-pill-x', `${active.offsetLeft}px`);
+    tabs.style.setProperty('--detail-pill-y', `${active.offsetTop}px`);
+    tabs.style.setProperty('--detail-pill-w', `${active.offsetWidth}px`);
+    tabs.style.setProperty('--detail-pill-h', `${active.offsetHeight}px`);
 }
 
 
@@ -14988,6 +16168,20 @@ function setActiveWorkflowButton(workflow) {
     document.querySelectorAll('.workspace-content > .workflow-main-tabs .tab-btn').forEach(el => {
         el.classList.toggle('active', el.dataset.workflow === activeWorkflow);
     });
+    requestAnimationFrame(updateWorkflowMainTabPill);
+}
+
+function updateWorkflowMainTabPill() {
+    const tabs = document.querySelector('.workspace-content > .workflow-main-tabs');
+    if(!tabs) return;
+    const active = tabs.querySelector('.tab-btn.active');
+    const pill = tabs.querySelector('.workflow-active-pill');
+    if(!active || !pill) return;
+    tabs.style.setProperty('--workflow-pill-x', `${active.offsetLeft}px`);
+    tabs.style.setProperty('--workflow-pill-w', `${active.offsetWidth}px`);
+    const isDanger = active.classList.contains('danger-tab') || active.dataset.workflow === 'delete';
+    tabs.style.setProperty('--workflow-pill-bg', isDanger ? '#dc2626' : '#2563eb');
+    tabs.classList.toggle('is-danger-active', isDanger);
 }
 
 function setBulkWorkflowSubTabs(workflow) {
@@ -15293,7 +16487,11 @@ function switchWorkflowTab(workflow, btn=null) {
     });
 }
 
-requestAnimationFrame(() => { updateWorkflowQuickCards('lookup'); updateWorkflowNextActionCard('lookup'); renderWorkflowShortcutPanel(); });
+requestAnimationFrame(() => { updateWorkflowQuickCards('lookup'); updateWorkflowNextActionCard('lookup'); renderWorkflowShortcutPanel(); updateWorkflowMainTabPill(); updateDetailMainSubTabPill(); updateAccountPreviewSubTabPill(); });
+window.addEventListener('resize', () => requestAnimationFrame(() => { updateWorkflowMainTabPill(); updateDetailMainSubTabPill(); updateAccountPreviewSubTabPill(); }));
+document.querySelector('.workspace-content > .workflow-main-tabs')?.addEventListener('scroll', () => requestAnimationFrame(updateWorkflowMainTabPill), { passive: true });
+document.querySelector('#tab_data .detail-main-sub-tabs')?.addEventListener('scroll', () => requestAnimationFrame(updateDetailMainSubTabPill), { passive: true });
+document.querySelector('#tab_data .account-preview-sub-tabs')?.addEventListener('scroll', () => requestAnimationFrame(updateAccountPreviewSubTabPill), { passive: true });
 
 function openWorkflowUtility(kind) {
     if (kind === 'keyword') return switchWorkflowTab('keyword');
@@ -15562,6 +16760,19 @@ function switchAccountAssetPreview(kind, btn) {
     const targetId = kind === 'exts' ? 'sub_account_exts' : (kind === 'ads' ? 'sub_account_ads' : 'sub_account_keywords');
     const target = document.getElementById(targetId);
     if(target) target.classList.add('active');
+    requestAnimationFrame(updateAccountPreviewSubTabPill);
+}
+
+function updateAccountPreviewSubTabPill() {
+    const tabs = document.querySelector('#tab_data .account-preview-sub-tabs');
+    if(!tabs) return;
+    const active = tabs.querySelector('.account-asset-preview-tab.active') || tabs.querySelector('.account-asset-preview-tab');
+    const pill = tabs.querySelector('.account-preview-active-pill');
+    if(!active || !pill) return;
+    tabs.style.setProperty('--account-pill-x', `${active.offsetLeft}px`);
+    tabs.style.setProperty('--account-pill-y', `${active.offsetTop}px`);
+    tabs.style.setProperty('--account-pill-w', `${active.offsetWidth}px`);
+    tabs.style.setProperty('--account-pill-h', `${active.offsetHeight}px`);
 }
 
 function getAvailableAssetLookupScopes() {
@@ -15872,6 +17083,10 @@ async function downloadAccountExtensionsExcel() {
 }
 
 async function loadAdgroupDetails() {
+    if(!currentCampaignId || !currentAdgroupId) {
+        clearAdgroupDetailView();
+        return;
+    }
     const c = ensureReady(true, true); if(!c) return;
     const requestAdgroupId = currentAdgroupId;
     const requestSeq = ++detailRequestSeq;
@@ -16225,13 +17440,11 @@ async function createKeywords() {
             bid_amt: document.getElementById('create_keyword_bid').value,
             use_group_bid_amt: document.getElementById('create_keyword_use_group').value === 'true'
         }, '키워드 등록 중...');
-        const slotSummary = Array.isArray(data.batch_summary) && data.batch_summary.length
-            ? ` | 슬롯 ${data.batch_summary.map(x => `${x.slot_index}:${x.keyword_count}`).join(', ')}`
-            : '';
         const successCount = Number(data.success || 0);
         const failCount = Number(data.fail || data.fail_count || 0);
         const tone = failCount > 0 ? (successCount > 0 ? 'info' : 'error') : 'success';
-        showToast(`성공 ${successCount}건 / 실패 ${failCount}건${slotSummary}`, tone);
+        const firstFailDetail = (Array.isArray(data.failed_details) && data.failed_details[0]) || data.details || '';
+        showToast(`성공 ${successCount}건 / 실패 ${failCount}건${firstFailDetail ? ` | ${firstFailDetail}` : ''}`, tone);
         await loadActionLogs(false);
         if(failCount <= 0) clearKeywordInputs();
         if(touchedCurrentAdgroup) await loadAdgroupDetails();
@@ -16240,7 +17453,8 @@ async function createKeywords() {
         const successCount = Number(data.success || data.success_count || 0);
         const failCount = Number(data.fail || data.fail_count || 0);
         if(failCount > 0 || successCount > 0) {
-            showToast(`키워드 등록 실패: 성공 ${successCount}건 / 실패 ${failCount}건`, 'error');
+            const firstFailDetail = (Array.isArray(data.failed_details) && data.failed_details[0]) || data.details || data.error || err.message || '';
+            showToast(`키워드 등록 실패: 성공 ${successCount}건 / 실패 ${failCount}건${firstFailDetail ? ` | ${firstFailDetail}` : ''}`, 'error');
         } else {
             showToast(err.message, 'error');
         }
@@ -18743,14 +19957,20 @@ function renderPowerlinkKeywordStatsResult(data) {
     const header = data?.message ? `<div class="field-note" style="margin-bottom:8px;">${escapeMaybe(data.message)}</div>` : '';
     const skippedHtml = skipped.length ? `<div class="field-note" style="margin-bottom:8px;">제외: ${escapeMaybe(skipped.join(' / '))}</div>` : '';
     const errorsHtml = errors.length ? `<div class="field-note" style="margin-bottom:8px; color:#b91c1c;">오류: ${escapeMaybe(errors.join(' / '))}</div>` : '';
+    const keywordTotalLabel = scope === 'account'
+        ? '현재 계정 파워링크 총 키워드'
+        : (scope === 'selected_adgroups' ? '선택 광고그룹 파워링크 키워드' : '선택 캠페인 파워링크 키워드');
+    const targetTotalLabel = scope === 'account'
+        ? '현재 계정 파워링크 캠페인 / 광고그룹'
+        : (scope === 'selected_adgroups' ? '조회된 파워링크 캠페인 / 선택 광고그룹' : '선택 파워링크 캠페인 / 광고그룹');
     const summary = `
         <div class="grid-2" style="margin-bottom:12px;">
             <div class="card" style="margin:0; box-shadow:none; border:1px solid var(--line);">
-                <div class="field-note" style="margin-bottom:6px;">현재 계정 파워링크 총 키워드</div>
+                <div class="field-note" style="margin-bottom:6px;">${keywordTotalLabel}</div>
                 <div style="font-size:24px; font-weight:800; color:var(--blue);">${num(data?.total_keyword_count || 0)}</div>
             </div>
             <div class="card" style="margin:0; box-shadow:none; border:1px solid var(--line);">
-                <div class="field-note" style="margin-bottom:6px;">현재 계정 파워링크 캠페인 / 광고그룹</div>
+                <div class="field-note" style="margin-bottom:6px;">${targetTotalLabel}</div>
                 <div style="font-size:20px; font-weight:800;">${num(data?.total_powerlink_campaign_count || 0)}개 / ${num(data?.total_powerlink_adgroup_count || 0)}개</div>
             </div>
         </div>
@@ -18968,12 +20188,17 @@ async function setCampaignState(enabled) {
     const c = ensureReady(); if(!c) return;
     const ids = Array.from(checkedCampaignIds);
     if(!ids.length) { showToast('좌측 체크박스에서 캠페인을 선택해주세요.', 'error'); return; }
+    const stateLabel = enabled ? 'ON' : 'OFF';
+    if(!await showAppConfirm(`선택한 캠페인 ${ids.length.toLocaleString()}개를 ${stateLabel}으로 변경할까요?\n\n캠페인 자체 상태만 변경하며 하위 광고그룹 상태는 변경하지 않습니다.`, {
+        title: `캠페인 ${stateLabel} 변경 확인`,
+        confirmText: `${stateLabel} 변경`,
+        tone: enabled ? 'default' : 'danger'
+    })) return;
     try {
         const data = await postJson('/set_campaign_state', {...c, ids, enabled}, '캠페인 상태 변경 중...');
         showToast(data.message, Number(data?.fail || 0) > 0 ? 'info' : 'success');
         if(Number(data?.fail || 0) <= 0) ids.forEach(id => setCampaignUiState(id, enabled));
         await refreshCampaigns(true);
-        try { await refreshAdgroups(); } catch(e) {}
     } catch(err) { showToast(err.message, 'error'); }
 }
 
@@ -18985,12 +20210,19 @@ async function quickSetCampaignState(campaignId, enabled, event) {
     const c = ensureReady(); if(!c) return;
     const id = String(campaignId || '').trim();
     if(!id) { showToast('캠페인 ID를 확인할 수 없습니다.', 'error'); return; }
+    const campaign = campaigns.find(x => String(x.id || '') === id) || {};
+    const campaignName = String(campaign.name || id).trim();
+    const stateLabel = enabled ? 'ON' : 'OFF';
+    if(!await showAppConfirm(`${campaignName} 캠페인을 ${stateLabel}으로 변경할까요?\n\n캠페인 자체 상태만 변경하며 하위 광고그룹 상태는 변경하지 않습니다.`, {
+        title: `캠페인 ${stateLabel} 변경 확인`,
+        confirmText: `${stateLabel} 변경`,
+        tone: enabled ? 'default' : 'danger'
+    })) return;
     try {
         const data = await postJson('/set_campaign_state', {...c, ids: [id], enabled}, `캠페인 ${enabled ? 'ON' : 'OFF'} 변경 중...`);
         showToast(data.message || `캠페인 ${enabled ? 'ON' : 'OFF'} 완료`, Number(data?.fail || 0) > 0 ? 'info' : 'success');
         if(Number(data?.fail || 0) <= 0) setCampaignUiState(id, enabled);
         await refreshCampaigns(true);
-        try { await refreshAdgroups(); } catch(e) {}
     } catch(err) { showToast(err.message, 'error'); }
 }
 
@@ -19026,6 +20258,67 @@ async function quickUpdateCampaignBudget(campaignId, currentBudget, event) {
     } catch(err) { showToast(err.message, 'error'); }
 }
 
+async function quickSetAdgroupState(adgroupId, enabled, event) {
+    if(event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    const c = ensureReady(); if(!c) return;
+    const id = String(adgroupId || '').trim();
+    if(!id) { showToast('광고그룹 ID를 확인할 수 없습니다.', 'error'); return; }
+    const adgroup = adgroups.find(x => String(x.id || '') === id) || {};
+    const adgroupName = String(adgroup.name || id).trim();
+    const stateLabel = enabled ? 'ON' : 'OFF';
+    if(!await showAppConfirm(`${adgroupName} 광고그룹을 ${stateLabel}으로 변경할까요?`, {
+        title: `광고그룹 ${stateLabel} 변경 확인`,
+        confirmText: `${stateLabel} 변경`,
+        tone: enabled ? 'default' : 'danger'
+    })) return;
+    try {
+        const data = await postJson('/set_adgroup_state_by_scope', {
+            ...c,
+            entity_type: 'adgroup',
+            entity_ids: [id],
+            enabled
+        }, `광고그룹 ${stateLabel} 변경 중...`);
+        showToast(data.message || `광고그룹 ${stateLabel} 완료`, Number(data?.fail || 0) > 0 ? 'info' : 'success');
+        if(Number(data?.fail || 0) <= 0) setAdgroupUiState(id, enabled);
+        await refreshAdgroups(true);
+    } catch(err) { showToast(err.message, 'error'); }
+}
+
+async function quickUpdateAdgroupBid(adgroupId, currentBid, event) {
+    if(event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    const c = ensureReady(); if(!c) return;
+    const id = String(adgroupId || '').trim();
+    if(!id) { showToast('광고그룹 ID를 확인할 수 없습니다.', 'error'); return; }
+    const adgroup = adgroups.find(x => String(x.id || '') === id) || {};
+    const adgroupName = String(adgroup.name || id).trim();
+    const current = String(currentBid || '').trim();
+    const input = prompt(`${adgroupName} 광고그룹 입찰가를 입력하세요.`, current || '70');
+    if(input === null) return;
+    const parsed = parseStrictBidAmount(input, '광고그룹 입찰가');
+    if(!parsed.ok) { showToast(parsed.message, 'error'); return; }
+    if(!await showAppConfirm(`${adgroupName} 광고그룹 입찰가를 ${parsed.value.toLocaleString()}원으로 변경할까요?`, {
+        title: '광고그룹 입찰가 변경 확인',
+        confirmText: '입찰가 변경'
+    })) return;
+    try {
+        const data = await postJson('/update_adgroup_options', {
+            ...c,
+            entity_type: 'adgroup',
+            entity_ids: [id],
+            bid_amt: parsed.value
+        }, '광고그룹 입찰가 변경 중...');
+        showToast(data.message || '광고그룹 입찰가 변경 완료', Number(data?.fail || 0) > 0 ? 'info' : 'success');
+        if(Number(data?.fail || 0) <= 0) setAdgroupUiBid(id, parsed.value);
+        await refreshAdgroups(true);
+    } catch(err) { showToast(err.message, 'error'); }
+}
+
 async function setAdgroupStateByScope(enabled) {
     const c = ensureReady(); if(!c) return;
     const scope = document.getElementById('adgroup_state_scope')?.value || 'adgroup';
@@ -19034,6 +20327,13 @@ async function setAdgroupStateByScope(enabled) {
         showToast(scope === 'campaign' ? '좌측 체크박스에서 캠페인을 선택해주세요.' : '좌측 체크박스에서 광고그룹을 선택해주세요.', 'error');
         return;
     }
+    const stateLabel = enabled ? 'ON' : 'OFF';
+    const scopeLabel = scope === 'campaign' ? `선택 캠페인 하위 광고그룹` : `선택 광고그룹`;
+    if(!await showAppConfirm(`${scopeLabel} ${ids.length.toLocaleString()}개 범위를 ${stateLabel}으로 변경할까요?`, {
+        title: `광고그룹 ${stateLabel} 변경 확인`,
+        confirmText: `${stateLabel} 변경`,
+        tone: enabled ? 'default' : 'danger'
+    })) return;
     try {
         const data = await postJson('/set_adgroup_state_by_scope', {
             ...c,
@@ -20451,6 +21751,64 @@ async function executeBulkDelete() {
     window.refreshUnifiedUiMotionPatch = refreshUnifiedUi;
 })();
 
+</script>
+
+<script>
+/* Account-list hover stabilizer:
+   CSS :hover can chatter on 1px borders, so keep the visual state briefly. */
+(function stabilizeAccountListHover(){
+  var timers = new WeakMap();
+
+  function itemFromEvent(event) {
+    return event.target && event.target.closest ? event.target.closest('#account_list .account-item') : null;
+  }
+
+  function keepHover(item) {
+    if (!item) return;
+    var timer = timers.get(item);
+    if (timer) window.clearTimeout(timer);
+    item.classList.add('is-hover-stable');
+  }
+
+  function releaseHover(item) {
+    if (!item) return;
+    var timer = timers.get(item);
+    if (timer) window.clearTimeout(timer);
+    timers.set(item, window.setTimeout(function(){
+      item.classList.remove('is-hover-stable');
+      timers.delete(item);
+    }, 420));
+  }
+
+  function bind() {
+    var list = document.getElementById('account_list');
+    if (!list || list.dataset.hoverStableBound === '1') return;
+    list.dataset.hoverStableBound = '1';
+
+    var onEnter = function(event){
+      var item = itemFromEvent(event);
+      if (!item) return;
+      if (item.contains(event.relatedTarget)) return;
+      keepHover(item);
+    };
+
+    var onLeave = function(event){
+      var item = itemFromEvent(event);
+      if (!item) return;
+      if (item.contains(event.relatedTarget)) return;
+      releaseHover(item);
+    };
+
+    list.addEventListener('pointerover', onEnter, true);
+    list.addEventListener('pointerout', onLeave, true);
+    list.addEventListener('mouseover', onEnter, true);
+    list.addEventListener('mouseout', onLeave, true);
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);
+  else bind();
+  window.stabilizeAccountListHover = bind;
+})();
 </script>
 
 <script>
