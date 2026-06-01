@@ -127,6 +127,7 @@ LOG_ACTION_LABELS = {
     "/bulk_upload_rsa_ads": "반응형 소재 일괄 업로드",
     "/bulk_upload_shopping_products": "쇼핑검색 상품 대량등록",
     "/bulk_upload_powerlink_bundle": "파워링크 대량등록",
+    "/bulk_update_shopping_ad_bids": "쇼핑 소재 입찰가 대량 변경",
     "/create_text_ad_simple": "텍스트 소재 생성",
     "/create_ad_advanced": "고급 소재 생성",
     "/create_extension_simple": "확장소재 등록",
@@ -185,7 +186,7 @@ LOG_ACTION_LABELS = {
 }
 ACTION_LOG_EXCLUDED_PATHS = {
     "/get_campaigns", "/get_adgroups", "/get_biz_channels", "/get_keywords", "/get_ads",
-    "/get_ad_extensions", "/get_restricted_keywords", "/find_powerlink_duplicate_keywords", "/find_account_powerlink_duplicate_keywords", "/get_powerlink_keyword_stats", "/search_powerlink_keywords", "/export_powerlink_keywords_excel", "/query_account_ads", "/query_account_extensions", "/query_account_keywords", "/export_account_ads_excel", "/export_account_extensions_excel", "/export_account_keywords_excel", "/get_action_logs", "/health", "/favicon.ico", "/",
+    "/get_ad_extensions", "/get_restricted_keywords", "/find_powerlink_duplicate_keywords", "/find_account_powerlink_duplicate_keywords", "/get_powerlink_keyword_stats", "/search_powerlink_keywords", "/search_adgroups_global", "/export_powerlink_keywords_excel", "/query_account_ads", "/query_account_extensions", "/query_account_keywords", "/export_account_ads_excel", "/export_account_extensions_excel", "/export_account_keywords_excel", "/get_action_logs", "/health", "/favicon.ico", "/",
     "/sample_headers", "/delete_sample_headers", "/clear_action_logs",
 }
 def _safe_json_body() -> Dict[str, Any]:
@@ -314,7 +315,7 @@ def _action_summary(path: str, payload: Dict[str, Any]) -> str:
         return f"유형={str(payload.get('entity_type') or '').strip()} | 건수={len(rows)}"
     if path == "/create_restricted_keywords_simple":
         return f"제외키워드={_line_count(payload.get('keywords_text'))}"
-    if path in {"/bulk_upload_text_ads", "/bulk_upload_rsa_ads", "/bulk_upload_shopping_products", "/bulk_upload_powerlink_bundle", "/bulk_upload_headlines", "/bulk_upload_extensions", "/bulk_delete_powerlink_ads_excel", "/bulk_delete_extensions_excel"}:
+    if path in {"/bulk_upload_text_ads", "/bulk_upload_rsa_ads", "/bulk_upload_shopping_products", "/bulk_upload_powerlink_bundle", "/bulk_update_shopping_ad_bids", "/bulk_upload_headlines", "/bulk_upload_extensions", "/bulk_delete_powerlink_ads_excel", "/bulk_delete_extensions_excel"}:
         file_names = []
         try:
             file_names = [f.filename for f in request.files.values() if getattr(f, 'filename', '')]
@@ -324,6 +325,8 @@ def _action_summary(path: str, payload: Dict[str, Any]) -> str:
             return (f"쇼핑검색 상품 대량등록 | 파일={', '.join(file_names[:2])}" if file_names else "쇼핑검색 상품 대량등록")
         if path == "/bulk_upload_powerlink_bundle":
             return (f"파워링크 대량등록 | 파일={', '.join(file_names[:2])}" if file_names else "파워링크 대량등록")
+        if path == "/bulk_update_shopping_ad_bids":
+            return (f"쇼핑 소재 입찰가 대량 변경 | 파일={', '.join(file_names[:2])}" if file_names else "쇼핑 소재 입찰가 대량 변경")
         if path == "/bulk_delete_powerlink_ads_excel":
             return (f"파워링크 소재ID 삭제 | 파일={', '.join(file_names[:2])}" if file_names else "파워링크 소재ID 삭제 | 파일 업로드")
         if path == "/bulk_delete_extensions_excel":
@@ -833,6 +836,114 @@ def _read_action_logs(limit: int = 150) -> List[Dict[str, Any]]:
         except Exception:
             continue
     return out
+
+def _action_log_sanitized_body(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            k: _action_log_sanitized_body(v)
+            for k, v in value.items()
+            if str(k) not in {"api_key", "secret_key", "apiKey", "secretKey"}
+        }
+    if isinstance(value, list):
+        return [_action_log_sanitized_body(v) for v in value]
+    return value
+
+def _sanitize_undo_operation_for_log(undo_operation: Any) -> Dict[str, Any] | None:
+    if not isinstance(undo_operation, dict):
+        return None
+    url = str(undo_operation.get("url") or "").strip()
+    body = undo_operation.get("body")
+    if not url or not isinstance(body, dict):
+        return None
+    out = {
+        "kind": str(undo_operation.get("kind") or "").strip(),
+        "url": url,
+        "label": str(undo_operation.get("label") or "작업 되돌리기").strip() or "작업 되돌리기",
+        "body": _action_log_sanitized_body(body),
+    }
+    return out
+
+def _copy_payload_for_log_undo(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return _action_log_sanitized_body(copy.deepcopy(payload or {}))
+
+def _collect_created_ids_for_log_undo(value: Any, entity_type: str, out: Optional[List[str]] = None, seen: Optional[set] = None) -> List[str]:
+    if out is None:
+        out = []
+    if seen is None:
+        seen = set()
+    if value is None:
+        return out
+    if isinstance(value, list):
+        for item in value:
+            _collect_created_ids_for_log_undo(item, entity_type, out, seen)
+        return out
+    if not isinstance(value, dict):
+        return out
+    if value.get("ok") is False or value.get("success") is False or value.get("exists") is True:
+        return out
+    key_map = {
+        "campaign": ["nccCampaignId", "campaignId", "campaign_id", "id"],
+        "adgroup": ["nccAdgroupId", "adgroupId", "adgroup_id", "id"],
+        "keyword": ["nccKeywordId", "keywordId", "keyword_id", "id"],
+        "ad": ["nccAdId", "adId", "ad_id", "id"],
+        "ad_extension": ["adExtensionId", "nccAdExtensionId", "extensionId", "ad_extension_id", "id"],
+    }
+    for key in key_map.get(entity_type, []):
+        raw = value.get(key)
+        if raw is None or isinstance(raw, (dict, list)):
+            continue
+        entity_id = str(raw or "").strip()
+        if entity_id and entity_id not in seen:
+            seen.add(entity_id)
+            out.append(entity_id)
+    for key in ("item", "items", "result", "results", "data"):
+        if key in value:
+            _collect_created_ids_for_log_undo(value.get(key), entity_type, out, seen)
+    return out
+
+def _registration_entity_for_log_undo(path: str, payload: Dict[str, Any], response_data: Dict[str, Any]) -> str:
+    if path == "/bulk_register":
+        return str(response_data.get("entity_type") or payload.get("entity_type") or "").strip().lower()
+    return {
+        "/create_campaign": "campaign",
+        "/create_adgroup_simple": "adgroup",
+        "/create_keywords_simple": "keyword",
+        "/create_text_ad_simple": "ad",
+        "/create_ad_advanced": "ad",
+        "/create_shopping_ad_simple": "ad",
+        "/create_extension_simple": "ad_extension",
+        "/create_extension_raw": "ad_extension",
+    }.get(path, "")
+
+def _infer_action_log_undo_operation(path: str, payload: Dict[str, Any], response_data: Dict[str, Any], status: str) -> Dict[str, Any] | None:
+    if status not in {"success", "partial"}:
+        return None
+    existing = _sanitize_undo_operation_for_log(response_data.get("undo_operation"))
+    if existing:
+        return existing
+    if path in {
+        "/set_campaign_state",
+        "/set_adgroup_state_by_scope",
+        "/set_ads_state_by_scope",
+        "/set_ad_extensions_state_by_scope",
+        "/set_asset_state_by_ids",
+        "/set_searched_powerlink_keyword_state",
+    } and "enabled" in payload:
+        body = _copy_payload_for_log_undo(payload)
+        body["enabled"] = not _boolish(payload.get("enabled"), True)
+        return {"kind": path.strip("/"), "url": path, "label": "상태 변경 전으로 되돌리기", "body": body}
+    entity_type = _registration_entity_for_log_undo(path, payload, response_data)
+    if entity_type in {"campaign", "adgroup", "keyword", "ad", "ad_extension"}:
+        ids = _collect_created_ids_for_log_undo(response_data, entity_type)
+        if ids:
+            return {
+                "kind": "delete_selected",
+                "url": "/delete_selected",
+                "label": "등록 항목 삭제로 되돌리기",
+                "body": {"entity_type": entity_type, "ids": ids},
+            }
+    return None
+
 def _write_action_log_from_request(response: Response) -> None:
     path = request.path or ''
     if request.method != 'POST' or path in ACTION_LOG_EXCLUDED_PATHS:
@@ -873,6 +984,9 @@ def _write_action_log_from_request(response: Response) -> None:
             'detail_level_counts': detail_level_counts,
             'detail_truncated': len(all_detail_items) > len(detail_items),
         }
+        undo_operation = _infer_action_log_undo_operation(path, payload, response_data, status)
+        if undo_operation:
+            entry["undo_operation"] = undo_operation
         _append_action_log(entry)
     except Exception:
         pass
@@ -1153,8 +1267,10 @@ def _read_table_text(text: str) -> List[Dict[str, Any]]:
     df = pd.read_csv(io.StringIO(text), sep=sep, dtype=str, keep_default_na=False, header=header_row)
     df.columns = _rename_uploaded_columns(list(df.columns))
     return df.to_dict(orient="records")
-def _result_item(row_no: int, ok: bool, name: str, detail: str = "") -> Dict[str, Any]:
-    return {"row_no": row_no, "ok": ok, "name": name, "detail": detail}
+def _result_item(row_no: int, ok: bool, name: str, detail: str = "", **extra) -> Dict[str, Any]:
+    item = {"row_no": row_no, "ok": ok, "name": name, "detail": detail}
+    item.update({k: v for k, v in (extra or {}).items() if v is not None and v != ""})
+    return item
 POWERLINK_KEYWORD_LIMIT_PER_ADGROUP = 1000
 POWERLINK_KEYWORD_LIMIT_TOTAL = 100000
 POWERLINK_BULK_SYNC_ROW_LIMIT = 5000
@@ -1293,7 +1409,8 @@ def _classify_keyword_create_success_response(res: Any, chunk: List[Tuple[int, D
         if error_text:
             return [_result_item(idx, False, str(payload.get("keyword")), error_text)]
         if _keyword_create_response_has_id(parsed):
-            return [_result_item(idx, True, str(payload.get("keyword")), "?앹꽦 ?꾨즺")]
+            keyword_id = str(parsed.get("nccKeywordId") or parsed.get("keywordId") or parsed.get("id") or "").strip()
+            return [_result_item(idx, True, str(payload.get("keyword")), "생성 완료", nccKeywordId=keyword_id, item=parsed)]
         return [_result_item(idx, False, str(payload.get("keyword")), _keyword_create_unconfirmed_detail(res))]
     if isinstance(parsed, list) and len(parsed) == len(chunk):
         classified: List[Dict[str, Any]] = []
@@ -1304,14 +1421,18 @@ def _classify_keyword_create_success_response(res: Any, chunk: List[Tuple[int, D
             elif not _keyword_create_response_has_id(item):
                 classified.append(_result_item(idx, False, str(payload.get("keyword")), _keyword_create_unconfirmed_detail(res)))
             else:
-                classified.append(_result_item(idx, True, str(payload.get("keyword")), "생성 완료"))
+                keyword_id = str((item or {}).get("nccKeywordId") or (item or {}).get("keywordId") or (item or {}).get("id") or "").strip()
+                classified.append(_result_item(idx, True, str(payload.get("keyword")), "생성 완료", nccKeywordId=keyword_id, item=item))
         return classified
     error_text = _keyword_create_error_text(parsed)
     if error_text:
         return [_result_item(idx, False, str(payload.get("keyword")), error_text) for idx, payload in chunk]
     if not (isinstance(parsed, list) and len(parsed) == len(chunk)):
         return [_result_item(idx, False, str(payload.get("keyword")), "키워드 등록 응답에 생성 ID가 없어 등록 여부를 다시 확인 중입니다.") for idx, payload in chunk]
-    return [_result_item(idx, True, str(payload.get("keyword")), "생성 완료") for idx, payload in chunk]
+    classified = []
+    for idx, payload in chunk:
+        classified.append(_result_item(idx, True, str(payload.get("keyword")), "생성 완료"))
+    return classified
 def _read_uploaded_table(upload) -> List[Dict[str, Any]]:
     if upload is None or not getattr(upload, "filename", ""):
         return []
@@ -2974,6 +3095,314 @@ def _apply_ad_bid_map(api_key: str, secret_key: str, cid: str, adgroup_contexts:
                 if len(err_details) < 5:
                     err_details.append(f"[{name}] {detail}")
     return success_cnt, fail_cnt, skipped_cnt, err_details, results
+
+_SHOPPING_AD_BID_HEADER_ALIASES = {
+    "ad_type": {"광고유형", "광고타입", "캠페인유형", "adtype", "ad_type", "campaigntp", "campaign_type"},
+    "campaign_name": {"캠페인", "캠페인명", "campaign", "campaignname", "campaign_name"},
+    "adgroup_name": {"광고그룹", "광고그룹명", "그룹", "그룹명", "adgroup", "adgroupname", "adgroup_name"},
+    "bid_amt": {"변경후입찰가", "변경후소재입찰가", "변경입찰가", "소재입찰가", "입찰가", "bid", "bidamt", "bid_amt", "targetbid", "target_bid", "adbidamt", "ad_bid_amt"},
+}
+
+def _bid_change_header_score(headers: List[Any]) -> int:
+    score = 0
+    for header in headers or []:
+        norm = _normalize_table_header_key(header)
+        for aliases in _SHOPPING_AD_BID_HEADER_ALIASES.values():
+            if norm in {_normalize_table_header_key(x) for x in aliases}:
+                score += 2
+                break
+    return score
+
+def _read_shopping_ad_bid_change_upload(upload) -> List[Dict[str, Any]]:
+    if upload is None or not getattr(upload, "filename", ""):
+        return []
+    filename = str(upload.filename or "").lower()
+    raw = upload.read()
+    try:
+        upload.stream.seek(0)
+    except Exception:
+        pass
+    if not raw:
+        return []
+
+    if filename.endswith(".csv") or filename.endswith(".txt") or filename.endswith(".tsv"):
+        text = _decode_uploaded_text(raw)
+        sample = text[:2048]
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=",\t;")
+            sep = dialect.delimiter
+        except Exception:
+            sep = "\t" if "\t" in sample else ","
+        rows = list(csv.reader(io.StringIO(text), delimiter=sep))
+        header_row = 0
+        for idx, row in enumerate(rows[:12]):
+            if _bid_change_header_score(row) >= 4:
+                header_row = idx
+                break
+        df = pd.read_csv(io.StringIO(text), sep=sep, dtype=str, keep_default_na=False, header=header_row)
+        return df.to_dict(orient="records")
+
+    if filename.endswith(".xlsx") or filename.endswith(".xls"):
+        try:
+            raw_df = pd.read_excel(io.BytesIO(raw), dtype=str, keep_default_na=False, header=None)
+        except Exception as e:
+            raise ValueError(f"엑셀 파일을 읽지 못했습니다: {e}")
+        header_row = 0
+        for idx in range(min(12, len(raw_df.index))):
+            if _bid_change_header_score(list(raw_df.iloc[idx].values)) >= 4:
+                header_row = idx
+                break
+        headers = list(raw_df.iloc[header_row].values)
+        df = raw_df.iloc[header_row + 1:].copy()
+        df.columns = headers
+        df = df.loc[:, [str(c).strip() != "" and not str(c).startswith("Unnamed") for c in df.columns]]
+        return df.to_dict(orient="records")
+
+    raise ValueError("지원 파일 형식은 csv, txt, tsv, xls, xlsx 입니다.")
+
+def _shopping_ad_bid_row_value(row: Dict[str, Any], field: str) -> str:
+    aliases = {_normalize_table_header_key(x) for x in _SHOPPING_AD_BID_HEADER_ALIASES.get(field, set())}
+    for key, value in (row or {}).items():
+        if _normalize_table_header_key(key) in aliases:
+            return str(value or "").strip()
+    return ""
+
+def _bid_change_name_key(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip()).casefold()
+
+def _campaign_type_matches_upload(ad_type: Any, campaign_tp: Any) -> bool:
+    raw = str(ad_type or "").strip()
+    if not raw:
+        return True
+    wanted = _normalize_campaign_tp(raw)
+    actual = _normalize_campaign_tp(campaign_tp)
+    return wanted == actual
+
+def _campaign_type_label_for_bid_upload(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "전체"
+    return _campaign_label(_normalize_campaign_tp(raw))
+
+def _resolve_campaign_for_bid_upload(campaigns: List[Dict[str, Any]], campaign_name: str, ad_type: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    name_key = _bid_change_name_key(campaign_name)
+    matches: List[Dict[str, Any]] = []
+    for row in campaigns or []:
+        raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+        row_name = str(row.get("name") or raw.get("name") or "").strip()
+        row_tp = row.get("campaignTp") or raw.get("campaignTp")
+        if _bid_change_name_key(row_name) == name_key and _campaign_type_matches_upload(ad_type, row_tp):
+            matches.append(row)
+    if not matches:
+        type_label = _campaign_type_label_for_bid_upload(ad_type)
+        return None, f"캠페인을 찾지 못했습니다: {campaign_name} ({type_label})"
+    if len(matches) > 1:
+        return None, f"동일한 이름의 캠페인이 {len(matches)}개입니다: {campaign_name}"
+    return matches[0], ""
+
+def _resolve_adgroup_for_bid_upload(api_key: str, secret_key: str, cid: str, campaign: Dict[str, Any], adgroup_name: str, adgroup_cache: Dict[str, Tuple[Any, List[Dict[str, Any]]]]) -> Tuple[Optional[Dict[str, Any]], str]:
+    raw = campaign.get("raw") if isinstance(campaign.get("raw"), dict) else {}
+    campaign_id = str(campaign.get("id") or raw.get("nccCampaignId") or "").strip()
+    campaign_name = str(campaign.get("name") or raw.get("name") or campaign_id)
+    if not campaign_id:
+        return None, f"캠페인 ID를 확인하지 못했습니다: {campaign_name}"
+    if campaign_id not in adgroup_cache:
+        adgroup_cache[campaign_id] = _fetch_adgroups(api_key, secret_key, cid, campaign_id, False)
+    res_adg, rows = adgroup_cache[campaign_id]
+    if getattr(res_adg, "status_code", 0) != 200:
+        return None, f"캠페인 {campaign_name} 하위 광고그룹 조회 실패: {getattr(res_adg, 'text', '')}"
+    name_key = _bid_change_name_key(adgroup_name)
+    matches = []
+    for row in rows or []:
+        raw_row = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+        row_name = str(row.get("name") or raw_row.get("name") or "").strip()
+        if _bid_change_name_key(row_name) == name_key:
+            matches.append(row)
+    if not matches:
+        return None, f"광고그룹을 찾지 못했습니다: {campaign_name} > {adgroup_name}"
+    if len(matches) > 1:
+        return None, f"동일한 이름의 광고그룹이 {len(matches)}개입니다: {campaign_name} > {adgroup_name}"
+    return matches[0], ""
+
+def _update_all_shopping_ads_bid_for_group(api_key: str, secret_key: str, cid: str, adgroup_id: str, target_bid: int, adgroup_bid: Any) -> Dict[str, Any]:
+    res_ads, ads = _fetch_ads(api_key, secret_key, cid, adgroup_id)
+    if res_ads.status_code != 200:
+        return {"ok": False, "changed": 0, "skipped": 0, "fail": 1, "scanned": 0, "detail": f"소재 조회 실패: {res_ads.text}"}
+    scanned = changed = skipped = fail = 0
+    details: List[str] = []
+    for ad in ads or []:
+        if not _ad_item_has_bid_attr(ad):
+            continue
+        scanned += 1
+        ad_id = _extract_ad_id(ad)
+        ad_attr = _extract_ad_attr(ad)
+        current_use_group = bool(ad_attr.get("useGroupBidAmt"))
+        effective_current_bid = _resolve_effective_bid(ad_attr.get("bidAmt"), current_use_group, adgroup_bid)
+        if effective_current_bid == int(target_bid) and not current_use_group:
+            skipped += 1
+            continue
+        item = copy.deepcopy(ad)
+        new_attr = _extract_ad_attr(item)
+        new_attr["useGroupBidAmt"] = False
+        new_attr["bidAmt"] = int(target_bid)
+        item["adAttr"] = new_attr
+        r_put = _put_single_ad_with_ad_attr(api_key, secret_key, cid, item)
+        if r_put.status_code in [200, 201, 204]:
+            changed += 1
+        else:
+            fail += 1
+            if len(details) < 5:
+                details.append(f"{ad_id or '소재ID 없음'} 변경 실패: {_short_log_text(getattr(r_put, 'text', ''), 300)}")
+    if scanned == 0:
+        return {"ok": False, "changed": 0, "skipped": 0, "fail": 0, "scanned": 0, "detail": "변경 가능한 소재가 없습니다."}
+    detail = f"소재 {scanned}개 확인 / 변경 {changed}개 / 유지 {skipped}개 / 실패 {fail}개"
+    if details:
+        detail += " | " + " / ".join(details)
+    return {"ok": fail == 0, "changed": changed, "skipped": skipped, "fail": fail, "scanned": scanned, "detail": detail}
+
+def bulk_update_shopping_ad_bids():
+    api_key = request.form.get("api_key")
+    secret_key = request.form.get("secret_key")
+    cid = request.form.get("customer_id")
+    upload = request.files.get("file")
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API Key / Secret Key / Customer ID가 필요합니다."}), 400
+    if upload is None or not getattr(upload, "filename", ""):
+        return jsonify({"error": "업로드 파일을 선택해주세요."}), 400
+    try:
+        raw_rows = _read_shopping_ad_bid_change_upload(upload)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+    if not raw_rows:
+        return jsonify({"error": "업로드 파일에서 데이터 행을 찾지 못했습니다."}), 400
+
+    targets: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+    invalid_results: List[Dict[str, Any]] = []
+    duplicate_count = 0
+    duplicate_conflicts = 0
+    for idx, row in enumerate(raw_rows, start=2):
+        if not any(str(v or "").strip() for v in (row or {}).values()):
+            continue
+        ad_type = _shopping_ad_bid_row_value(row, "ad_type")
+        campaign_name = _shopping_ad_bid_row_value(row, "campaign_name")
+        adgroup_name = _shopping_ad_bid_row_value(row, "adgroup_name")
+        raw_bid = _shopping_ad_bid_row_value(row, "bid_amt")
+        missing = []
+        if not campaign_name:
+            missing.append("캠페인")
+        if not adgroup_name:
+            missing.append("광고그룹")
+        if not raw_bid:
+            missing.append("변경 후 입찰가")
+        if missing:
+            invalid_results.append({"row_no": idx, "ok": False, "name": f"{campaign_name} > {adgroup_name}", "detail": f"필수 열 누락: {', '.join(missing)}"})
+            continue
+        target_bid, bid_error = _parse_strict_bid_amt(raw_bid, f"{idx}행 변경 후 입찰가")
+        if bid_error:
+            invalid_results.append({"row_no": idx, "ok": False, "name": f"{campaign_name} > {adgroup_name}", "detail": bid_error})
+            continue
+        key = (_bid_change_name_key(ad_type), _bid_change_name_key(campaign_name), _bid_change_name_key(adgroup_name))
+        previous = targets.get(key)
+        if previous is not None:
+            duplicate_count += 1
+            if int(previous.get("bid_amt") or 0) != int(target_bid):
+                duplicate_conflicts += 1
+        targets[key] = {
+            "row_no": idx,
+            "ad_type": ad_type,
+            "campaign_name": campaign_name,
+            "adgroup_name": adgroup_name,
+            "bid_amt": int(target_bid),
+        }
+
+    if not targets and invalid_results:
+        return jsonify({"ok": False, "error": "유효한 변경 대상이 없습니다.", "results": invalid_results[:100], "total": len(raw_rows), "fail": len(invalid_results)}), 400
+
+    res_camp, campaigns = _fetch_campaigns(api_key, secret_key, cid)
+    if res_camp.status_code != 200:
+        return jsonify({"error": f"캠페인 조회 실패: {res_camp.text}"}), 400
+
+    results: List[Dict[str, Any]] = list(invalid_results)
+    adgroup_cache: Dict[str, Tuple[Any, List[Dict[str, Any]]]] = {}
+    target_success = target_fail = 0
+    changed_ads = skipped_ads = failed_ads = scanned_ads = 0
+
+    for spec in targets.values():
+        campaign, camp_error = _resolve_campaign_for_bid_upload(campaigns, spec["campaign_name"], spec["ad_type"])
+        if camp_error:
+            target_fail += 1
+            results.append({"row_no": spec["row_no"], "ok": False, "name": f"{spec['campaign_name']} > {spec['adgroup_name']}", "detail": camp_error})
+            continue
+        adgroup, adg_error = _resolve_adgroup_for_bid_upload(api_key, secret_key, cid, campaign, spec["adgroup_name"], adgroup_cache)
+        if adg_error:
+            target_fail += 1
+            results.append({"row_no": spec["row_no"], "ok": False, "name": f"{spec['campaign_name']} > {spec['adgroup_name']}", "detail": adg_error})
+            continue
+        raw_adg = adgroup.get("raw") if isinstance(adgroup.get("raw"), dict) else {}
+        adgroup_id = str(adgroup.get("id") or adgroup.get("nccAdgroupId") or raw_adg.get("nccAdgroupId") or "").strip()
+        adgroup_type = str(adgroup.get("adgroupType") or raw_adg.get("adgroupType") or "").upper()
+        adgroup_bid = raw_adg.get("bidAmt") if raw_adg else adgroup.get("bidAmt")
+        if not adgroup_id:
+            target_fail += 1
+            results.append({"row_no": spec["row_no"], "ok": False, "name": f"{spec['campaign_name']} > {spec['adgroup_name']}", "detail": "광고그룹 ID를 확인하지 못했습니다."})
+            continue
+        if not _adgroup_uses_ad_level_bid(adgroup_type):
+            target_fail += 1
+            results.append({"row_no": spec["row_no"], "ok": False, "name": f"{spec['campaign_name']} > {spec['adgroup_name']}", "detail": f"소재 입찰가를 지원하는 쇼핑/CATALOG 그룹이 아닙니다. 현재 유형: {adgroup_type or '-'}"})
+            continue
+        update_result = _update_all_shopping_ads_bid_for_group(api_key, secret_key, cid, adgroup_id, int(spec["bid_amt"]), adgroup_bid)
+        scanned_ads += int(update_result.get("scanned") or 0)
+        changed_ads += int(update_result.get("changed") or 0)
+        skipped_ads += int(update_result.get("skipped") or 0)
+        failed_ads += int(update_result.get("fail") or 0)
+        if update_result.get("ok"):
+            target_success += 1
+        else:
+            target_fail += 1
+        results.append({
+            "row_no": spec["row_no"],
+            "ok": bool(update_result.get("ok")),
+            "name": f"{spec['campaign_name']} > {spec['adgroup_name']}",
+            "campaignName": spec["campaign_name"],
+            "adgroupName": spec["adgroup_name"],
+            "bidAmt": int(spec["bid_amt"]),
+            "detail": update_result.get("detail") or "",
+        })
+
+    if changed_ads > 0:
+        _cache_invalidate(api_key, secret_key, cid)
+
+    warnings: List[str] = []
+    if duplicate_count:
+        warnings.append(f"같은 캠페인/광고그룹이 중복된 행 {duplicate_count}건은 마지막 행 기준으로 적용했습니다.")
+    if duplicate_conflicts:
+        warnings.append(f"중복 행 중 입찰가가 서로 다른 그룹 {duplicate_conflicts}건이 있어 마지막 행의 입찰가가 최종값입니다.")
+    if invalid_results:
+        warnings.append(f"필수값/입찰가 오류로 제외된 행 {len(invalid_results)}건이 있습니다.")
+    total_fail = target_fail + len(invalid_results)
+    excluded_line = f" / 제외 행 {len(invalid_results)}건" if invalid_results else ""
+    message = (
+        f"쇼핑 소재 입찰가 대량 변경 완료: 대상 그룹 성공 {target_success}개 / 실패 {target_fail}개, "
+        f"소재 변경 {changed_ads}개 / 유지 {skipped_ads}개 / 실패 {failed_ads}개{excluded_line}"
+    )
+    return jsonify({
+        "ok": total_fail == 0 and failed_ads == 0,
+        "message": message,
+        "total": len(raw_rows),
+        "targets": len(targets),
+        "success": target_success,
+        "fail": total_fail,
+        "target_fail": target_fail,
+        "invalid_rows": len(invalid_results),
+        "changed_ads": changed_ads,
+        "skipped_ads": skipped_ads,
+        "failed_ads": failed_ads,
+        "scanned_ads": scanned_ads,
+        "duplicate_rows": duplicate_count,
+        "duplicate_conflicts": duplicate_conflicts,
+        "warnings": warnings,
+        "results": results[:300],
+    }), (200 if total_fail == 0 and failed_ads == 0 else 207 if target_success > 0 or changed_ads > 0 else 400)
 def _resolve_shopping_extra_owner_ids(api_key: str, secret_key: str, cid: str, campaign_ids: List[str] | None = None, adgroup_ids: List[str] | None = None):
     campaign_ids = [str(x).strip() for x in (campaign_ids or []) if str(x).strip()]
     adgroup_ids = [str(x).strip() for x in (adgroup_ids or []) if str(x).strip()]
@@ -6340,8 +6769,10 @@ def _bulk_create_campaigns(api_key: str, secret_key: str, cid: str, rows: List[D
             continue
         res = _do_req("POST", api_key, secret_key, cid, "/ncc/campaigns", json_body=payload)
         if res.status_code in [200, 201]:
+            item = _created_item_from_response(res)
+            campaign_id = str(item.get("nccCampaignId") or item.get("id") or "").strip()
             success += 1
-            results.append(_result_item(idx, True, name, "생성 완료"))
+            results.append(_result_item(idx, True, name, "생성 완료", nccCampaignId=campaign_id, item=item))
         else:
             fail += 1
             results.append(_result_item(idx, False, name, res.text))
@@ -6358,8 +6789,10 @@ def _bulk_create_adgroups(api_key: str, secret_key: str, cid: str, rows: List[Di
             continue
         res = _do_req("POST", api_key, secret_key, cid, "/ncc/adgroups", json_body=payload)
         if res.status_code in [200, 201]:
+            item = _created_item_from_response(res)
+            adgroup_id = str(item.get("nccAdgroupId") or item.get("id") or "").strip()
             success += 1
-            results.append(_result_item(idx, True, name, "생성 완료"))
+            results.append(_result_item(idx, True, name, "생성 완료", nccAdgroupId=adgroup_id, item=item))
         else:
             fail += 1
             results.append(_result_item(idx, False, name, res.text))
@@ -6585,7 +7018,9 @@ def _post_one_ad(api_key: str, secret_key: str, cid: str, row_no: int, payload: 
     else:
         res = _do_req("POST", api_key, secret_key, cid, "/ncc/ads", params={"nccAdgroupId": adg_id}, json_body=body)
     if res.status_code in [200, 201]:
-        return _result_item(row_no, True, name, "생성 완료")
+        item = _created_item_from_response(res)
+        ad_id = str(item.get("nccAdId") or item.get("id") or "").strip()
+        return _result_item(row_no, True, name, "생성 완료", nccAdId=ad_id, item=item)
     return _result_item(row_no, False, name, res.text)
 def _bulk_create_ads(api_key: str, secret_key: str, cid: str, rows: List[Dict[str, Any]]):
     prepared = [(idx, _prepare_payload_row(row, "ad", cid)) for idx, row in enumerate(rows, start=1)]
@@ -6611,8 +7046,11 @@ def _bulk_create_extensions(api_key: str, secret_key: str, cid: str, rows: List[
             continue
         res = _do_req("POST", api_key, secret_key, cid, "/ncc/ad-extensions", params={"ownerId": owner_id}, json_body=payload)
         if res.status_code in [200, 201]:
+            item = _created_item_from_response(res)
+            ext_item = _extract_extension_item(item) or item
+            ext_id = str((ext_item or {}).get("adExtensionId") or (ext_item or {}).get("nccAdExtensionId") or (ext_item or {}).get("id") or "").strip()
             success += 1
-            results.append(_result_item(idx, True, name, "생성 완료"))
+            results.append(_result_item(idx, True, name, "생성 완료", adExtensionId=ext_id, item=item))
         else:
             fail += 1
             results.append(_result_item(idx, False, name, res.text))
@@ -7325,6 +7763,173 @@ def _delete_entity_by_id(api_key: str, secret_key: str, cid: str, entity_type: s
     if not uri:
         return _make_fake_response(400, f"지원하지 않는 삭제 유형: {entity_type}")
     return _do_req("DELETE", api_key, secret_key, cid, uri)
+
+def _entity_id_from_row(entity_type: str, row: Dict[str, Any]) -> str:
+    key_map = {
+        "campaign": ["nccCampaignId", "캠페인ID", "campaign_id", "id"],
+        "adgroup": ["nccAdgroupId", "광고그룹ID", "adgroup_id", "id"],
+        "keyword": ["nccKeywordId", "키워드ID", "keyword_id", "id"],
+        "ad": ["nccAdId", "소재ID", "ad_id", "id"],
+        "ad_extension": ["adExtensionId", "nccAdExtensionId", "확장소재ID", "확장소재 ID", "ad_extension_id", "id"],
+    }
+    for key in key_map.get(entity_type, []):
+        value = str((row or {}).get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+def _entity_detail_uri(entity_type: str, entity_id: str) -> str:
+    return {
+        "campaign": f"/ncc/campaigns/{entity_id}",
+        "adgroup": f"/ncc/adgroups/{entity_id}",
+        "keyword": f"/ncc/keywords/{entity_id}",
+        "ad": f"/ncc/ads/{entity_id}",
+        "ad_extension": f"/ncc/ad-extensions/{entity_id}",
+    }.get(entity_type, "")
+
+def _fetch_entity_snapshot(api_key: str, secret_key: str, cid: str, entity_type: str, entity_id: str) -> Dict[str, Any] | None:
+    uri = _entity_detail_uri(entity_type, entity_id)
+    if not uri:
+        return None
+    res = _do_req("GET", api_key, secret_key, cid, uri)
+    if res.status_code != 200:
+        return None
+    try:
+        obj = res.json()
+    except Exception:
+        return None
+    if isinstance(obj, list):
+        obj = next((x for x in obj if isinstance(x, dict)), None)
+    return obj if isinstance(obj, dict) else None
+
+def _delete_restore_payload(entity_type: str, snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    payload = copy.deepcopy(snapshot or {})
+    readonly_keys = {
+        "nccCampaignId", "nccAdgroupId", "nccKeywordId", "nccAdId", "adExtensionId", "nccAdExtensionId",
+        "id", "regTm", "editTm", "status", "statusReason", "inspectStatus", "delFlag", "managedKeyword",
+        "reviewStatus", "reviewStatusReason", "customerId",
+    }
+    for key in list(payload.keys()):
+        if key in readonly_keys or str(key).startswith("_"):
+            payload.pop(key, None)
+    return payload
+
+def _collect_delete_undo_snapshots(api_key: str, secret_key: str, cid: str, entity_type: str, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    snapshots = []
+    for row in rows or []:
+        entity_id = _entity_id_from_row(entity_type, row)
+        if not entity_id:
+            continue
+        snapshot = _fetch_entity_snapshot(api_key, secret_key, cid, entity_type, entity_id)
+        if snapshot:
+            snapshots.append({"entity_type": entity_type, "id": entity_id, "snapshot": snapshot})
+    return snapshots
+
+def _make_undo_operation(kind: str, body: Dict[str, Any], label: str) -> Dict[str, Any]:
+    return {"kind": kind, "url": f"/{kind}", "body": body, "label": label}
+
+def _delete_undo_operation(api_key: str, secret_key: str, cid: str, snapshots: List[Dict[str, Any]]) -> Dict[str, Any] | None:
+    if not snapshots:
+        return None
+    return _make_undo_operation(
+        "restore_deleted",
+        {"api_key": api_key, "secret_key": secret_key, "customer_id": cid, "snapshots": snapshots},
+        "삭제 전 상태로 재등록",
+    )
+
+@app.route("/restore_budget", methods=["POST"])
+def restore_budget():
+    d = request.json or {}
+    api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
+    items = d.get("items") or []
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API Key / Secret Key / Customer ID가 필요합니다."}), 400
+    success = fail = 0
+    results = []
+    for idx, item in enumerate(items, start=1):
+        entity_type = str((item or {}).get("entity_type") or "").strip().lower()
+        entity_id = str((item or {}).get("id") or "").strip()
+        use_daily_budget = _normalize_bool_for_api((item or {}).get("use_daily_budget"), False)
+        try:
+            budget = int(float((item or {}).get("daily_budget") or 0))
+        except Exception:
+            budget = 0
+        uri = f"/ncc/campaigns/{entity_id}" if entity_type == "campaign" else f"/ncc/adgroups/{entity_id}" if entity_type == "adgroup" else ""
+        if not uri:
+            fail += 1
+            results.append(_result_item(idx, False, entity_id or f"{idx}행", "지원하지 않는 예산 복구 대상입니다."))
+            continue
+        r_get = _do_req("GET", api_key, secret_key, cid, uri)
+        if r_get.status_code != 200:
+            fail += 1
+            results.append(_result_item(idx, False, entity_id, f"조회 실패: {_response_detail_text(r_get)}"))
+            continue
+        obj = r_get.json() or {}
+        obj["useDailyBudget"] = bool(use_daily_budget)
+        obj["dailyBudget"] = budget if use_daily_budget else 0
+        obj.pop("budget", None)
+        r_put = _do_req("PUT", api_key, secret_key, cid, uri, params={"fields": "budget"}, json_body=obj)
+        if r_put.status_code in [200, 201, 204]:
+            success += 1
+            label = "제한없음" if not use_daily_budget else f"{budget:,}원"
+            results.append(_result_item(idx, True, entity_id, f"예산 {label} 복구 완료"))
+        else:
+            fail += 1
+            results.append(_result_item(idx, False, entity_id, f"복구 실패: {_response_detail_text(r_put)}"))
+    _cache_invalidate(api_key, secret_key, cid)
+    return jsonify({"ok": fail == 0 and success > 0, "total": len(items), "success": success, "fail": fail, "results": results, "message": f"예산 되돌리기 완료 (성공 {success} / 실패 {fail})"}), (200 if success > 0 else 400)
+
+@app.route("/restore_deleted", methods=["POST"])
+def restore_deleted():
+    d = request.json or {}
+    api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
+    snapshots = d.get("snapshots") or []
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API Key / Secret Key / Customer ID가 필요합니다."}), 400
+    success = fail = 0
+    results = []
+    endpoint_map = {
+        "campaign": "/ncc/campaigns",
+        "adgroup": "/ncc/adgroups",
+        "keyword": "/ncc/keywords",
+        "ad": "/ncc/ads",
+        "ad_extension": "/ncc/ad-extensions",
+    }
+    for idx, item in enumerate(snapshots, start=1):
+        entity_type = str((item or {}).get("entity_type") or "").strip().lower()
+        snapshot = (item or {}).get("snapshot") if isinstance((item or {}).get("snapshot"), dict) else {}
+        endpoint = endpoint_map.get(entity_type)
+        if not endpoint or not snapshot:
+            fail += 1
+            results.append(_result_item(idx, False, str((item or {}).get("id") or idx), "복구 스냅샷이 없습니다."))
+            continue
+        payload = _delete_restore_payload(entity_type, snapshot)
+        try:
+            payload.setdefault("customerId", int(cid))
+        except Exception:
+            payload.setdefault("customerId", cid)
+        params = None
+        json_body: Any = payload
+        if entity_type in {"keyword", "ad"}:
+            adgroup_id = str(snapshot.get("nccAdgroupId") or snapshot.get("adgroupId") or "").strip()
+            params = {"nccAdgroupId": adgroup_id} if adgroup_id else None
+            if entity_type == "keyword":
+                json_body = [payload]
+            elif str(payload.get("type") or "").strip() in SHOPPING_AD_TYPES:
+                params = {**(params or {}), "isList": "true"}
+                json_body = [payload]
+        elif entity_type == "ad_extension":
+            owner_id = str(snapshot.get("ownerId") or snapshot.get("nccAdgroupId") or snapshot.get("nccAdId") or "").strip()
+            params = {"ownerId": owner_id} if owner_id else None
+        res = _do_req("POST", api_key, secret_key, cid, endpoint, params=params, json_body=json_body)
+        if res.status_code in [200, 201, 204]:
+            success += 1
+            results.append(_result_item(idx, True, str((item or {}).get("id") or idx), "재등록 완료"))
+        else:
+            fail += 1
+            results.append(_result_item(idx, False, str((item or {}).get("id") or idx), f"재등록 실패: {_response_detail_text(res)}"))
+    _cache_invalidate(api_key, secret_key, cid)
+    return jsonify({"ok": fail == 0 and success > 0, "total": len(snapshots), "success": success, "fail": fail, "results": results, "message": f"삭제 되돌리기 완료 (재등록 성공 {success} / 실패 {fail})"}), (200 if success > 0 else 400)
 def _delete_failure_detail(res, entity_type: str = "") -> str:
     status = getattr(res, "status_code", None)
     raw = str(getattr(res, "text", "") or "").strip()
@@ -7374,7 +7979,12 @@ def index():
         accounts = df2.to_dict(orient="records")
     favicon_path = os.path.join(app.static_folder or os.path.join(BASE_DIR, "static"), "favicon", "favicon.ico")
     favicon_version = int(os.path.getmtime(favicon_path)) if os.path.exists(favicon_path) else 0
-    return render_template("index.html", accounts=accounts, favicon_version=favicon_version)
+    auth_defaults = {
+        "api_key": os.getenv("NAVER_API_KEY", ""),
+        "secret_key": os.getenv("NAVER_SECRET_KEY", ""),
+        "customer_id": os.getenv("NAVER_CUSTOMER_ID", ""),
+    }
+    return render_template("index.html", accounts=accounts, favicon_version=favicon_version, auth_defaults=auth_defaults)
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"ok": True, "service": "naver-bulk-manager-refresh"})
@@ -11850,40 +12460,124 @@ def apply_target_settings_bulk():
 def update_budget():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
-    entity_type, entity_ids, budget = d.get("entity_type"), d.get("entity_ids", []), int(d.get("budget", 0))
-    use_daily_budget = bool(d.get("use_daily_budget", budget > 0))
-    results = {"success": 0, "fail": 0}
+    entity_type = str(d.get("entity_type") or "").strip().lower()
+    entity_ids = _unique_keep_order([str(x or "").strip() for x in (d.get("entity_ids") or []) if str(x or "").strip()])
+    if entity_type not in {"campaign", "adgroup"}:
+        return jsonify({"error": "entity_type은 campaign 또는 adgroup 이어야 합니다."}), 400
+    if not entity_ids:
+        return jsonify({"error": "선택된 캠페인 또는 광고그룹이 없습니다."}), 400
+    try:
+        budget = int(float(str(d.get("budget", 0)).replace(",", "").strip() or 0))
+    except Exception:
+        return jsonify({"error": "예산은 숫자로 입력해주세요."}), 400
+    if budget < 0:
+        return jsonify({"error": "예산은 0원 이상으로 입력해주세요."}), 400
+    use_daily_budget = _normalize_bool_for_api(d.get("use_daily_budget"), budget > 0) and budget > 0
+    expected_budget = budget if use_daily_budget else 0
+    results = {"success": 0, "fail": 0, "unchanged": 0}
     detail_rows: List[Dict[str, Any]] = []
+    undo_items: List[Dict[str, Any]] = []
     entity_label = "캠페인" if entity_type == "campaign" else "광고그룹"
+
+    def _budget_matches(obj: Dict[str, Any] | None) -> bool:
+        if not isinstance(obj, dict):
+            return False
+        actual_use = _normalize_bool_for_api(obj.get("useDailyBudget"), False)
+        try:
+            actual_budget = int(float(obj.get("dailyBudget") or 0))
+        except Exception:
+            actual_budget = 0
+        if actual_use != use_daily_budget:
+            return False
+        return (not use_daily_budget) or actual_budget == expected_budget
+
+    def _verify_budget(uri: str) -> Tuple[bool, str]:
+        last_detail = ""
+        for idx in range(3):
+            if idx:
+                time.sleep(0.25 * idx)
+            r_verify = _do_req("GET", api_key, secret_key, cid, uri)
+            if r_verify.status_code != 200:
+                last_detail = f"검증 조회 실패: {_response_detail_text(r_verify)}"
+                continue
+            try:
+                verify_obj = r_verify.json() or {}
+            except Exception:
+                verify_obj = {}
+            if _budget_matches(verify_obj):
+                return True, ""
+            actual_use = _normalize_bool_for_api((verify_obj or {}).get("useDailyBudget"), False)
+            actual_budget = (verify_obj or {}).get("dailyBudget")
+            actual_label = "제한없음" if not actual_use else f"{actual_budget}원"
+            last_detail = f"검증 불일치: 현재 {actual_label}"
+        return False, last_detail or "검증 실패"
+
     for eid in entity_ids:
-        eid = str(eid).strip()
         uri = f"/ncc/campaigns/{eid}" if entity_type == "campaign" else f"/ncc/adgroups/{eid}"
         r_get = _do_req("GET", api_key, secret_key, cid, uri)
         if r_get.status_code != 200:
             results["fail"] += 1
-            detail_rows.append({"ok": False, "id": eid, "target": f"{entity_label} {eid}", "detail": f"조회 실패: {r_get.text}"})
+            detail_rows.append({"ok": False, "id": eid, "target": f"{entity_label} {eid}", "detail": f"조회 실패: {_response_detail_text(r_get)}"})
             continue
         obj = r_get.json()
         target_name = str((obj or {}).get("name") or eid)
+        old_use_daily_budget = _normalize_bool_for_api((obj or {}).get("useDailyBudget"), False)
+        try:
+            old_daily_budget = int(float((obj or {}).get("dailyBudget") or 0))
+        except Exception:
+            old_daily_budget = 0
+        if _budget_matches(obj):
+            results["unchanged"] += 1
+            expected_label = "제한없음" if not use_daily_budget else f"{expected_budget:,}원"
+            detail_rows.append({"ok": True, "id": eid, "name": target_name, "detail": f"이미 {expected_label}"})
+            continue
         obj["useDailyBudget"] = use_daily_budget
-        obj["dailyBudget"] = budget if use_daily_budget else 0
+        obj["dailyBudget"] = expected_budget
         if "budget" in obj:
             del obj["budget"]
-        r_put = _do_req("PUT", api_key, secret_key, cid, uri, params={"fields": "budget"}, json_body=obj)
-        if r_put.status_code == 200:
+        put_errors: List[str] = []
+        applied = False
+        for fields in ("budget", "dailyBudget,useDailyBudget"):
+            r_put = _do_req("PUT", api_key, secret_key, cid, uri, params={"fields": fields}, json_body=obj)
+            if r_put.status_code not in [200, 201, 204]:
+                put_errors.append(f"fields={fields}: {_response_detail_text(r_put)}")
+                continue
+            ok_verify, verify_detail = _verify_budget(uri)
+            if ok_verify:
+                applied = True
+                break
+            put_errors.append(f"fields={fields}: {verify_detail}")
+        if applied:
             results["success"] += 1
-            detail_rows.append({"ok": True, "id": eid, "name": target_name, "detail": f"예산 {budget:,}원 적용"})
+            undo_items.append({
+                "entity_type": entity_type,
+                "id": eid,
+                "use_daily_budget": old_use_daily_budget,
+                "daily_budget": old_daily_budget,
+            })
+            expected_label = "제한없음" if not use_daily_budget else f"{expected_budget:,}원"
+            detail_rows.append({"ok": True, "id": eid, "name": target_name, "detail": f"예산 {expected_label} 적용"})
         else:
             results["fail"] += 1
-            detail_rows.append({"ok": False, "id": eid, "name": target_name, "detail": f"변경 실패: {r_put.text}"})
+            detail_rows.append({"ok": False, "id": eid, "name": target_name, "detail": "변경 미반영: " + " | ".join(put_errors[:4])})
+    _cache_invalidate(api_key, secret_key, cid)
+    status = "success" if results["fail"] == 0 else ("partial" if results["success"] or results["unchanged"] else "error")
+    status_code = 200 if status == "success" else (207 if status == "partial" else 400)
     return jsonify({
-        "ok": True,
-        "message": f"총 {len(entity_ids)}개 예산 업데이트 성공: {results['success']}개 / 실패: {results['fail']}개",
+        "ok": results["fail"] == 0 and (results["success"] > 0 or results["unchanged"] > 0),
+        "status": status,
+        "message": f"총 {len(entity_ids)}개 예산 업데이트 완료 · 변경 {results['success']}개 / 유지 {results['unchanged']}개 / 실패 {results['fail']}개",
         "total": len(entity_ids),
         "success": results["success"],
+        "unchanged": results["unchanged"],
         "fail": results["fail"],
         "results": detail_rows,
-    })
+        "undo_operation": _make_undo_operation(
+            "restore_budget",
+            {"api_key": api_key, "secret_key": secret_key, "customer_id": cid, "items": undo_items},
+            "예산 변경 전으로 되돌리기",
+        ) if undo_items else None,
+    }), status_code
 def _normalize_schedule_days(values: Any) -> List[int]:
     out: List[int] = []
     if not isinstance(values, list):
@@ -13813,8 +14507,11 @@ def update_bid_mode_by_scope():
     entity_type = str(d.get("entity_type") or "adgroup").strip().lower()
     entity_ids = d.get("entity_ids") or []
     bid_mode = str(d.get("bid_mode") or "").strip().lower()
+    asset_type = str(d.get("asset_type") or "all").strip().lower()
     if bid_mode not in {"group", "individual"}:
         return jsonify({"error": "입찰가 설정 방식을 확인해주세요."}), 400
+    if asset_type not in {"all", "adgroup", "ad"}:
+        return jsonify({"error": "처리 대상을 확인해주세요."}), 400
     if not entity_ids:
         return jsonify({"error": "대상이 없습니다."}), 400
     adgroup_contexts, resolve_warnings = _resolve_adgroup_contexts(api_key, secret_key, cid, entity_type, entity_ids)
@@ -13827,8 +14524,8 @@ def update_bid_mode_by_scope():
         return jsonify({"ok": True, "message": "\n".join(lines)}), 200
 
     target_use_group = bid_mode == "group"
-    keyword_contexts = [ctx for ctx in adgroup_contexts if not _adgroup_uses_ad_level_bid(ctx.get("adgroup_type"))]
-    shopping_contexts = [ctx for ctx in adgroup_contexts if _adgroup_uses_ad_level_bid(ctx.get("adgroup_type"))]
+    keyword_contexts = [] if asset_type == "ad" else [ctx for ctx in adgroup_contexts if not _adgroup_uses_ad_level_bid(ctx.get("adgroup_type"))]
+    shopping_contexts = [] if asset_type == "adgroup" else [ctx for ctx in adgroup_contexts if _adgroup_uses_ad_level_bid(ctx.get("adgroup_type"))]
     keyword_groups = len(keyword_contexts)
     shopping_groups = len(shopping_contexts)
     kw_success = kw_fail = kw_skipped = 0
@@ -13973,8 +14670,9 @@ def update_bid_mode_by_scope():
                             err_details.append(f"[{name}] 입찰가 설정 방식 변경 실패: {r_put.text}")
 
     label = "그룹 입찰가 사용" if target_use_group else "개별 입찰가 사용"
+    asset_label = {"all": "광고그룹/소재 전체", "adgroup": "광고그룹만", "ad": "소재만"}.get(asset_type, "광고그룹/소재 전체")
     lines = [
-        f"입찰가 설정 방식 변경 완료! ({label})",
+        f"입찰가 설정 방식 변경 완료! ({asset_label} · {label})",
         f"파워링크/키워드 처리 광고그룹: {keyword_groups}개 | 쇼핑/소재 처리 광고그룹: {shopping_groups}개",
         f"키워드 변경 성공: {kw_success}개 / 실패: {kw_fail}개 / 유지: {kw_skipped}개",
         f"쇼핑 소재 변경 성공: {ad_success}개 / 실패: {ad_fail}개 / 유지: {ad_skipped}개",
@@ -15069,6 +15767,7 @@ def bulk_delete_by_parent():
         rows = [{"nccCampaignId": x} for x in campaign_parent_ids]
         if not rows:
             return jsonify({"error": "삭제할 캠페인을 좌측에서 1개 이상 체크해주세요."}), 400
+        undo_snapshots = _collect_delete_undo_snapshots(api_key, secret_key, cid, "campaign", rows)
         success, fail, results = _delete_payload_rows(api_key, secret_key, cid, "campaign", rows)
         return jsonify({
             "ok": True,
@@ -15079,6 +15778,7 @@ def bulk_delete_by_parent():
             "results": results,
             "message": f"캠페인 삭제 완료 (대상 {len(rows)}건 / 성공 {success} / 실패 {fail})",
             "patch": "delete-campaign-adgroup-v1-20260430",
+            "undo_operation": _delete_undo_operation(api_key, secret_key, cid, undo_snapshots) if success > 0 else None,
         })
 
     collect_errors: List[str] = []
@@ -15110,6 +15810,7 @@ def bulk_delete_by_parent():
             if collect_errors:
                 msg += "\n" + "\n".join(collect_errors[:10])
             return jsonify({"ok": True, "total": 0, "success": 0, "fail": 0, "results": [], "message": msg})
+        undo_snapshots = _collect_delete_undo_snapshots(api_key, secret_key, cid, "adgroup", rows)
         success, fail, results = _delete_payload_rows(api_key, secret_key, cid, "adgroup", rows)
         scope_bits = []
         if campaign_parent_ids:
@@ -15129,6 +15830,7 @@ def bulk_delete_by_parent():
             "results": results,
             "message": msg,
             "patch": "delete-campaign-adgroup-v1-20260430",
+            "undo_operation": _delete_undo_operation(api_key, secret_key, cid, undo_snapshots) if success > 0 else None,
         })
 
     rows: List[Dict[str, Any]] = []
@@ -15207,6 +15909,7 @@ def bulk_delete_by_parent():
             msg += "\n" + "\n".join(collect_errors[:10])
         return jsonify({"ok": True, "total": 0, "success": 0, "fail": 0, "results": [], "message": msg})
 
+    undo_snapshots = _collect_delete_undo_snapshots(api_key, secret_key, cid, entity_type, rows)
     success, fail, results = _delete_payload_rows(api_key, secret_key, cid, entity_type, rows)
     msg_target = {
         "keyword": "키워드",
@@ -15231,6 +15934,7 @@ def bulk_delete_by_parent():
         "results": results,
         "message": msg,
         "patch": "bulk-delete-extension-types-v20-20260429",
+        "undo_operation": _delete_undo_operation(api_key, secret_key, cid, undo_snapshots) if success > 0 else None,
     })
 def bulk_register():
     d = request.json or {}
@@ -15376,6 +16080,7 @@ def bulk_delete_powerlink_ads_excel():
         return jsonify({"error": f"소재ID 엑셀 처리 실패: {exc}"}), 400
 
     rows = [{"nccAdId": ad_id} for ad_id in ad_ids]
+    undo_snapshots = _collect_delete_undo_snapshots(api_key, secret_key, cid, "ad", rows)
     # 파일 기반 소재 삭제는 실패 원인 추적이 중요해 동시 삭제를 줄인다.
     # requests Session/네트워크 레벨의 일시 오류가 '알 수 없는 오류'로 뭉개지는 상황도 함께 완화한다.
     success, fail, results = _delete_payload_rows(api_key, secret_key, cid, "ad", rows, max_workers=1)
@@ -15393,6 +16098,7 @@ def bulk_delete_powerlink_ads_excel():
         "warnings": warnings,
         "message": "\n".join(msg_lines),
         "patch": "powerlink-ad-id-excel-delete-v2-20260430",
+        "undo_operation": _delete_undo_operation(api_key, secret_key, cid, undo_snapshots) if success > 0 else None,
     })
 
 
@@ -15494,6 +16200,7 @@ def bulk_delete_extensions_excel():
     except Exception as exc:
         return jsonify({"error": f"확장소재ID 엑셀 처리 실패: {exc}"}), 400
     rows = [{"adExtensionId": ext_id} for ext_id in ext_ids]
+    undo_snapshots = _collect_delete_undo_snapshots(api_key, secret_key, cid, "ad_extension", rows)
     success, fail, results = _delete_payload_rows(api_key, secret_key, cid, "ad_extension", rows, max_workers=1)
     msg_lines = [f"확장소재ID 엑셀 대량삭제 완료 (대상 {len(rows)}건 / 성공 {success} / 실패 {fail})"]
     if warnings:
@@ -15509,6 +16216,7 @@ def bulk_delete_extensions_excel():
         "warnings": warnings,
         "message": "\n".join(msg_lines),
         "patch": "bulk-extension-upload-delete-v1-20260430",
+        "undo_operation": _delete_undo_operation(api_key, secret_key, cid, undo_snapshots) if success > 0 else None,
     })
 
 def bulk_delete():
@@ -15523,8 +16231,17 @@ def bulk_delete():
         rows = _read_table_text(raw_text)
     if not rows:
         return jsonify({"error": "삭제할 데이터가 없습니다."}), 400
+    undo_snapshots = _collect_delete_undo_snapshots(api_key, secret_key, cid, entity_type, rows)
     success, fail, results = _delete_payload_rows(api_key, secret_key, cid, entity_type, rows)
-    return jsonify({"ok": True, "entity_type": entity_type, "total": len(rows), "success": success, "fail": fail, "results": results})
+    return jsonify({
+        "ok": True,
+        "entity_type": entity_type,
+        "total": len(rows),
+        "success": success,
+        "fail": fail,
+        "results": results,
+        "undo_operation": _delete_undo_operation(api_key, secret_key, cid, undo_snapshots) if success > 0 else None,
+    })
 def _set_user_lock_for_entity(api_key: str, secret_key: str, cid: str, entity_type: str, entity_id: str, enabled: bool) -> Tuple[bool, str]:
     entity_id = str(entity_id or "").strip()
     if not entity_id:
@@ -16231,8 +16948,17 @@ def delete_selected():
         return jsonify({"error": "지원하지 않는 선택삭제 유형입니다."}), 400
     for x in ids:
         rows.append({key_name: x})
+    undo_snapshots = _collect_delete_undo_snapshots(api_key, secret_key, cid, entity_type, rows)
     success, fail, results = _delete_payload_rows(api_key, secret_key, cid, entity_type, rows)
-    return jsonify({"ok": True, "total": len(rows), "success": success, "fail": fail, "results": results})
+    return jsonify({
+        "ok": True,
+        "entity_type": entity_type,
+        "total": len(rows),
+        "success": success,
+        "fail": fail,
+        "results": results,
+        "undo_operation": _delete_undo_operation(api_key, secret_key, cid, undo_snapshots) if success > 0 else None,
+    })
 @app.route("/sample_headers", methods=["GET"])
 def sample_headers():
     entity_type = request.args.get("entity_type", "campaign")
@@ -16289,6 +17015,7 @@ _CHANGE_SERVICE = ChangeService({
     "update_adgroup_options": update_adgroup_options,
     "update_powerlink_device_bid_weights": update_powerlink_device_bid_weights,
     "update_contents_network_bid_amt": update_contents_network_bid_amt,
+    "bulk_update_shopping_ad_bids": bulk_update_shopping_ad_bids,
     "apply_target_settings_bulk": apply_target_settings_bulk,
     "update_budget": update_budget,
     "update_schedule": update_schedule,
@@ -16371,10 +17098,11 @@ def _open_external_browser_window(url: str) -> None:
 
 if __name__ == "__main__":
     os.makedirs(SAMPLES_DIR, exist_ok=True)
-    port = _pick_available_port(5000)
+    default_port = int(os.environ.get("DA_TARGET_PORT", "5001"))
+    port = _pick_available_port(default_port)
     url = f"http://127.0.0.1:{port}/"
-    if port != 5000:
-        print(f"Port 5000 is already in use. Running on {url}")
+    if port != default_port:
+        print(f"Port {default_port} is already in use. Running on {url}")
     print(f"Opening browser window: {url}")
     threading.Timer(1.0, _open_external_browser_window, args=(url,)).start()
     app.run(debug=not getattr(sys, "frozen", False), port=port, use_reloader=False)
