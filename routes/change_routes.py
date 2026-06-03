@@ -24,6 +24,7 @@ def create_change_blueprint(service):
         ("/copy_restricted_media_settings", "copy_restricted_media_settings"),
         ("/update_powerlink_device_bid_weights", "update_powerlink_device_bid_weights"),
         ("/update_contents_network_bid_amt", "update_contents_network_bid_amt"),
+        ("/bulk_update_shopping_ad_bids", "bulk_update_shopping_ad_bids"),
         ("/apply_target_settings_bulk", "apply_target_settings_bulk"),
         ("/update_budget", "update_budget"),
         ("/update_schedule", "update_schedule"),
@@ -45,6 +46,7 @@ def create_change_blueprint(service):
         ("/set_asset_state_by_ids", "set_asset_state_by_ids"),
         ("/update_ad_product_name", "update_ad_product_name"),
         ("/update_ad_product_names_bulk", "update_ad_product_names_bulk"),
+        ("/update_shopping_ad_bid", "update_shopping_ad_bid"),
     ]
     # Register the main POST routes.
     # Some older local builds or cached HTML can call the restricted-media URLs

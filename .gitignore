@@ -1,0 +1,37 @@
+# Python runtime/cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+
+# Build artifacts
+dist/
+build/
+*.spec
+*.exe
+
+# Logs and runtime history
+*.log
+server_*.err.log
+server_*.out.log
+logs/
+
+# Local credentials / account data
+accounts.csv
+.env
+.env.*
+
+# Local caches / generated scratch data
+shopping_nvmid_cache.json
+.lazyweb/
+off_group_partial_copy_fix_patch/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

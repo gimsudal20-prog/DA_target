@@ -16,6 +16,7 @@ import time
 import threading
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date, timedelta
 from typing import Any, Dict, Iterable, List, Tuple, Optional
 from urllib.parse import urlparse, urlencode
 import pandas as pd
@@ -49,6 +50,8 @@ from routes.detail_lookup_routes import create_detail_lookup_blueprint
 from services.detail_lookup_service import DetailLookupService
 from routes.account_lookup_routes import create_account_lookup_blueprint
 from services.account_lookup_service import AccountLookupService
+from routes.purchase_report_routes import create_purchase_report_blueprint
+from services.purchase_report_service import PurchaseReportService
 from routes.registration_routes import create_registration_blueprint
 from services.registration_service import RegistrationService
 from routes.change_routes import create_change_blueprint
@@ -181,12 +184,13 @@ LOG_ACTION_LABELS = {
     "/set_asset_state_by_ids": "ID별 소재/확장소재 상태 변경",
     "/update_ad_product_name": "노출용 상품명 수정",
     "/update_ad_product_names_bulk": "노출용 상품명 대량 변경",
+    "/update_shopping_ad_bid": "쇼핑 소재 입찰가 변경",
     "/delete_selected": "선택 삭제",
     "/clear_action_logs": "로그 비우기",
 }
 ACTION_LOG_EXCLUDED_PATHS = {
     "/get_campaigns", "/get_adgroups", "/get_biz_channels", "/get_keywords", "/get_ads",
-    "/get_ad_extensions", "/get_restricted_keywords", "/find_powerlink_duplicate_keywords", "/find_account_powerlink_duplicate_keywords", "/get_powerlink_keyword_stats", "/search_powerlink_keywords", "/search_adgroups_global", "/export_powerlink_keywords_excel", "/query_account_ads", "/query_account_extensions", "/query_account_keywords", "/export_account_ads_excel", "/export_account_extensions_excel", "/export_account_keywords_excel", "/get_action_logs", "/health", "/favicon.ico", "/",
+    "/get_ad_extensions", "/get_restricted_keywords", "/find_powerlink_duplicate_keywords", "/find_account_powerlink_duplicate_keywords", "/get_powerlink_keyword_stats", "/search_powerlink_keywords", "/search_adgroups_global", "/export_powerlink_keywords_excel", "/query_account_ads", "/query_account_extensions", "/query_account_keywords", "/export_account_ads_excel", "/export_account_extensions_excel", "/export_account_keywords_excel", "/get_purchase_report_current", "/export_purchase_report_current_excel", "/get_action_logs", "/health", "/favicon.ico", "/",
     "/sample_headers", "/delete_sample_headers", "/clear_action_logs",
 }
 def _safe_json_body() -> Dict[str, Any]:
@@ -255,6 +259,8 @@ def _action_summary(path: str, payload: Dict[str, Any]) -> str:
     if path == "/update_ad_product_names_bulk":
         rows = payload.get("rows") or []
         return f"그룹={len(rows)} | 상품명 대량 변경"
+    if path == "/update_shopping_ad_bid":
+        return f"소재ID={str(payload.get('ad_id') or '').strip()} | 입찰가={payload.get('bid_amt')}"
     if path in {"/set_ads_state_by_scope", "/set_ad_extensions_state_by_scope", "/set_asset_state_by_ids"}:
         camp_ids = payload.get('campaign_ids') or []
         adg_ids = payload.get('adgroup_ids') or []
@@ -2843,6 +2849,574 @@ def _get_powerlink_keyword_stats(api_key: str, secret_key: str, cid: str, campai
         "skipped": skipped,
         "errors": errors[:50],
     }
+PERFORMANCE_STAT_FIELDS = ["impCnt", "clkCnt", "salesAmt", "cpc", "ccnt", "crto", "convAmt", "ror", "purchaseCcnt", "purchaseConvAmt", "purchaseRor"]
+PERFORMANCE_PURCHASE_FIELDS = ["ccnt", "convAmt", "salesAmt", "ror"]
+PERFORMANCE_CAMPAIGN_TYPES = {
+    "WEB_SITE": "파워링크",
+    "SHOPPING": "쇼핑검색",
+}
+PERFORMANCE_METRIC_ALIASES = {
+    "impCnt": ("impCnt", "impressionCnt", "impressions", "impression", "노출"),
+    "clkCnt": ("clkCnt", "clickCnt", "clicks", "click", "클릭"),
+    "salesAmt": ("salesAmt", "cost", "spend", "adCost", "totalCost", "총비용"),
+    "cpc": ("cpc", "avgCpc", "averageCpc", "clickCost", "클릭비용"),
+    "ccnt": ("ccnt", "convCnt", "conversionCnt", "conversions", "conversion", "전환수"),
+    "convAmt": ("convAmt", "conversionValue", "conversionAmt", "salesByConv", "convSalesAmt", "전환매출"),
+    "purchaseCcnt": ("purchaseCcnt", "purchaseCnt", "purchaseConvCnt", "purchaseConversions"),
+    "purchaseConvAmt": ("purchaseConvAmt", "purchaseAmt", "purchaseAmount", "purchaseConversionValue"),
+    "purchaseRor": ("purchaseRor", "purchaseRoas", "purchaseROAS"),
+}
+PERFORMANCE_STAT_ROW_LIST_KEYS = ("data", "rows", "items", "stats", "summaries", "results", "breakdowns", "breakdown")
+PERFORMANCE_STAT_ROW_DICT_KEYS = ("metrics", "metric", "summary", "stat", "fields", "values", "result", "breakdown", "event")
+
+def _performance_deep_values(value: Any, keys: Iterable[str], max_depth: int = 6) -> List[Any]:
+    key_set = {str(k) for k in keys if str(k or "").strip()}
+    found: List[Any] = []
+
+    def walk(node: Any, depth: int):
+        if depth < 0:
+            return
+        if isinstance(node, dict):
+            raw = node.get("raw")
+            for k, v in node.items():
+                if str(k) in key_set and v not in (None, ""):
+                    found.append(v)
+                if isinstance(v, (dict, list)):
+                    walk(v, depth - 1)
+            if isinstance(raw, dict) and raw is not node:
+                walk(raw, depth - 1)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, depth - 1)
+
+    walk(value, max_depth)
+    return found
+
+def _performance_deep_value(value: Any, keys: Iterable[str]) -> Any:
+    for found in _performance_deep_values(value, keys):
+        if found not in (None, ""):
+            return found
+    return None
+
+def _performance_row_value(row: Dict[str, Any], canonical_key: str) -> Any:
+    aliases = PERFORMANCE_METRIC_ALIASES.get(canonical_key, (canonical_key,))
+    value = _performance_deep_value(row or {}, aliases)
+    if value not in (None, ""):
+        return value
+    return None
+
+def _performance_nested_value(row: Dict[str, Any], *keys: str) -> Any:
+    return _performance_deep_value(row or {}, keys) or ""
+
+def _performance_target_id(row: Dict[str, Any], kind: str) -> str:
+    kind = str(kind or "").strip().lower()
+    if kind == "adgroup":
+        keys = ("nccAdgroupId", "adgroupId", "adGroupId", "id")
+        prefix = "grp-"
+    else:
+        keys = ("nccCampaignId", "campaignId", "id")
+        prefix = "cmp-"
+    candidates: List[Tuple[str, str]] = []
+    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+    for source in (row, raw):
+        for key in keys:
+            value = str((source or {}).get(key) or "").strip()
+            if value:
+                candidates.append((key, value))
+    for _, value in candidates:
+        if value.lower().startswith(prefix):
+            return value
+    for key, value in candidates:
+        if key != "id":
+            return value
+    return ""
+
+def _performance_stats_id_is_valid(value: Any, kind: str = "") -> bool:
+    value_s = str(value or "").strip().lower()
+    if not value_s:
+        return False
+    kind_s = str(kind or "").strip().lower()
+    if kind_s == "campaign":
+        return value_s.startswith("cmp-")
+    if kind_s == "adgroup":
+        return value_s.startswith("grp-")
+    return bool(re.match(r"^(cmp|grp|nkw|nad)-", value_s))
+
+def _performance_campaign_type_label(value: Any) -> str:
+    key = str(value or "").strip().upper()
+    if _is_shopping_campaign_type(key):
+        key = "SHOPPING"
+    return PERFORMANCE_CAMPAIGN_TYPES.get(key, label_campaign_type(key, default=key or "기타"))
+
+def _performance_campaign_bucket(value: Any) -> str:
+    key = str(value or "").strip().upper()
+    if _is_shopping_campaign_type(key):
+        return "SHOPPING"
+    if key in {"WEB_SITE", "POWERLINK", "WEB"}:
+        return "WEB_SITE"
+    return key
+
+def _performance_number(value: Any) -> float:
+    if value is None or value == "":
+        return 0.0
+    if isinstance(value, (int, float)):
+        try:
+            return float(value)
+        except Exception:
+            return 0.0
+    raw = str(value).strip().replace(",", "").replace("%", "")
+    if not raw:
+        return 0.0
+    try:
+        return float(raw)
+    except Exception:
+        return 0.0
+
+def _performance_int(value: Any) -> int:
+    return int(round(_performance_number(value)))
+
+def _performance_date_range(preset: str, since: Any = "", until: Any = "") -> Tuple[str, str, str]:
+    today = date.today()
+    preset_norm = str(preset or "today").strip().lower()
+    if preset_norm in {"custom", "direct", "range"}:
+        since_s = str(since or "").strip()
+        until_s = str(until or "").strip() or since_s
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", since_s or "") or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", until_s or ""):
+            raise ValueError("직접 기간은 YYYY-MM-DD 형식으로 입력해주세요.")
+        return since_s, until_s, "직접 기간"
+    if preset_norm in {"yesterday", "어제"}:
+        d = today - timedelta(days=1)
+        return d.isoformat(), d.isoformat(), "어제"
+    if preset_norm in {"last7days", "last_7_days", "7days", "최근7일"}:
+        return (today - timedelta(days=6)).isoformat(), today.isoformat(), "최근 7일"
+    return today.isoformat(), today.isoformat(), "오늘"
+
+def _normalize_performance_scope(value: Any) -> str:
+    s = str(value or "account").strip().lower()
+    if s in {"campaign", "campaigns", "selected_campaign", "selected_campaigns"}:
+        return "selected_campaigns"
+    if s in {"adgroup", "adgroups", "selected_adgroup", "selected_adgroups"}:
+        return "selected_adgroups"
+    return "account"
+
+def _normalize_performance_level(value: Any) -> str:
+    s = str(value or "type").strip().lower()
+    if s in {"campaign", "campaigns"}:
+        return "campaign"
+    if s in {"adgroup", "adgroups", "group", "groups"}:
+        return "adgroup"
+    return "type"
+
+def _normalize_performance_type_filter(value: Any) -> str:
+    s = str(value or "all").strip().upper()
+    if s in {"WEB_SITE", "POWERLINK", "파워링크"}:
+        return "WEB_SITE"
+    if s in {"SHOPPING", "쇼핑", "쇼핑검색"}:
+        return "SHOPPING"
+    return "ALL"
+
+def _flatten_stat_row(row: Dict[str, Any], context: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    out: Dict[str, Any] = dict(context or {})
+    for key, value in (row or {}).items():
+        if isinstance(value, dict) and key in PERFORMANCE_STAT_ROW_DICT_KEYS:
+            for nested_key, nested_value in value.items():
+                out.setdefault(nested_key, nested_value)
+        elif key not in set(PERFORMANCE_STAT_ROW_DICT_KEYS) | set(PERFORMANCE_STAT_ROW_LIST_KEYS):
+            out[key] = value
+    return out
+
+def _stat_row_context(row: Dict[str, Any], context: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    out = dict(context or {})
+    for key, value in (row or {}).items():
+        if isinstance(value, (dict, list)):
+            continue
+        if value not in (None, ""):
+            out.setdefault(key, value)
+    return out
+
+def _stat_row_has_metric(row: Dict[str, Any]) -> bool:
+    return any(_performance_row_value(row, key) not in (None, "") for key in PERFORMANCE_METRIC_ALIASES.keys())
+
+def _collect_stat_rows_from_json(value: Any, context: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
+    if isinstance(value, list):
+        rows: List[Dict[str, Any]] = []
+        for item in value:
+            rows.extend(_collect_stat_rows_from_json(item, context))
+        return rows
+    if not isinstance(value, dict):
+        return []
+    rows: List[Dict[str, Any]] = []
+    next_context = _stat_row_context(value, context)
+    for key in PERFORMANCE_STAT_ROW_LIST_KEYS:
+        if key in value:
+            rows.extend(_collect_stat_rows_from_json(value.get(key), next_context))
+    flat = _flatten_stat_row(value, context)
+    flat_has_metric = _stat_row_has_metric(flat)
+    if flat_has_metric or (not rows and _stat_row_id(flat)):
+        rows.insert(0, flat)
+    if not rows:
+        for key in PERFORMANCE_STAT_ROW_DICT_KEYS:
+            if key in value:
+                rows.extend(_collect_stat_rows_from_json(value.get(key), next_context))
+    return rows
+
+def _stats_rows_from_response(res: Any) -> List[Dict[str, Any]]:
+    try:
+        data = res.json()
+    except Exception:
+        return []
+    return _collect_stat_rows_from_json(data)
+
+def _stat_row_id(row: Dict[str, Any]) -> str:
+    for key in ("id", "entityId", "statId", "nccId", "nccCampaignId", "campaignId", "nccAdgroupId", "adgroupId", "adGroupId", "nccKeywordId", "keywordId", "nccAdId", "adId"):
+        value = str(_performance_nested_value(row or {}, key) or "").strip()
+        if value:
+            return value
+    return ""
+
+def _fetch_stats_rows(api_key: str, secret_key: str, cid: str, ids: List[str], fields: List[str], since: str, until: str, breakdown: str = "", id_kind: str = ""):
+    rows: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    invalid_ids: List[str] = []
+    id_list: List[str] = []
+    for x in ids:
+        value = str(x or "").strip()
+        if not value:
+            continue
+        if id_kind and not _performance_stats_id_is_valid(value, id_kind):
+            invalid_ids.append(value)
+            continue
+        id_list.append(value)
+    if invalid_ids:
+        sample = ", ".join(invalid_ids[:5])
+        errors.append(f"통계 조회에서 유효하지 않은 ID {len(invalid_ids)}개 제외: {sample}")
+    def request_batch(batch: List[str]):
+        params = {
+            "ids": ",".join(batch),
+            "fields": json.dumps(fields),
+            "timeRange": json.dumps({"since": since, "until": until}),
+            "timeIncrement": "allDays",
+        }
+        if breakdown:
+            params["breakdown"] = breakdown
+        return _do_req("GET", api_key, secret_key, cid, "/stats", params=params)
+
+    for start in range(0, len(id_list), 100):
+        batch = id_list[start:start + 100]
+        res = request_batch(batch)
+        if getattr(res, "status_code", 0) != 200:
+            if len(batch) <= 1:
+                errors.append(_short_log_text(getattr(res, "text", ""), 500) or f"/stats {getattr(res, 'status_code', '')}")
+                continue
+            recovered = 0
+            failed: List[str] = []
+            for one_id in batch:
+                one_res = request_batch([one_id])
+                if getattr(one_res, "status_code", 0) == 200:
+                    rows.extend(_stats_rows_from_response(one_res))
+                    recovered += 1
+                else:
+                    detail = _short_log_text(getattr(one_res, "text", ""), 220) or f"/stats {getattr(one_res, 'status_code', '')}"
+                    failed.append(f"{one_id}: {detail}")
+            if failed:
+                errors.append(f"통계 배치 일부 실패: 정상 {recovered}개, 제외 {len(failed)}개")
+                errors.extend(failed[:5])
+            continue
+        rows.extend(_stats_rows_from_response(res))
+    return rows, errors
+
+def _fetch_stats_rows_for_targets(api_key: str, secret_key: str, cid: str, targets: List[Dict[str, Any]], fields: List[str], since: str, until: str, breakdown: str = "", id_kind: str = ""):
+    rows: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    grouped_ids: Dict[str, List[str]] = {}
+    seen_by_group: Dict[str, set[str]] = defaultdict(set)
+    for target in targets or []:
+        target_id = str((target or {}).get("id") or "").strip()
+        if not target_id:
+            continue
+        group_key = str((target or {}).get("campaign_type") or "UNKNOWN")
+        if target_id in seen_by_group[group_key]:
+            continue
+        seen_by_group[group_key].add(target_id)
+        grouped_ids.setdefault(group_key, []).append(target_id)
+    for id_group in grouped_ids.values():
+        group_rows, group_errors = _fetch_stats_rows(api_key, secret_key, cid, id_group, fields, since, until, breakdown=breakdown, id_kind=id_kind)
+        rows.extend(group_rows)
+        errors.extend(group_errors)
+    return rows, errors
+
+def _build_empty_perf_metric() -> Dict[str, Any]:
+    return {
+        "impCnt": 0,
+        "clkCnt": 0,
+        "salesAmt": 0,
+        "cpc": 0,
+        "purchaseCcnt": 0,
+        "purchaseConvAmt": 0,
+        "ccnt": 0,
+        "convAmt": 0,
+    }
+
+def _add_stat_to_metric(metric: Dict[str, Any], row: Dict[str, Any]):
+    metric["impCnt"] += _performance_int(_performance_row_value(row, "impCnt"))
+    metric["clkCnt"] += _performance_int(_performance_row_value(row, "clkCnt"))
+    metric["salesAmt"] += _performance_int(_performance_row_value(row, "salesAmt"))
+    metric["ccnt"] += _performance_number(_performance_row_value(row, "ccnt"))
+    metric["convAmt"] += _performance_int(_performance_row_value(row, "convAmt"))
+    metric["purchaseCcnt"] += _performance_number(_performance_row_value(row, "purchaseCcnt"))
+    metric["purchaseConvAmt"] += _performance_int(_performance_row_value(row, "purchaseConvAmt"))
+
+def _add_purchase_stat_to_metric(metric: Dict[str, Any], row: Dict[str, Any]):
+    purchase_count = _performance_row_value(row, "purchaseCcnt")
+    purchase_amount = _performance_row_value(row, "purchaseConvAmt")
+    metric["purchaseCcnt"] += _performance_number(purchase_count if purchase_count not in (None, "") else _performance_row_value(row, "ccnt"))
+    metric["purchaseConvAmt"] += _performance_int(purchase_amount if purchase_amount not in (None, "") else _performance_row_value(row, "convAmt"))
+
+def _finalize_perf_metric(metric: Dict[str, Any]) -> Dict[str, Any]:
+    imp = _performance_number(metric.get("impCnt"))
+    clicks = _performance_number(metric.get("clkCnt"))
+    cost = _performance_number(metric.get("salesAmt"))
+    total_conv_amt = _performance_number(metric.get("convAmt"))
+    purchase_conv_amt = _performance_number(metric.get("purchaseConvAmt"))
+    metric["ctr"] = round((clicks / imp * 100) if imp > 0 else 0, 2)
+    metric["cpc"] = round((cost / clicks) if clicks > 0 else 0, 2)
+    metric["purchaseRor"] = round((purchase_conv_amt / cost * 100) if cost > 0 else 0, 2)
+    metric["ror"] = round((total_conv_amt / cost * 100) if cost > 0 else 0, 2)
+    metric["ccnt"] = round(_performance_number(metric.get("ccnt")), 2)
+    metric["purchaseCcnt"] = round(_performance_number(metric.get("purchaseCcnt")), 2)
+    return metric
+
+PERFORMANCE_PURCHASE_EVENT_KEYS = ("eventCode", "eventName", "eventType", "conversionType", "convType", "conversionName", "name", "type")
+
+def _row_has_purchase_event_identifier(row: Dict[str, Any]) -> bool:
+    return any(str(x or "").strip() for x in _performance_deep_values(row or {}, PERFORMANCE_PURCHASE_EVENT_KEYS))
+
+def _row_matches_purchase_event(row: Dict[str, Any], configured_codes: List[str]) -> bool:
+    candidates = _performance_deep_values(row or {}, PERFORMANCE_PURCHASE_EVENT_KEYS)
+    normalized = [str(x or "").strip().lower() for x in candidates if str(x or "").strip()]
+    if configured_codes:
+        code_set = {str(x or "").strip().lower() for x in configured_codes if str(x or "").strip()}
+        return any(x in code_set or x.replace(" ", "") in code_set for x in normalized)
+    return any(("구매" in x or "purchase" in x or "order" in x or "pay" in x or "결제" in x) for x in normalized)
+
+def _collect_performance_targets(api_key: str, secret_key: str, cid: str, scope: str, level: str, type_filter: str, campaign_ids: List[str], adgroup_ids: List[str]):
+    res_camp, campaign_rows = _fetch_campaigns(api_key, secret_key, cid)
+    if res_camp.status_code != 200:
+        raise RuntimeError(f"캠페인 조회 실패: {res_camp.text}")
+    campaign_map: Dict[str, Dict[str, Any]] = {}
+    for row in campaign_rows or []:
+        camp_id = _performance_target_id(row, "campaign")
+        if camp_id:
+            campaign_map[camp_id] = row
+    selected_campaign_ids = [str(x or "").strip() for x in (campaign_ids or []) if str(x or "").strip()]
+    selected_adgroup_ids = [str(x or "").strip() for x in (adgroup_ids or []) if str(x or "").strip()]
+    if scope == "selected_campaigns" and not selected_campaign_ids:
+        raise ValueError("선택 캠페인 조회를 사용하려면 좌측에서 캠페인을 체크해주세요.")
+    if scope == "selected_adgroups" and not selected_adgroup_ids:
+        raise ValueError("선택 광고그룹 조회를 사용하려면 좌측에서 광고그룹을 체크해주세요.")
+    if scope == "account":
+        scan_campaign_ids = list(campaign_map.keys())
+    elif scope == "selected_campaigns":
+        scan_campaign_ids = [x for x in selected_campaign_ids if x in campaign_map]
+    else:
+        scan_campaign_ids = list(campaign_map.keys())
+    if type_filter != "ALL":
+        scan_campaign_ids = [cid0 for cid0 in scan_campaign_ids if _performance_campaign_bucket((campaign_map.get(cid0) or {}).get("campaignTp")) == type_filter]
+    target_rows: List[Dict[str, Any]] = []
+    warnings: List[str] = []
+    if level in {"type", "campaign"}:
+        for camp_id in scan_campaign_ids:
+            camp = campaign_map.get(camp_id) or {}
+            camp_type = _performance_campaign_bucket(camp.get("campaignTp"))
+            if type_filter != "ALL" and camp_type != type_filter:
+                continue
+            target_rows.append({
+                "id": camp_id,
+                "name": str(camp.get("name") or camp_id),
+                "campaign_id": camp_id,
+                "campaign_name": str(camp.get("name") or camp_id),
+                "campaign_type": camp_type,
+                "campaign_type_label": _performance_campaign_type_label(camp_type),
+            })
+        return target_rows, warnings
+    max_workers = max(1, min(FAST_IO_WORKERS, len(scan_campaign_ids) or 1))
+    selected_adgroup_set = set(selected_adgroup_ids)
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        future_map = {
+            ex.submit(_fetch_adgroups, api_key, secret_key, cid, camp_id, False): camp_id
+            for camp_id in scan_campaign_ids
+        }
+        for fut in as_completed(future_map):
+            camp_id = future_map[fut]
+            camp = campaign_map.get(camp_id) or {}
+            camp_type = _performance_campaign_bucket(camp.get("campaignTp"))
+            try:
+                res_adg, adg_rows = fut.result()
+            except Exception as e:
+                warnings.append(f"[{camp.get('name') or camp_id}] 광고그룹 조회 실패: {e}")
+                continue
+            if res_adg.status_code != 200:
+                warnings.append(f"[{camp.get('name') or camp_id}] 광고그룹 조회 실패: {res_adg.text}")
+                continue
+            for adg in adg_rows or []:
+                adg_id = _performance_target_id(adg, "adgroup")
+                if not adg_id:
+                    continue
+                if scope == "selected_adgroups" and adg_id not in selected_adgroup_set:
+                    continue
+                adgroup_type = str(adg.get("adgroupType") or "").upper()
+                target_rows.append({
+                    "id": adg_id,
+                    "name": str(adg.get("name") or adg_id),
+                    "campaign_id": camp_id,
+                    "campaign_name": str(camp.get("name") or camp_id),
+                    "campaign_type": camp_type,
+                    "campaign_type_label": _performance_campaign_type_label(camp_type),
+                    "adgroup_type": adgroup_type,
+                    "adgroup_id": adg_id,
+                    "adgroup_name": str(adg.get("name") or adg_id),
+                })
+    shopping_target_rows = [
+        row for row in target_rows
+        if str(row.get("campaign_type") or "").upper() == "SHOPPING"
+        or _adgroup_uses_ad_level_bid(str(row.get("adgroup_type") or ""))
+    ]
+    if shopping_target_rows:
+        max_ad_workers = max(1, min(FAST_IO_WORKERS, len(shopping_target_rows)))
+        with ThreadPoolExecutor(max_workers=max_ad_workers) as ex:
+            future_map = {
+                ex.submit(_fetch_ads, api_key, secret_key, cid, str(row.get("adgroup_id") or row.get("id") or "")): row
+                for row in shopping_target_rows
+            }
+            for fut in as_completed(future_map):
+                row = future_map[fut]
+                adg_id = str(row.get("adgroup_id") or row.get("id") or "")
+                try:
+                    res_ads, ads = fut.result()
+                except Exception as e:
+                    row["ad_count"] = None
+                    if len(warnings) < 10:
+                        warnings.append(f"[{row.get('adgroup_name') or adg_id}] 소재 조회 실패: {e}")
+                    continue
+                if res_ads.status_code != 200:
+                    row["ad_count"] = None
+                    if len(warnings) < 10:
+                        warnings.append(f"[{row.get('adgroup_name') or adg_id}] 소재 조회 실패: {res_ads.text}")
+                    continue
+                row["ad_count"] = len(ads or [])
+    if scope == "selected_adgroups":
+        found = {row["id"] for row in target_rows}
+        missing = [x for x in selected_adgroup_ids if x not in found]
+        if missing:
+            warnings.append(f"선택 광고그룹 {len(missing)}개를 찾지 못했거나 선택한 유형에 포함되지 않습니다.")
+    return target_rows, warnings
+
+def _get_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dict[str, Any]):
+    scope = _normalize_performance_scope(payload.get("target_scope") or payload.get("scope"))
+    level = _normalize_performance_level(payload.get("result_level") or payload.get("level"))
+    type_filter = _normalize_performance_type_filter(payload.get("campaign_type") or payload.get("type_filter"))
+    since, until, date_label = _performance_date_range(payload.get("date_preset"), payload.get("since"), payload.get("until"))
+    campaign_ids = [str(x or "").strip() for x in (payload.get("campaign_ids") or []) if str(x or "").strip()]
+    adgroup_ids = [str(x or "").strip() for x in (payload.get("adgroup_ids") or []) if str(x or "").strip()]
+    purchase_event_codes = _split_filter_words(payload.get("purchase_event_code") or payload.get("purchase_event_codes"))
+    target_rows, warnings = _collect_performance_targets(api_key, secret_key, cid, scope, level, type_filter, campaign_ids, adgroup_ids)
+    ids = [row["id"] for row in target_rows]
+    if not ids:
+        return {
+            "message": "조회 대상이 없습니다.",
+            "rows": [],
+            "summary": _finalize_perf_metric(_build_empty_perf_metric()),
+            "warnings": warnings,
+            "errors": [],
+            "scope": scope,
+            "result_level": level,
+            "campaign_type": type_filter,
+            "since": since,
+            "until": until,
+            "date_label": date_label,
+        }
+    stats_id_kind = "adgroup" if level == "adgroup" else "campaign"
+    use_purchase_event_breakdown = bool(purchase_event_codes)
+    stats_fields = PERFORMANCE_STAT_FIELDS
+    if use_purchase_event_breakdown:
+        stats_fields = [field for field in PERFORMANCE_STAT_FIELDS if field not in {"purchaseCcnt", "purchaseConvAmt", "purchaseRor"}]
+    stats_rows, errors = _fetch_stats_rows_for_targets(api_key, secret_key, cid, target_rows, stats_fields, since, until, id_kind=stats_id_kind)
+    purchase_rows: List[Dict[str, Any]] = []
+    if use_purchase_event_breakdown:
+        purchase_errors: List[str]
+        purchase_rows, purchase_errors = _fetch_stats_rows_for_targets(api_key, secret_key, cid, target_rows, PERFORMANCE_PURCHASE_FIELDS, since, until, breakdown="eventCode", id_kind=stats_id_kind)
+        errors.extend(purchase_errors[:10])
+    metric_by_id: Dict[str, Dict[str, Any]] = defaultdict(_build_empty_perf_metric)
+    for stat_row in stats_rows:
+        stat_id = _stat_row_id(stat_row)
+        if stat_id:
+            _add_stat_to_metric(metric_by_id[stat_id], stat_row)
+    purchase_match_count = 0
+    if use_purchase_event_breakdown:
+        for purchase_row in purchase_rows:
+            if not _row_matches_purchase_event(purchase_row, purchase_event_codes):
+                continue
+            stat_id = _stat_row_id(purchase_row)
+            if stat_id:
+                _add_purchase_stat_to_metric(metric_by_id[stat_id], purchase_row)
+                purchase_match_count += 1
+    else:
+        for stat_row in stats_rows:
+            purchase_count = _performance_number(_performance_row_value(stat_row, "purchaseCcnt"))
+            purchase_amount = _performance_number(_performance_row_value(stat_row, "purchaseConvAmt"))
+            if purchase_count or purchase_amount:
+                purchase_match_count += 1
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for target in target_rows:
+        metric = metric_by_id.get(target["id"], _build_empty_perf_metric())
+        if level == "type":
+            group_key = str(target.get("campaign_type") or "ETC")
+            group = grouped.setdefault(group_key, {
+                "id": group_key,
+                "name": target.get("campaign_type_label") or group_key,
+                "campaign_type": target.get("campaign_type"),
+                "campaign_type_label": target.get("campaign_type_label"),
+                "campaign_count": 0,
+                "adgroup_count": 0,
+                "metrics": _build_empty_perf_metric(),
+            })
+            group["campaign_count"] += 1
+        else:
+            group_key = target["id"]
+            group = grouped.setdefault(group_key, {
+                **target,
+                "metrics": _build_empty_perf_metric(),
+            })
+        for key in ("impCnt", "clkCnt", "salesAmt", "ccnt", "convAmt", "purchaseCcnt", "purchaseConvAmt"):
+            group["metrics"][key] += _performance_number(metric.get(key))
+    summary = _build_empty_perf_metric()
+    rows: List[Dict[str, Any]] = []
+    for group in grouped.values():
+        metrics = _finalize_perf_metric(group["metrics"])
+        for key in ("impCnt", "clkCnt", "salesAmt", "ccnt", "convAmt", "purchaseCcnt", "purchaseConvAmt"):
+            summary[key] += _performance_number(metrics.get(key))
+        group["metrics"] = metrics
+        rows.append(group)
+    summary = _finalize_perf_metric(summary)
+    rows.sort(key=lambda row: (-_performance_number((row.get("metrics") or {}).get("salesAmt")), str(row.get("name") or "").casefold()))
+    if use_purchase_event_breakdown and purchase_rows and purchase_match_count == 0:
+        warnings.append("구매완료 이벤트를 자동 식별하지 못해 구매완료수와 구매완료 ROAS는 0으로 표시됩니다.")
+    level_label = {"type": "유형별 전체", "campaign": "캠페인별", "adgroup": "광고그룹별"}.get(level, "성과")
+    type_label = "전체 유형" if type_filter == "ALL" else _performance_campaign_type_label(type_filter)
+    return {
+        "message": f"{date_label} {type_label} {level_label} 성과 조회 완료 · 대상 {len(target_rows)}개",
+        "rows": rows,
+        "summary": summary,
+        "warnings": warnings,
+        "errors": errors[:30],
+        "scope": scope,
+        "result_level": level,
+        "campaign_type": type_filter,
+        "since": since,
+        "until": until,
+        "date_label": date_label,
+        "purchase_event_match_count": purchase_match_count,
+    }
 def _fetch_ads(api_key: str, secret_key: str, cid: str, adgroup_id: str):
     res = _do_req("GET", api_key, secret_key, cid, "/ncc/ads", params={"nccAdgroupId": adgroup_id})
     if res.status_code != 200:
@@ -2905,7 +3479,7 @@ def _adgroup_name_word_match(name: str, word: str, match_mode: str = "contains")
     word_norm = str(word or "").strip().lower()
     if not word_norm:
         return False
-    if str(match_mode or "").strip().lower() in {"exact", "equals", "equal", "정확히일치", "완전일치"}:
+    if str(match_mode or "").strip().lower() in {"exact", "equals", "equal", "phrase", "구문", "구문일치", "정확히일치", "완전일치"}:
         return name_norm == word_norm
     return word_norm in name_norm
 
@@ -3022,12 +3596,53 @@ def _ad_item_has_bid_attr(ad_item: Dict[str, Any] | None) -> bool:
     ad_attr = _extract_ad_attr(ad_item)
     return any(k in ad_attr for k in ("bidAmt", "useGroupBidAmt", "adBidAmt", "adUseGroupBidAmt"))
 
-def _resolve_effective_bid(raw_bid: Any, use_group_bid: bool, adgroup_bid: Any) -> Optional[int]:
+def _resolve_effective_bid(raw_bid: Any, use_group_bid: bool, adgroup_bid: Any, min_bid: int = 70) -> Optional[int]:
     if bool(use_group_bid):
         group_bid = _normalize_bid_amt(adgroup_bid)
         if group_bid is not None:
             return group_bid
-    return _normalize_bid_amt(raw_bid)
+    return _normalize_bid_amt(raw_bid, min_bid=min_bid)
+
+def _ad_attr_uses_group_bid(ad_attr: Dict[str, Any] | None) -> bool:
+    raw = _first_non_empty(
+        (ad_attr or {}).get("useGroupBidAmt"),
+        (ad_attr or {}).get("adUseGroupBidAmt"),
+        (ad_attr or {}).get("use_group_bid_amt"),
+        (ad_attr or {}).get("ad_use_group_bid_amt"),
+    )
+    return bool(_bool_or_none(raw))
+
+def _set_ad_bid_fields(ad_item: Dict[str, Any], bid_amt: int, use_group_bid: bool = False) -> Dict[str, Any]:
+    bid = int(bid_amt)
+    item = copy.deepcopy(ad_item or {})
+    ad_attr = _extract_ad_attr(item)
+    ad_attr["bidAmt"] = bid
+    ad_attr["useGroupBidAmt"] = bool(use_group_bid)
+    item["adAttr"] = ad_attr
+    item["adAttrJson"] = json.dumps(ad_attr, ensure_ascii=False)
+    item["bidAmt"] = bid
+    item["useGroupBidAmt"] = bool(use_group_bid)
+    if isinstance(item.get("ad"), dict):
+        item["ad"] = copy.deepcopy(item["ad"])
+        item["ad"]["adAttr"] = copy.deepcopy(ad_attr)
+        item["ad"]["adAttrJson"] = json.dumps(ad_attr, ensure_ascii=False)
+    return item
+
+def _verify_ad_bid_applied(api_key: str, secret_key: str, cid: str, ad_id: str, expected_bid: int, expected_use_group: bool = False) -> Tuple[bool, str]:
+    res = _do_req("GET", api_key, secret_key, cid, f"/ncc/ads/{ad_id}")
+    if res.status_code != 200:
+        return False, f"검증 조회 실패: {res.text}"
+    obj = res.json() or {}
+    ad_attr = _extract_ad_attr(obj if isinstance(obj, dict) else {})
+    actual_use_group = _ad_attr_uses_group_bid(ad_attr)
+    actual_bid = _normalize_bid_amt(_first_non_empty(ad_attr.get("bidAmt"), ad_attr.get("adBidAmt"), ad_attr.get("bid_amt"), ad_attr.get("ad_bid_amt")), min_bid=50)
+    if actual_use_group != bool(expected_use_group):
+        return False, f"저장 확인 실패: 그룹입찰가 사용값이 {actual_use_group}로 남아 있습니다."
+    if not expected_use_group and actual_bid != int(expected_bid):
+        actual_label = f"{actual_bid:,}원" if actual_bid is not None else "확인 불가"
+        return False, f"저장 확인 실패: 요청 {int(expected_bid):,}원, 실제 {actual_label}"
+    return True, "저장 확인 완료"
+
 def _put_single_ad_with_ad_attr(api_key: str, secret_key: str, cid: str, ad_item: Dict[str, Any]):
     ad_id = _extract_ad_id(ad_item)
     cleanup_keys = ['regTm', 'editTm', 'status', 'statusReason', 'inspectStatus', 'delFlag', 'referenceKey', 'referenceData', 'referenceKeyData']
@@ -3068,8 +3683,8 @@ def _apply_ad_bid_map(api_key: str, secret_key: str, cid: str, adgroup_contexts:
                 skipped_cnt += 1
                 continue
             meta = ad_meta.get(ad_id, {})
-            current_use_group = bool(meta.get("use_group_bid", _extract_ad_attr(ad).get("useGroupBidAmt")))
-            current_bid = _normalize_bid_amt(meta.get("current_bid"))
+            current_use_group = bool(meta.get("use_group_bid", _ad_attr_uses_group_bid(_extract_ad_attr(ad))))
+            current_bid = _normalize_bid_amt(meta.get("current_bid"), min_bid=50)
             target_bid = int(bid_map[ad_id])
             name = str(meta.get("name") or ((ad.get("ad") or {}).get("productName") if isinstance(ad.get("ad"), dict) else "") or ad_id)
             current_label = f"{int(current_bid):,}원" if current_bid is not None else "현재가 없음"
@@ -3079,13 +3694,17 @@ def _apply_ad_bid_map(api_key: str, secret_key: str, cid: str, adgroup_contexts:
                 skipped_cnt += 1
                 results.append({"level": "skip", "name": name, "target": name, "ad_id": ad_id, "detail": f"이미 동일 입찰가 {target_bid:,}원이라 유지"})
                 continue
-            item = copy.deepcopy(ad)
-            ad_attr = _extract_ad_attr(item)
-            ad_attr["useGroupBidAmt"] = False
-            ad_attr["bidAmt"] = target_bid
-            item["adAttr"] = ad_attr
+            item = _set_ad_bid_fields(ad, target_bid, use_group_bid=False)
             r_put = _put_single_ad_with_ad_attr(api_key, secret_key, cid, item)
             if r_put.status_code in [200, 201]:
+                if target_bid < 70:
+                    verified, verify_detail = _verify_ad_bid_applied(api_key, secret_key, cid, ad_id, target_bid, expected_use_group=False)
+                    if not verified:
+                        fail_cnt += 1
+                        results.append({"ok": False, "level": "fail", "name": name, "target": name, "ad_id": ad_id, "detail": f"변경 실패: {verify_detail}"})
+                        if len(err_details) < 5:
+                            err_details.append(f"[{name}] 변경 실패: {verify_detail}")
+                        continue
                 success_cnt += 1
                 results.append({"ok": True, "level": "success", "name": name, "target": name, "ad_id": ad_id, "detail": f"{current_label} → {target_bid:,}원 적용"})
             else:
@@ -3237,7 +3856,7 @@ def _update_all_shopping_ads_bid_for_group(api_key: str, secret_key: str, cid: s
         ad_id = _extract_ad_id(ad)
         ad_attr = _extract_ad_attr(ad)
         current_use_group = bool(ad_attr.get("useGroupBidAmt"))
-        effective_current_bid = _resolve_effective_bid(ad_attr.get("bidAmt"), current_use_group, adgroup_bid)
+        effective_current_bid = _resolve_effective_bid(ad_attr.get("bidAmt"), current_use_group, adgroup_bid, min_bid=50)
         if effective_current_bid == int(target_bid) and not current_use_group:
             skipped += 1
             continue
@@ -3297,7 +3916,7 @@ def bulk_update_shopping_ad_bids():
         if missing:
             invalid_results.append({"row_no": idx, "ok": False, "name": f"{campaign_name} > {adgroup_name}", "detail": f"필수 열 누락: {', '.join(missing)}"})
             continue
-        target_bid, bid_error = _parse_strict_bid_amt(raw_bid, f"{idx}행 변경 후 입찰가")
+        target_bid, bid_error = _parse_strict_bid_amt(raw_bid, f"{idx}행 변경 후 입찰가", min_bid=50)
         if bid_error:
             invalid_results.append({"row_no": idx, "ok": False, "name": f"{campaign_name} > {adgroup_name}", "detail": bid_error})
             continue
@@ -4099,7 +4718,7 @@ def _lookup_ad_bid_fields(ad_item: Dict[str, Any] | None, adgroup_bid: Any = Non
     # If the ad response has no ad-level bid fields, it is effectively using the
     # adgroup bid. Show that explicitly instead of leaving every bid column blank.
     use_group = parsed_use_group if parsed_use_group is not None else (not has_raw_ad_bid)
-    effective_bid = _resolve_effective_bid(raw_ad_bid, use_group, adgroup_bid)
+    effective_bid = _resolve_effective_bid(raw_ad_bid, use_group, adgroup_bid, min_bid=50)
     if effective_bid is None and group_bid_display:
         effective_bid = _normalize_bid_amt(adgroup_bid)
     return {
@@ -4169,6 +4788,12 @@ def _collect_lookup_ads_for_contexts(api_key: str, secret_key: str, cid: str, co
                     "adId": ad_id,
                     "type": str(ad.get("type") or ad.get("adType") or ""),
                     "status": "ON" if _extract_enabled_from_entity(ad) is not False else "OFF",
+                    "rawStatus": str(ad.get("status") or ""),
+                    "statusReason": ad.get("statusReason"),
+                    "inspectStatus": ad.get("inspectStatus"),
+                    "userLock": ad.get("userLock"),
+                    "enable": ad.get("enable"),
+                    "delFlag": ad.get("delFlag"),
                     "headline": text_fields.get("headline") or "",
                     "description": text_fields.get("description") or "",
                     "productName": text_fields.get("productName") or "",
@@ -4212,6 +4837,13 @@ def _collect_lookup_keywords_for_contexts(api_key: str, secret_key: str, cid: st
                     "keywordId": str(kw.get("nccKeywordId") or kw.get("id") or "").strip(),
                     "keyword": str(kw.get("keyword") or "").strip(),
                     "status": "ON" if _extract_enabled_from_entity(kw) is not False else "OFF",
+                    "rawStatus": str(kw.get("status") or ""),
+                    "statusReason": kw.get("statusReason"),
+                    "inspectStatus": kw.get("inspectStatus"),
+                    "managedKeyword": kw.get("managedKeyword"),
+                    "userLock": kw.get("userLock"),
+                    "enable": kw.get("enable"),
+                    "delFlag": kw.get("delFlag"),
                     "bidAmt": kw.get("bidAmt"),
                     "useGroupBidAmt": bool(kw.get("useGroupBidAmt")),
                     "matchType": str(kw.get("matchType") or kw.get("type") or "").strip(),
@@ -8008,6 +8640,12 @@ _ACCOUNT_LOOKUP_SERVICE = AccountLookupService(
     xlsx_mime=XLSX_MIME,
 )
 app.register_blueprint(create_account_lookup_blueprint(_ACCOUNT_LOOKUP_SERVICE))
+_PURCHASE_REPORT_SERVICE = PurchaseReportService(
+    request_func=_do_req,
+    workbook_to_bytesio_func=workbook_to_bytesio,
+    xlsx_mime=XLSX_MIME,
+)
+app.register_blueprint(create_purchase_report_blueprint(_PURCHASE_REPORT_SERVICE))
 
 
 @app.route("/find_powerlink_duplicate_keywords", methods=["POST"])
@@ -8102,6 +8740,19 @@ def get_powerlink_keyword_stats():
         return jsonify({"ok": True, **result})
     except Exception as e:
         return jsonify({"error": "파워링크 키워드 개수 조회 실패", "details": str(e)}), 400
+@app.route("/get_performance_stats", methods=["POST"])
+def get_performance_stats():
+    d = request.json or {}
+    api_key = str(d.get("api_key") or "").strip()
+    secret_key = str(d.get("secret_key") or "").strip()
+    cid = str(d.get("customer_id") or "").strip()
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API 정보 및 광고주를 선택해주세요."}), 400
+    try:
+        result = _get_performance_stats(api_key, secret_key, cid, d)
+        return jsonify({"ok": True, **result})
+    except Exception as e:
+        return jsonify({"error": "성과 조회 실패", "details": str(e)}), 400
 @app.route("/search_powerlink_keywords", methods=["POST"])
 def search_powerlink_keywords():
     d = request.json or {}
@@ -8632,20 +9283,24 @@ def _parse_target_ids(payload: Dict[str, Any], single_key: str, multi_key: str) 
             seen.add(x)
             uniq.append(x)
     return uniq
+KEYWORD_INSERTION_RE = re.compile(r"\{(?:키워드|keyword)(?::([^}]*))?\}", flags=re.IGNORECASE)
 def _count_keyword_insertions(text_value: str) -> int:
-    return len(re.findall(r"\{키워드(?::[^}]+)?\}", str(text_value or "")))
+    return len(KEYWORD_INSERTION_RE.findall(str(text_value or "")))
 def _apply_keyword_insertion_template(text_value: str, replace_keyword: str) -> str:
     text_value = str(text_value or "").strip()
     if not text_value:
         return text_value
-    if "{키워드}" in text_value:
-        if not replace_keyword:
+    replace_keyword = str(replace_keyword or "").strip()
+    def _replace(match: re.Match) -> str:
+        existing_alt = str(match.group(1) or "").strip()
+        alt = existing_alt or replace_keyword
+        if not alt:
             raise ValueError("키워드삽입 사용 시 대체키워드를 입력해야 합니다.")
-        text_value = text_value.replace("{키워드}", f"{{키워드:{replace_keyword}}}")
-    return text_value
+        return f"{{키워드:{alt}}}"
+    return KEYWORD_INSERTION_RE.sub(_replace, text_value)
 def _visible_keyword_length(text_value: str) -> int:
     text_value = str(text_value or "").strip()
-    text_value = re.sub(r"\{키워드:[^}]+\}", "{키워드}", text_value)
+    text_value = KEYWORD_INSERTION_RE.sub("{키워드}", text_value)
     return len(text_value)
 def _text_ad_length_errors(headline: str, description: str) -> List[str]:
     errors: List[str] = []
@@ -8894,35 +9549,66 @@ def bulk_upload_text_ads():
         try:
             payload = _prepare_payload_row(row, "ad", cid)
         except Exception as e:
-            precheck_results.append(_result_item(idx, False, f"{idx}행", f"행 파싱 실패: {e}"))
+            precheck_results.append(_result_item(idx, False, f"{idx}\ud589", f"\ud589 \ud30c\uc2f1 \uc2e4\ud328: {e}"))
             continue
         adgroup_id = str(payload.get("nccAdgroupId") or "").strip()
         ad_obj = payload.get("ad") if isinstance(payload.get("ad"), dict) else {}
-        raw_headline = str((ad_obj or {}).get("headline") or payload.get("headline") or "").strip()
-        raw_description = str((ad_obj or {}).get("description") or payload.get("description") or "").strip()
-        pc_url = _ensure_final_url((ad_obj.get("pc") or {}).get("final") if isinstance(ad_obj, dict) else payload.get("pcFinalUrl"))
-        mobile_url = _ensure_final_url((ad_obj.get("mobile") or {}).get("final") if isinstance(ad_obj, dict) else payload.get("mobileFinalUrl")) or pc_url
-        replace_keyword = str(row.get("replace_keyword") or row.get("대체키워드") or row.get("replaceKeyword") or "").strip()
+        pc_obj = ad_obj.get("pc") if isinstance(ad_obj.get("pc"), dict) else {}
+        mobile_obj = ad_obj.get("mobile") if isinstance(ad_obj.get("mobile"), dict) else {}
+        raw_headline = str(
+            (ad_obj or {}).get("headline")
+            or payload.get("headline")
+            or _row_pick_value(row, ["headline", "\uc18c\uc7ac\uc81c\ubaa9", "\uc81c\ubaa9", "title"])
+            or ""
+        ).strip()
+        raw_description = str(
+            (ad_obj or {}).get("description")
+            or payload.get("description")
+            or _row_pick_value(row, ["description", "\uc124\uba85", "desc"])
+            or ""
+        ).strip()
+        pc_url = _ensure_final_url(
+            pc_obj.get("final")
+            or payload.get("pcFinalUrl")
+            or payload.get("finalUrl")
+            or _row_pick_value(row, ["pcFinalUrl", "PC \uc5f0\uacb0 URL", "PC\ub79c\ub529URL", "PC\uc5f0\uacb0URL", "pc\uc5f0\uacb0url", "pc_url"])
+        )
+        mobile_url = _ensure_final_url(
+            mobile_obj.get("final")
+            or payload.get("mobileFinalUrl")
+            or payload.get("mobileUrl")
+            or _row_pick_value(row, ["mobileFinalUrl", "\ubaa8\ubc14\uc77c \uc5f0\uacb0 URL", "\ubaa8\ubc14\uc77c\ub79c\ub529URL", "\ubaa8\ubc14\uc77c\uc5f0\uacb0URL", "mo\uc5f0\uacb0url", "mobile_url"])
+        ) or pc_url
+        replace_keyword = str(row.get("replace_keyword") or row.get("\ub300\uccb4\ud0a4\uc6cc\ub4dc") or row.get("replaceKeyword") or "").strip()
         if not adgroup_id or not raw_headline or not raw_description or not pc_url:
-            precheck_results.append(_result_item(idx, False, raw_headline or f"{idx}행", "그룹ID, 소재제목, 설명, PC 연결 URL은 필수입니다."))
+            missing = []
+            if not adgroup_id:
+                missing.append("\uadf8\ub8f9ID")
+            if not raw_headline:
+                missing.append("\uc18c\uc7ac\uc81c\ubaa9")
+            if not raw_description:
+                missing.append("\uc124\uba85")
+            if not pc_url:
+                missing.append("PC \uc5f0\uacb0 URL")
+            precheck_results.append(_result_item(idx, False, raw_headline or f"{idx}\ud589", f"\ud544\uc218\uac12 \ub204\ub77d: {', '.join(missing)}"))
             continue
         try:
             headline = _apply_keyword_insertion_template(raw_headline, replace_keyword)
             description = _apply_keyword_insertion_template(raw_description, replace_keyword)
         except ValueError as e:
-            precheck_results.append(_result_item(idx, False, raw_headline or f"{idx}행", str(e)))
+            precheck_results.append(_result_item(idx, False, raw_headline or f"{idx}\ud589", f"\ud544\uc218\uac12 \ub204\ub77d: {', '.join(missing)}"))
             continue
         headline_insert_cnt = _count_keyword_insertions(headline)
         desc_insert_cnt = _count_keyword_insertions(description)
         if headline_insert_cnt > 1:
-            precheck_results.append(_result_item(idx, False, raw_headline or f"{idx}행", "키워드삽입은 제목에 1회까지만 사용할 수 있습니다."))
+            precheck_results.append(_result_item(idx, False, raw_headline or f"{idx}\ud589", f"\ud544\uc218\uac12 \ub204\ub77d: {', '.join(missing)}"))
             continue
         if desc_insert_cnt > 2:
-            precheck_results.append(_result_item(idx, False, raw_headline or f"{idx}행", "키워드삽입은 설명에 2회까지만 사용할 수 있습니다."))
+            precheck_results.append(_result_item(idx, False, raw_headline or f"{idx}\ud589", f"\ud544\uc218\uac12 \ub204\ub77d: {', '.join(missing)}"))
             continue
         length_errors = _text_ad_length_errors(headline, description)
         if length_errors:
-            precheck_results.append(_result_item(idx, False, raw_headline or f"{idx}행", " / ".join(length_errors)))
+            precheck_results.append(_result_item(idx, False, raw_headline or f"{idx}\ud589", f"\ud544\uc218\uac12 \ub204\ub77d: {', '.join(missing)}"))
             continue
         prepared.append((idx, adgroup_id, headline, description, pc_url, mobile_url))
     exec_results: List[Dict[str, Any]] = []
@@ -12305,7 +12991,7 @@ def update_contents_network_bid_amt():
         "skipped": skipped,
         "target_bid": int(target_bid) if target_bid is not None else None,
         "use_contents_network_bid_amt": bool(use_contents_bid),
-        "message": f"{scope_label} 파워링크 추천/콘텐츠 지면 입찰가 {'변경' if use_contents_bid else '설정 안함'} 완료 · "
+        "message": f"{scope_label} 파워링크/쇼핑검색 추천/콘텐츠 지면 입찰가 {'변경' if use_contents_bid else '설정 안함'} 완료 · "
                    + (f"적용가 {int(target_bid):,}원 · " if use_contents_bid and target_bid is not None else "")
                    + f"변경 {success}개 / 유지 {unchanged}개 / 실패 {fail}개 / 건너뜀 {skipped}개{stopped_msg}"
                    + ("\n" + "\n".join(details[:30]) if details else ""),
@@ -13081,7 +13767,7 @@ def _resolve_shopping_adgroup_ids(api_key: str, secret_key: str, cid: str, entit
             else:
                 skipped_non_shopping += 1
     return _unique_keep_order(adgroup_ids), skipped_non_shopping, warnings
-def _normalize_bid_amt(value: Any, max_bid: Optional[int] = None) -> Optional[int]:
+def _normalize_bid_amt(value: Any, max_bid: Optional[int] = None, min_bid: int = 70) -> Optional[int]:
     try:
         bid = int(float(value))
     except Exception:
@@ -13089,10 +13775,10 @@ def _normalize_bid_amt(value: Any, max_bid: Optional[int] = None) -> Optional[in
     bid = int(round(bid / 10.0) * 10)
     if max_bid is not None:
         bid = min(bid, int(max_bid))
-    bid = max(70, min(100000, bid))
+    bid = max(int(min_bid), min(100000, bid))
     return bid
 
-def _parse_strict_bid_amt(value: Any, label: str = "입찰가") -> Tuple[Optional[int], Optional[str]]:
+def _parse_strict_bid_amt(value: Any, label: str = "입찰가", min_bid: int = 70) -> Tuple[Optional[int], Optional[str]]:
     raw = str(value if value is not None else "").strip().replace(",", "")
     if not raw:
         return None, f"{label}를 입력해주세요."
@@ -13105,8 +13791,8 @@ def _parse_strict_bid_amt(value: Any, label: str = "입찰가") -> Tuple[Optiona
     bid = int(bid_float)
     if bid % 10 != 0:
         return None, f"{label}는 네이버 규정상 10원 단위로만 변경할 수 있습니다. 1원 단위 입력은 불가능합니다."
-    if not (70 <= bid <= 100000):
-        return None, f"{label}는 70원 이상 100,000원 이하로 입력해주세요."
+    if not (int(min_bid) <= bid <= 100000):
+        return None, f"{label}는 {int(min_bid):,}원 이상 100,000원 이하로 입력해주세요."
     return bid, None
 
 def _normalize_estimated_bid_amt(value: Any, max_bid: Optional[int] = None, min_bid: Optional[int] = None) -> Optional[int]:
@@ -13289,6 +13975,27 @@ def _resolve_contents_network_bid_payload_value(obj: Dict[str, Any], target_bid:
 
 
 def _prepare_contents_network_bid_update_obj(obj: Dict[str, Any], cid: str, target_bid: Optional[int], use_contents_bid: bool, sanitized: bool = True) -> Dict[str, Any]:
+    adgroup_type = str((obj or {}).get("adgroupType") or "").upper()
+    if adgroup_type != "WEB_SITE":
+        update_obj = dict(obj or {})
+        update_obj["contentsNetworkBidAmt"] = _resolve_contents_network_bid_payload_value(obj or {}, target_bid)
+        update_obj["useCntsNetworkBidAmt"] = bool(use_contents_bid)
+        update_obj.setdefault("customerId", _safe_int_default(cid, 0))
+        adgroup_id = str(update_obj.get("nccAdgroupId") or update_obj.get("id") or "").strip()
+        if adgroup_id:
+            update_obj["nccAdgroupId"] = adgroup_id
+        if not sanitized:
+            return update_obj
+        readonly_keys = {
+            "id", "raw", "targets", "targetSummary", "pcChannelKey", "mobileChannelKey",
+            "status", "statusReason", "expectCost", "regTm", "editTm", "migType",
+            "sharedDailyBudget", "sharedBudgetName", "sharedBudgetLock", "sharedBudgetExpectCost",
+            "numberInUse", "pcDevice", "mobileDevice",
+        }
+        for key in readonly_keys:
+            update_obj.pop(key, None)
+        return {k: v for k, v in update_obj.items() if v is not None}
+
     current_pc = _safe_int_default((obj or {}).get("pcNetworkBidWeight"), 100)
     current_mobile = _safe_int_default((obj or {}).get("mobileNetworkBidWeight"), 100)
     update_obj = _prepare_powerlink_device_bid_weight_update_obj(
@@ -13331,8 +14038,9 @@ def _update_contents_network_bid_amt_for_adgroup(api_key: str, secret_key: str, 
     if res_get.status_code != 200 or not isinstance(obj, dict):
         detail = res_get.text if res_get is not None else "광고그룹 조회 실패"
         return False, f"광고그룹 조회 실패: {detail}", obj if isinstance(obj, dict) else {}, {}
-    if str(obj.get("adgroupType") or "").upper() != "WEB_SITE":
-        return None, "파워링크 광고그룹이 아니어서 건너뜀", obj, {}
+    adgroup_type = str(obj.get("adgroupType") or "").upper()
+    if adgroup_type != "WEB_SITE" and adgroup_type not in SHOPPING_TARGETABLE_ADGROUP_TYPES:
+        return None, "파워링크/쇼핑검색 광고그룹이 아니어서 건너뜀", obj, {}
 
     current_bid = _normalize_bid_amt(obj.get("contentsNetworkBidAmt"))
     current_use = _boolish(obj.get("useCntsNetworkBidAmt"), False)
@@ -13341,12 +14049,20 @@ def _update_contents_network_bid_amt_for_adgroup(api_key: str, secret_key: str, 
             return True, f"이미 동일값 유지(추천/콘텐츠 {int(target_bid):,}원)", obj, {"strategy": "unchanged"}
         return True, "이미 추천/콘텐츠 전용 입찰가 설정 안함 상태", obj, {"strategy": "unchanged"}
 
-    strategies = [
-        None,
-        "contentsNetworkBidAmt",
-        "useCntsNetworkBidAmt",
-        "contentsNetworkBidAmt,useCntsNetworkBidAmt",
-    ]
+    if adgroup_type == "WEB_SITE":
+        strategies = [
+            None,
+            "contentsNetworkBidAmt",
+            "useCntsNetworkBidAmt",
+            "contentsNetworkBidAmt,useCntsNetworkBidAmt",
+        ]
+    else:
+        strategies = [
+            "contentsNetworkBidAmt,useCntsNetworkBidAmt",
+            "contentsNetworkBidAmt",
+            "useCntsNetworkBidAmt",
+            None,
+        ]
     if preferred_fields in strategies:
         strategies = [preferred_fields] + [x for x in strategies if x != preferred_fields]
 
@@ -14332,7 +15048,10 @@ def update_keyword_bids():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
     entity_type, entity_ids = d.get("entity_type"), d.get("entity_ids", [])
-    bid_amt = int(d.get("bid_amt", 70))
+    try:
+        bid_amt = int(d.get("bid_amt", 70))
+    except Exception:
+        return jsonify({"error": "입찰가는 숫자로 입력해주세요."}), 400
     if not entity_ids:
         return jsonify({"error": "대상이 없습니다."}), 400
     adgroup_contexts, resolve_warnings = _resolve_adgroup_contexts(api_key, secret_key, cid, entity_type, entity_ids)
@@ -14344,7 +15063,6 @@ def update_keyword_bids():
         lines.extend(_adgroup_name_filter_summary(name_filter_info))
         return jsonify({"ok": True, "message": "\n".join(lines)}), 200
     use_group_bid = bid_amt == 0
-    target_bid = _normalize_bid_amt(bid_amt if bid_amt else 70) or 70
     kw_success = kw_fail = kw_skipped = 0
     ad_success = ad_fail = ad_skipped = 0
     err_details: List[str] = list(resolve_warnings)
@@ -14355,7 +15073,14 @@ def update_keyword_bids():
     shopping_contexts = [ctx for ctx in adgroup_contexts if _adgroup_uses_ad_level_bid(ctx.get("adgroup_type"))]
     keyword_groups = len(keyword_contexts)
     shopping_groups = len(shopping_contexts)
-    if keyword_contexts:
+    keyword_target_bid = _normalize_bid_amt(bid_amt if bid_amt else 70, min_bid=70) or 70
+    shopping_target_bid = _normalize_bid_amt(bid_amt if bid_amt else 50, min_bid=50) or 50
+    skip_keyword_bid_update = (not use_group_bid) and bid_amt < 70
+    if skip_keyword_bid_update and keyword_contexts:
+        err_details.append("파워링크 키워드 입찰가는 최소 70원이라 50원대 입력 시 키워드는 변경하지 않고 쇼핑 소재만 변경합니다.")
+        if not shopping_contexts:
+            return jsonify({"error": "파워링크 키워드 입찰가는 70원 이상으로 입력해주세요. 쇼핑 소재는 50원부터 변경할 수 있습니다."}), 400
+    if keyword_contexts and not skip_keyword_bid_update:
         max_workers = min(BID_IO_WORKERS, max(1, len(keyword_contexts)))
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
             future_map = {
@@ -14386,12 +15111,12 @@ def update_keyword_bids():
                     current_use_group = bool(kw.get("useGroupBidAmt"))
                     effective_current_bid = _resolve_effective_bid(kw.get("bidAmt"), current_use_group, adgroup_bid)
                     raw_keyword_bid = _normalize_bid_amt(kw.get("bidAmt")) or 70
-                    should_skip = current_use_group if use_group_bid else ((effective_current_bid == target_bid) and (not current_use_group))
+                    should_skip = current_use_group if use_group_bid else ((effective_current_bid == keyword_target_bid) and (not current_use_group))
                     if should_skip:
                         kw_skipped += 1
                         continue
                     item["useGroupBidAmt"] = bool(use_group_bid)
-                    item["bidAmt"] = raw_keyword_bid if use_group_bid else target_bid
+                    item["bidAmt"] = raw_keyword_bid if use_group_bid else keyword_target_bid
                     for k in cleanup_keys:
                         item.pop(k, None)
                     update_payload.append(item)
@@ -14455,18 +15180,14 @@ def update_keyword_bids():
                     if not _ad_item_has_bid_attr(ad):
                         continue
                     ad_attr = _extract_ad_attr(ad)
-                    current_use_group = bool(ad_attr.get("useGroupBidAmt"))
-                    effective_current_bid = _resolve_effective_bid(ad_attr.get("bidAmt"), current_use_group, adgroup_bid)
-                    raw_item_bid = _normalize_bid_amt(ad_attr.get("bidAmt")) or 70
-                    should_skip = current_use_group if use_group_bid else ((effective_current_bid == target_bid) and (not current_use_group))
+                    current_use_group = _ad_attr_uses_group_bid(ad_attr)
+                    effective_current_bid = _resolve_effective_bid(ad_attr.get("bidAmt"), current_use_group, adgroup_bid, min_bid=50)
+                    raw_item_bid = _normalize_bid_amt(ad_attr.get("bidAmt"), min_bid=50) or 50
+                    should_skip = current_use_group if use_group_bid else ((effective_current_bid == shopping_target_bid) and (not current_use_group))
                     if should_skip:
                         ad_skipped += 1
                         continue
-                    item = copy.deepcopy(ad)
-                    new_attr = _extract_ad_attr(item)
-                    new_attr["useGroupBidAmt"] = bool(use_group_bid)
-                    new_attr["bidAmt"] = raw_item_bid if use_group_bid else target_bid
-                    item["adAttr"] = new_attr
+                    item = _set_ad_bid_fields(ad, raw_item_bid if use_group_bid else shopping_target_bid, use_group_bid=bool(use_group_bid))
                     put_jobs.append(item)
         if put_jobs:
             put_workers = min(BID_IO_WORKERS, max(1, len(put_jobs)))
@@ -14483,13 +15204,31 @@ def update_keyword_bids():
                             err_details.append(f"[{name}] 소재 입찰가 변경 실패: {exc}")
                         continue
                     if r_put.status_code in [200, 201]:
-                        ad_success += 1
+                        ad_id = _extract_ad_id(item)
+                        if (not use_group_bid) and shopping_target_bid < 70 and ad_id:
+                            verified, verify_detail = _verify_ad_bid_applied(api_key, secret_key, cid, ad_id, shopping_target_bid, expected_use_group=False)
+                            if verified:
+                                ad_success += 1
+                            else:
+                                ad_fail += 1
+                                if len(err_details) < 10:
+                                    name = str((((item.get("ad") or {}).get("productName")) if isinstance(item.get("ad"), dict) else "") or ad_id or "알수없음")
+                                    err_details.append(f"[{name}] 소재 입찰가 변경 실패: {verify_detail}")
+                        else:
+                            ad_success += 1
                     else:
                         ad_fail += 1
                         if len(err_details) < 10:
                             name = str((((item.get("ad") or {}).get("productName")) if isinstance(item.get("ad"), dict) else "") or _extract_ad_id(item) or "알수없음")
                             err_details.append(f"[{name}] 소재 입찰가 변경 실패: {r_put.text}")
-    label = "그룹 입찰가 사용 전환" if use_group_bid else f"고정 입찰가 {target_bid:,}원 적용"
+    if use_group_bid:
+        label = "그룹 입찰가 사용 전환"
+    elif keyword_contexts and shopping_contexts and keyword_target_bid != shopping_target_bid:
+        label = f"쇼핑 소재 {shopping_target_bid:,}원 적용 / 파워링크 키워드 제외"
+    elif shopping_contexts and not keyword_contexts:
+        label = f"쇼핑 소재 고정 입찰가 {shopping_target_bid:,}원 적용"
+    else:
+        label = f"고정 입찰가 {keyword_target_bid:,}원 적용"
     lines = [
         f"입찰가 변경 완료! ({label})",
         f"파워링크/키워드 처리 광고그룹: {keyword_groups}개 | 쇼핑/소재 처리 광고그룹: {shopping_groups}개",
@@ -14500,7 +15239,12 @@ def update_keyword_bids():
     if err_details:
         lines.append("\n[상세 내역]")
         lines.extend(err_details[:10])
-    return jsonify({"ok": True, "message": "\n".join(lines)})
+    return jsonify({
+        "ok": True,
+        "message": "\n".join(lines),
+        "keywordTargetBid": int(keyword_target_bid),
+        "shoppingTargetBid": int(shopping_target_bid),
+    })
 def update_bid_mode_by_scope():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
@@ -14635,8 +15379,8 @@ def update_bid_mode_by_scope():
                         continue
                     ad_attr = _extract_ad_attr(ad)
                     current_use_group = bool(ad_attr.get("useGroupBidAmt"))
-                    raw_item_bid = _normalize_bid_amt(ad_attr.get("bidAmt")) or 70
-                    effective_current_bid = _resolve_effective_bid(ad_attr.get("bidAmt"), current_use_group, adgroup_bid) or raw_item_bid
+                    raw_item_bid = _normalize_bid_amt(ad_attr.get("bidAmt"), min_bid=50) or 50
+                    effective_current_bid = _resolve_effective_bid(ad_attr.get("bidAmt"), current_use_group, adgroup_bid, min_bid=50) or raw_item_bid
                     target_bid = raw_item_bid if target_use_group else effective_current_bid
                     if current_use_group == target_use_group:
                         ad_skipped += 1
@@ -14710,18 +15454,24 @@ def adjust_keyword_bids_by_threshold():
     try:
         upper_bid = _parse_optional_bound(d.get("upper_bid"), "상한가")
         lower_bid = _parse_optional_bound(d.get("lower_bid"), "하한가")
-        upper_delta = _parse_signed_step(d.get("upper_delta"), "상한가 조정값") if upper_bid is not None else 0
-        lower_delta = _parse_signed_step(d.get("lower_delta"), "하한가 조정값") if lower_bid is not None else 0
+        threshold_mode = str(d.get("threshold_mode") or "").strip().lower()
+        clamp_to_bounds = _boolish(d.get("clamp_to_bounds"), False) or threshold_mode in {"clamp", "bounds", "limit"}
+        upper_delta = 0 if clamp_to_bounds else (_parse_signed_step(d.get("upper_delta"), "상한가 조정값") if upper_bid is not None else 0)
+        lower_delta = 0 if clamp_to_bounds else (_parse_signed_step(d.get("lower_delta"), "하한가 조정값") if lower_bid is not None else 0)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     if upper_bid is None and lower_bid is None:
         return jsonify({"error": "상한가 또는 하한가 중 하나 이상 입력해주세요."}), 400
     if upper_bid is not None and lower_bid is not None and lower_bid >= upper_bid:
         return jsonify({"error": "하한가는 상한가보다 작아야 합니다."}), 400
-    if upper_bid is not None and upper_delta == 0:
+    if not clamp_to_bounds and upper_bid is not None and upper_delta == 0:
         return jsonify({"error": "상한가 조정값은 0이 될 수 없습니다."}), 400
-    if lower_bid is not None and lower_delta == 0:
+    if not clamp_to_bounds and lower_bid is not None and lower_delta == 0:
         return jsonify({"error": "하한가 조정값은 0이 될 수 없습니다."}), 400
+    def _threshold_target(bound: int, delta: int, min_bid: int) -> int:
+        if clamp_to_bounds:
+            return _normalize_bid_amt(bound, min_bid=min_bid) or int(bound)
+        return _normalize_bid_amt(bound + delta, min_bid=min_bid) or int(bound)
     adgroup_contexts, resolve_warnings = _resolve_adgroup_contexts(api_key, secret_key, cid, entity_type, entity_ids)
     if not adgroup_contexts:
         return jsonify({"error": "대상 광고그룹을 찾지 못했습니다."}), 400
@@ -14761,7 +15511,7 @@ def adjust_keyword_bids_by_threshold():
                     continue
                 ad_attr = _extract_ad_attr(ad)
                 current_use_group = bool(ad_attr.get("useGroupBidAmt"))
-                effective_current_bid = _resolve_effective_bid(ad_attr.get("bidAmt"), current_use_group, adgroup_bid)
+                effective_current_bid = _resolve_effective_bid(ad_attr.get("bidAmt"), current_use_group, adgroup_bid, min_bid=50)
                 if effective_current_bid is None:
                     continue
                 ad_name = str(((ad.get("ad") or {}).get("productName") if isinstance(ad.get("ad"), dict) else "") or ad_id)
@@ -14774,10 +15524,10 @@ def adjust_keyword_bids_by_threshold():
                 target_bid = None
                 if upper_bid is not None and effective_current_bid >= upper_bid:
                     upper_hit += 1
-                    target_bid = _normalize_bid_amt(upper_bid + upper_delta)
+                    target_bid = _threshold_target(upper_bid, upper_delta, min_bid=50)
                 elif lower_bid is not None and effective_current_bid <= lower_bid:
                     lower_hit += 1
-                    target_bid = _normalize_bid_amt(lower_bid + lower_delta)
+                    target_bid = _threshold_target(lower_bid, lower_delta, min_bid=50)
                 if target_bid is None:
                     continue
                 if target_bid == effective_current_bid and (not current_use_group):
@@ -14809,10 +15559,10 @@ def adjust_keyword_bids_by_threshold():
                 target_bid = None
                 if upper_bid is not None and effective_current_bid >= upper_bid:
                     upper_hit += 1
-                    target_bid = _normalize_bid_amt(upper_bid + upper_delta)
+                    target_bid = _threshold_target(upper_bid, upper_delta, min_bid=70)
                 elif lower_bid is not None and effective_current_bid <= lower_bid:
                     lower_hit += 1
-                    target_bid = _normalize_bid_amt(lower_bid + lower_delta)
+                    target_bid = _threshold_target(lower_bid, lower_delta, min_bid=70)
                 if target_bid is None:
                     continue
                 if target_bid == effective_current_bid and (not current_use_group):
@@ -14857,11 +15607,11 @@ def adjust_keyword_bids_by_threshold():
         lines.append(f"변경 후 입찰가 범위: 최소 {stats['min']:,}원 · 중앙 {stats['median']:,}원 · 최대 {stats['max']:,}원")
     rule_bits = []
     if upper_bid is not None:
-        upper_target = _normalize_bid_amt(upper_bid + upper_delta)
-        rule_bits.append(f"상한 {upper_bid:,}원 이상 → {upper_bid:,}원 기준 {upper_delta:+,}원 = {upper_target:,}원")
+        upper_target = _threshold_target(upper_bid, upper_delta, min_bid=70)
+        rule_bits.append(f"상한 {upper_bid:,}원 이상 → {upper_target:,}원으로 맞춤" if clamp_to_bounds else f"상한 {upper_bid:,}원 이상 → {upper_bid:,}원 기준 {upper_delta:+,}원 = {upper_target:,}원")
     if lower_bid is not None:
-        lower_target = _normalize_bid_amt(lower_bid + lower_delta)
-        rule_bits.append(f"하한 {lower_bid:,}원 이하 → {lower_bid:,}원 기준 {lower_delta:+,}원 = {lower_target:,}원")
+        lower_target = _threshold_target(lower_bid, lower_delta, min_bid=70)
+        rule_bits.append(f"하한 {lower_bid:,}원 이하 → {lower_target:,}원으로 맞춤" if clamp_to_bounds else f"하한 {lower_bid:,}원 이하 → {lower_bid:,}원 기준 {lower_delta:+,}원 = {lower_target:,}원")
     if rule_bits:
         lines.append("적용 규칙: " + " / ".join(rule_bits))
     lines.extend(_adgroup_name_filter_summary(name_filter_info))
@@ -15286,7 +16036,7 @@ def update_keyword_bids_avg_position():
                     skipped_ad_pending += 1
                 continue
             ad_attr = _extract_ad_attr(ad)
-            effective_current_bid = _resolve_effective_bid(ad_attr.get("bidAmt"), bool(ad_attr.get("useGroupBidAmt")), adgroup_bid)
+            effective_current_bid = _resolve_effective_bid(ad_attr.get("bidAmt"), bool(ad_attr.get("useGroupBidAmt")), adgroup_bid, min_bid=50)
             ad_name = str(((ad.get("ad") or {}).get("productName") if isinstance(ad.get("ad"), dict) else "") or ad_id)
             ad_ids.append(ad_id)
             ad_meta[ad_id] = {
@@ -16605,6 +17355,52 @@ def update_ad_product_name():
         "patch": "ad-product-name-edit-v1-20260519",
     })
 
+def update_shopping_ad_bid():
+    d = request.json or {}
+    api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
+    ad_id = str(d.get("ad_id") or d.get("nccAdId") or "").strip()
+    target_bid, bid_error = _parse_strict_bid_amt(d.get("bid_amt"), "소재 입찰가", min_bid=50)
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API Key / Secret Key / Customer ID가 필요합니다."}), 400
+    if not ad_id:
+        return jsonify({"error": "수정할 소재 ID가 필요합니다."}), 400
+    if bid_error:
+        return jsonify({"error": bid_error}), 400
+    res = _do_req("GET", api_key, secret_key, cid, f"/ncc/ads/{ad_id}")
+    if res.status_code != 200:
+        return jsonify({"error": f"소재 조회 실패: {res.text}"}), res.status_code
+    ad_item = res.json() or {}
+    if not isinstance(ad_item, dict):
+        return jsonify({"error": "소재 응답 형식을 확인할 수 없습니다."}), 500
+    if not _ad_item_has_bid_attr(ad_item):
+        return jsonify({"error": "소재 입찰가 변경은 쇼핑/카탈로그 상품소재에서만 지원합니다."}), 400
+    old_attr = _extract_ad_attr(ad_item)
+    old_bid = _normalize_bid_amt(_first_non_empty(old_attr.get("bidAmt"), old_attr.get("adBidAmt"), old_attr.get("bid_amt"), old_attr.get("ad_bid_amt")), min_bid=50)
+    old_use_group = bool(_bool_or_none(_first_non_empty(old_attr.get("useGroupBidAmt"), old_attr.get("adUseGroupBidAmt"), old_attr.get("use_group_bid_amt"), old_attr.get("ad_use_group_bid_amt"))))
+    item = _set_ad_bid_fields(ad_item, int(target_bid), use_group_bid=False)
+    put_res = _put_single_ad_with_ad_attr(api_key, secret_key, cid, item)
+    if not put_res or put_res.status_code not in [200, 201]:
+        detail = put_res.text if put_res is not None else "응답 없음"
+        return jsonify({"error": f"소재 입찰가 변경 실패: {detail}"}), 500
+    if int(target_bid) < 70:
+        verified, verify_detail = _verify_ad_bid_applied(api_key, secret_key, cid, ad_id, int(target_bid), expected_use_group=False)
+        if not verified:
+            return jsonify({"error": f"소재 입찰가 변경 실패: {verify_detail}"}), 500
+    _cache_invalidate(api_key, secret_key, cid)
+    old_label = f"{old_bid:,}원" if old_bid is not None else "현재가 없음"
+    if old_use_group:
+        old_label += " (그룹입찰가 사용)"
+    return jsonify({
+        "ok": True,
+        "ad_id": ad_id,
+        "oldBidAmt": old_bid,
+        "oldUseGroupBidAmt": old_use_group,
+        "bidAmt": int(target_bid),
+        "useGroupBidAmt": False,
+        "message": f"쇼핑 소재 입찰가 변경 완료: {old_label} → {int(target_bid):,}원",
+        "patch": "shopping-ad-bid-edit-v1-20260601",
+    })
+
 def update_ad_product_names_bulk():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
@@ -17039,6 +17835,7 @@ _CHANGE_SERVICE = ChangeService({
     "set_asset_state_by_ids": set_asset_state_by_ids,
     "update_ad_product_name": update_ad_product_name,
     "update_ad_product_names_bulk": update_ad_product_names_bulk,
+    "update_shopping_ad_bid": update_shopping_ad_bid,
 })
 app.register_blueprint(create_change_blueprint(_CHANGE_SERVICE))
 
