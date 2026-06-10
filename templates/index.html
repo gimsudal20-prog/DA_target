@@ -170,6 +170,9 @@
     .schedule-mini-chip { border:1px solid var(--line); background:#fff; color:var(--text); border-radius:999px; padding:4px 8px; font-size:12px; cursor:pointer; }
     .schedule-mini-chip.active { background:#eff6ff; border-color:#93c5fd; color:#1d4ed8; font-weight:700; }
     .schedule-mode-btn.active { box-shadow: inset 0 0 0 1px rgba(0,0,0,.04); }
+    .schedule-quick-disabled { opacity:.45; }
+    .schedule-quick-disabled .mini-chip,
+    .schedule-quick-disabled .btn { cursor:not-allowed; }
     @media (max-width: 768px) { .schedule-block-row { grid-template-columns: 1fr; } }
 
     /* Toast */
@@ -7433,6 +7436,14 @@
       gap: 7px !important;
       width: 100% !important;
     }
+    #tab_data > .account-lookup-card .account-export-button-grid .off-keyword-export-btn {
+      grid-column: 1 / -1 !important;
+      justify-self: start !important;
+      width: auto !important;
+      min-width: 220px !important;
+      background: #fff7ed !important;
+      color: #9a3412 !important;
+    }
     #tab_data > .account-lookup-card .lookup-action-panel .account-asset-action-row .btn,
     #tab_data > .account-lookup-card .export-action-panel .account-asset-action-row .btn {
       min-height: 32px !important;
@@ -7504,6 +7515,9 @@
     #tab_data > .account-lookup-card .account-export-button-grid .btn {
       width: 100% !important;
     }
+    #tab_data > .account-lookup-card .account-export-button-grid .off-keyword-export-btn {
+      width: auto !important;
+    }
     #tab_data > .account-lookup-card .lookup-diagnosis-card {
       margin-top: 10px !important;
       min-height: 42px !important;
@@ -7548,6 +7562,10 @@
     @media (max-width: 720px) {
       #tab_data > .account-lookup-card .account-export-button-grid {
         grid-template-columns: 1fr !important;
+      }
+      #tab_data > .account-lookup-card .account-export-button-grid .off-keyword-export-btn {
+        width: 100% !important;
+        min-width: 0 !important;
       }
     }
     #tab_data > .account-lookup-card table.account-lookup-table {
@@ -10879,6 +10897,7 @@
     body #tab_data > .performance-stats-card > .grid-2,
     body #tab_data > .performance-stats-card > .btn-row,
     body #tab_data > .performance-stats-card > .performance-result-viewbar,
+    body #tab_data > .performance-stats-card > .performance-copy-control,
     body #tab_data > .performance-stats-card > #performance_stats_result,
     body #tab_data > .performance-stats-card > #purchase_report_result {
       margin-left: 22px !important;
@@ -10902,6 +10921,19 @@
     }
     body #tab_data > .performance-stats-card > .grid-3 {
       grid-template-columns: repeat(3, minmax(180px, 1fr)) !important;
+    }
+    body #tab_data > .performance-stats-card > .performance-date-grid {
+      grid-template-columns: minmax(220px, 340px) !important;
+      align-items: end !important;
+    }
+    body #tab_data > .performance-stats-card.is-custom-date > .performance-date-grid {
+      grid-template-columns: minmax(220px, 340px) repeat(2, minmax(220px, 1fr)) !important;
+    }
+    body #tab_data > .performance-stats-card .performance-custom-date-field {
+      display: none !important;
+    }
+    body #tab_data > .performance-stats-card.is-custom-date .performance-custom-date-field {
+      display: block !important;
     }
     body #tab_data > .performance-stats-card > .performance-filter-grid {
       grid-template-columns: repeat(2, minmax(220px, 1fr)) !important;
@@ -10997,6 +11029,94 @@
       background: #eff6ff !important;
       color: #0b5fce !important;
       font-weight: 950 !important;
+    }
+    body #tab_data > .performance-stats-card > .performance-copy-control {
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 10px !important;
+      margin-top: 12px !important;
+      padding: 12px !important;
+      border: 1px solid #d8e2ef !important;
+      border-radius: 8px !important;
+      background: #fbfcfe !important;
+    }
+    body #tab_data > .performance-stats-card .performance-copy-head {
+      display: flex !important;
+      align-items: center !important;
+      justify-content: space-between !important;
+      gap: 12px !important;
+      min-width: 0 !important;
+    }
+    body #tab_data > .performance-stats-card .performance-copy-toggle {
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 8px !important;
+      margin: 0 !important;
+      color: #0f172a !important;
+      font-size: 12px !important;
+      font-weight: 900 !important;
+      white-space: nowrap !important;
+    }
+    body #tab_data > .performance-stats-card .performance-copy-toggle input {
+      width: 16px !important;
+      height: 16px !important;
+      min-height: 16px !important;
+      margin: 0 !important;
+    }
+    body #tab_data > .performance-stats-card .performance-copy-status {
+      color: #64748b !important;
+      font-size: 12px !important;
+      font-weight: 800 !important;
+      text-align: right !important;
+    }
+    body #tab_data > .performance-stats-card .performance-copy-panel {
+      display: none !important;
+      grid-template-columns: minmax(220px, 1fr) minmax(140px, 180px) auto auto !important;
+      gap: 10px !important;
+      align-items: end !important;
+      padding-top: 10px !important;
+      border-top: 1px solid #e2e8f0 !important;
+    }
+    body #tab_data > .performance-stats-card .performance-copy-control.is-active .performance-copy-panel {
+      display: grid !important;
+    }
+    body #tab_data > .performance-stats-card .performance-copy-checks {
+      display: flex !important;
+      align-items: center !important;
+      gap: 12px !important;
+      flex-wrap: wrap !important;
+      min-width: 0 !important;
+    }
+    body #tab_data > .performance-stats-card .performance-copy-checks label {
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 6px !important;
+      margin: 0 !important;
+      color: #475569 !important;
+      font-size: 12px !important;
+      font-weight: 800 !important;
+      white-space: nowrap !important;
+    }
+    body #tab_data > .performance-stats-card .performance-copy-checks input {
+      width: 14px !important;
+      height: 14px !important;
+      min-height: 14px !important;
+      margin: 0 !important;
+    }
+    body #tab_data > .performance-stats-card .performance-copy-actions {
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: flex-end !important;
+      gap: 6px !important;
+      flex-wrap: wrap !important;
+    }
+    body #tab_data > .performance-stats-card .performance-copy-actions .btn {
+      min-height: 34px !important;
+      padding: 0 11px !important;
+      border-radius: 7px !important;
+      font-size: 12px !important;
+      font-weight: 850 !important;
+      white-space: nowrap !important;
     }
     body #tab_data > .performance-stats-card #performance_stats_result,
     body #tab_data > .performance-stats-card #purchase_report_result {
@@ -11123,6 +11243,17 @@
       text-align: right !important;
       white-space: nowrap !important;
     }
+    body #tab_data > .performance-stats-card .performance-copy-select-cell {
+      width: 42px !important;
+      text-align: center !important;
+      white-space: nowrap !important;
+    }
+    body #tab_data > .performance-stats-card .performance-copy-select-cell input {
+      width: 16px !important;
+      height: 16px !important;
+      min-height: 16px !important;
+      margin: 0 !important;
+    }
     body #tab_data > .performance-stats-card .performance-bid-toggle {
       min-height: 28px !important;
       padding: 0 10px !important;
@@ -11184,6 +11315,106 @@
       font-size: 12px !important;
       white-space: nowrap !important;
     }
+    body #tab_data > .performance-stats-card .performance-inline-bids {
+      display: flex !important;
+      align-items: center !important;
+      flex-wrap: wrap !important;
+      gap: 5px !important;
+      margin-top: 1px !important;
+    }
+    body #tab_data > .performance-stats-card .performance-bid-chip {
+      display: inline-flex !important;
+      align-items: center !important;
+      min-height: 20px !important;
+      padding: 2px 7px !important;
+      border: 1px solid #cfe0f4 !important;
+      border-radius: 999px !important;
+      background: #f8fbff !important;
+      color: #0b5fce !important;
+      font-size: 11px !important;
+      font-weight: 850 !important;
+      line-height: 1.2 !important;
+      white-space: nowrap !important;
+    }
+    body #tab_data > .performance-stats-card .performance-detail-row > td {
+      padding: 0 !important;
+      background: #f8fbff !important;
+      border-bottom: 1px solid #dbe7f5 !important;
+    }
+    body #tab_data > .performance-stats-card .performance-row-detail {
+      display: grid !important;
+      grid-template-columns: minmax(260px, .85fr) minmax(380px, 1.15fr) !important;
+      gap: 12px !important;
+      padding: 12px !important;
+      background: #f8fbff !important;
+    }
+    body #tab_data > .performance-stats-card .performance-detail-panel {
+      min-width: 0 !important;
+      padding: 12px !important;
+      border: 1px solid #d8e2f0 !important;
+      border-radius: 8px !important;
+      background: #fff !important;
+    }
+    body #tab_data > .performance-stats-card .performance-detail-title {
+      display: flex !important;
+      align-items: center !important;
+      justify-content: space-between !important;
+      gap: 10px !important;
+      margin-bottom: 10px !important;
+      color: #0f172a !important;
+      font-size: 12px !important;
+      font-weight: 950 !important;
+    }
+    body #tab_data > .performance-stats-card .performance-period-actions {
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 4px !important;
+      flex-wrap: wrap !important;
+      justify-content: flex-end !important;
+    }
+    body #tab_data > .performance-stats-card .performance-period-btn {
+      min-height: 26px !important;
+      padding: 0 9px !important;
+      border: 1px solid #d8e2f0 !important;
+      border-radius: 7px !important;
+      background: #fff !important;
+      color: #475569 !important;
+      font-size: 11px !important;
+      font-weight: 850 !important;
+      line-height: 1 !important;
+      box-shadow: none !important;
+      cursor: pointer !important;
+      white-space: nowrap !important;
+    }
+    body #tab_data > .performance-stats-card .performance-period-btn:hover,
+    body #tab_data > .performance-stats-card .performance-period-btn.is-active {
+      border-color: #93c5fd !important;
+      background: #eff6ff !important;
+      color: #0b5fce !important;
+    }
+    body #tab_data > .performance-stats-card .performance-bid-snapshot {
+      display: flex !important;
+      flex-wrap: wrap !important;
+      gap: 6px !important;
+      margin-bottom: 10px !important;
+    }
+    body #tab_data > .performance-stats-card .performance-detail-table-shell {
+      max-height: 190px !important;
+      overflow: auto !important;
+      border: 1px solid #e2e8f0 !important;
+      border-radius: 7px !important;
+    }
+    body #tab_data > .performance-stats-card .performance-detail-table-shell table {
+      margin: 0 !important;
+      min-width: 620px !important;
+    }
+    body #tab_data > .performance-stats-card .performance-detail-table-shell th,
+    body #tab_data > .performance-stats-card .performance-detail-table-shell td {
+      padding: 9px 10px !important;
+      background: #fff !important;
+      font-size: 11.5px !important;
+      white-space: nowrap !important;
+    }
     body #tab_data > .performance-stats-card .performance-summary-card {
       min-width: 0 !important;
       padding: 12px !important;
@@ -11226,6 +11457,10 @@
       body #tab_data > .performance-stats-card > .grid-2 {
         grid-template-columns: 1fr !important;
       }
+      body #tab_data > .performance-stats-card > .performance-date-grid,
+      body #tab_data > .performance-stats-card.is-custom-date > .performance-date-grid {
+        grid-template-columns: 1fr !important;
+      }
       body #tab_data > .performance-stats-card > .performance-result-viewbar {
         align-items: stretch !important;
         flex-direction: column !important;
@@ -11244,6 +11479,16 @@
       body #tab_data > .performance-stats-card .performance-bid-editor-label {
         flex: 1 0 100% !important;
         margin-right: 0 !important;
+      }
+      body #tab_data > .performance-stats-card .performance-row-detail {
+        grid-template-columns: 1fr !important;
+      }
+      body #tab_data > .performance-stats-card .performance-detail-title {
+        align-items: flex-start !important;
+        flex-direction: column !important;
+      }
+      body #tab_data > .performance-stats-card .performance-period-actions {
+        justify-content: flex-start !important;
       }
       body #tab_data > .performance-stats-card > .btn-row {
         justify-content: stretch !important;
@@ -13036,7 +13281,7 @@
                 </select>
               </div>
             </div>
-            <div class="grid-3" style="margin-bottom:12px;">
+            <div class="grid-3 performance-date-grid" style="margin-bottom:12px;">
               <div class="form-group" style="margin-bottom:0;">
                 <label>기간</label>
                 <select id="performance_date_preset" onchange="syncPerformanceDatePreset()">
@@ -13046,11 +13291,11 @@
                   <option value="custom">직접 기간</option>
                 </select>
               </div>
-              <div class="form-group" style="margin-bottom:0;">
+              <div class="form-group performance-custom-date-field" style="margin-bottom:0;">
                 <label>시작일</label>
                 <input type="date" id="performance_since" disabled>
               </div>
-              <div class="form-group" style="margin-bottom:0;">
+              <div class="form-group performance-custom-date-field" style="margin-bottom:0;">
                 <label>종료일</label>
                 <input type="date" id="performance_until" disabled>
               </div>
@@ -13077,6 +13322,31 @@
                 <button type="button" class="performance-result-tab is-selected" data-performance-level="type" aria-pressed="true" onclick="setPerformanceResultLevel('type', { fetch: true })">유형별</button>
                 <button type="button" class="performance-result-tab" data-performance-level="campaign" aria-pressed="false" onclick="setPerformanceResultLevel('campaign', { fetch: true })">캠페인별</button>
                 <button type="button" class="performance-result-tab" data-performance-level="adgroup" aria-pressed="false" onclick="setPerformanceResultLevel('adgroup', { fetch: true })">광고그룹별</button>
+              </div>
+            </div>
+            <div class="performance-copy-control" id="performance_copy_control">
+              <div class="performance-copy-head">
+                <label class="performance-copy-toggle"><input type="checkbox" id="performance_copy_mode_enabled" onchange="syncPerformanceAdgroupCopyMode()"> 성과 그룹 복사 모드 ON</label>
+                <div class="performance-copy-status" id="performance_copy_status">OFF</div>
+              </div>
+              <div class="performance-copy-panel">
+                <div class="form-group" style="margin-bottom:0;">
+                  <label>붙여넣을 캠페인</label>
+                  <select id="performance_copy_target_campaign_select"></select>
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                  <label>복사명 접미사</label>
+                  <input type="text" id="performance_copy_suffix" value="_성과선별">
+                </div>
+                <div class="performance-copy-checks">
+                  <label><input type="checkbox" id="performance_copy_exclude_off_assets"> OFF 소재 제외</label>
+                  <label><input type="checkbox" id="performance_copy_as_off"> 복사본 OFF</label>
+                </div>
+                <div class="performance-copy-actions">
+                  <button type="button" class="btn btn-sub" onclick="selectPerformanceCopyRows(true)">조회 그룹 전체선택</button>
+                  <button type="button" class="btn btn-sub" onclick="selectPerformanceCopyRows(false)">선택 해제</button>
+                  <button type="button" class="btn btn-primary" onclick="copyPerformanceSelectedAdgroups()">선택 그룹 복사</button>
+                </div>
               </div>
             </div>
             <div id="performance_stats_result" class="log-list">
@@ -13138,7 +13408,9 @@
                   <div class="account-export-button-grid">
                     <button class="btn btn-green is-export-action" type="button" onclick="downloadAccountKeywordsExcel()">키워드 엑셀</button>
                     <button class="btn btn-green is-export-action" type="button" onclick="downloadAccountAdsExcel()">소재 엑셀</button>
+                    <button class="btn btn-green is-export-action" type="button" onclick="downloadAccountIssuesExcel()">특이사항 엑셀</button>
                     <button class="btn btn-green is-export-action" type="button" onclick="downloadAccountExtensionsExcel()">확장소재 엑셀</button>
+                    <button class="btn btn-green is-export-action off-keyword-export-btn" type="button" onclick="downloadSelectedCampaignOffKeywordsExcel()">선택 캠페인 OFF 키워드 엑셀</button>
                   </div>
                   <div class="inline-export-control account-ext-export-control" title="확장소재 엑셀에 포함할 유형을 선택합니다. 전체가 기본입니다.">
                     <span class="inline-export-label">확장소재 유형</span>
@@ -13412,7 +13684,10 @@
                             <div class="form-group"><label>PC 연결 URL</label><input type="text" id="create_ad_pc" placeholder="https://..."></div>
                             <div class="form-group"><label>모바일 연결 URL</label><input type="text" id="create_ad_mobile" placeholder="https://..."></div>
                         </div>
-                        <label style="display:flex; gap:6px; font-size:12px; margin-bottom:12px; color:var(--muted);"><input type="checkbox" id="create_ad_multi"> 좌측에서 선택(체크)한 광고그룹 전체에 동일 소재 등록</label>
+                        <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
+                            <label style="display:flex; gap:6px; font-size:12px; color:var(--muted);"><input type="checkbox" id="create_ad_multi"> 좌측에서 선택(체크)한 광고그룹 전체에 동일 소재 등록</label>
+                            <label style="display:flex; gap:6px; font-size:12px; color:var(--muted);"><input type="checkbox" id="create_ad_campaign_multi"> 좌측에서 선택(체크)한 캠페인 하위 광고그룹 전체에 동일 소재 등록</label>
+                        </div>
                         <div class="btn-row">
                             <button class="btn btn-primary" style="flex:1;" onclick="createTextAd(false)">소재 등록</button>
                             <button class="btn btn-sub create-ad-keep-btn" style="flex:1;" onclick="createTextAd(true)">소재 등록 후 입력 유지</button>
@@ -13554,6 +13829,21 @@
                             <label>처리 결과</label>
                             <textarea id="shopping_ad_bid_result" rows="8" readonly placeholder="실행 결과가 여기에 표시됩니다."></textarea>
                         </div>
+                        <div style="height:1px; background:var(--line); margin:16px 0;"></div>
+                        <div class="card-title" style="font-size:13px; margin-bottom:8px;">쇼핑 상품 소재별 입찰가 대량 변경</div>
+                        <div class="field-note" style="margin-bottom:12px;">업로드 열: 소재ID, 변경 후 입찰가. 소재ID 기준으로 해당 쇼핑 상품 소재의 개별 입찰가만 변경합니다.</div>
+                        <div class="form-group">
+                            <label>상품 소재별 파일</label>
+                            <input type="file" id="shopping_product_ad_bid_file" accept=".csv,.txt,.tsv,.xls,.xlsx">
+                        </div>
+                        <div class="btn-row">
+                            <button type="button" class="btn btn-sub" style="flex:1;" onclick="downloadShoppingProductAdBidTemplate()">CSV 템플릿 다운로드</button>
+                            <button type="button" class="btn btn-primary" style="flex:1;" onclick="bulkUpdateShoppingProductAdBids()">상품 소재 입찰가 변경</button>
+                        </div>
+                        <div class="form-group" style="margin-top:10px;">
+                            <label>처리 결과</label>
+                            <textarea id="shopping_product_ad_bid_result" rows="8" readonly placeholder="실행 결과가 여기에 표시됩니다."></textarea>
+                        </div>
                     </div>
                     <div class="card">
                         <div class="card-title">입찰가 설정 방식만 일괄 변경</div>
@@ -13588,11 +13878,11 @@
                     <div class="card">
                         <div class="card-title">추천 및 콘텐츠 지면 입찰가 변경</div>
                         <div class="field-note" style="margin-bottom:12px;">
-                            선택한 캠페인 또는 광고그룹의 파워링크/쇼핑검색 광고그룹을 대상으로 추천/콘텐츠 지면 전용 입찰가를 일괄 적용합니다.
+                            선택한 캠페인 또는 광고그룹의 파워링크/쇼핑검색 광고그룹 콘텐츠 영역 별도 입찰가를 변경합니다.
                         </div>
                         <div class="form-group"><label>적용 범위</label><select id="contents_bid_scope"><option value="campaign">선택한 캠페인 하위 파워링크/쇼핑검색 그룹 전체</option><option value="adgroup">선택한 광고그룹 중 파워링크/쇼핑검색 그룹</option></select></div>
-                        <div class="form-group"><label>변경할 설정</label><select id="contents_network_bid_mode" onchange="syncContentsNetworkBidMode()"><option value="on">전용 입찰가 사용</option><option value="off">전용 입찰가 설정 안함</option></select></div>
-                        <div class="form-group"><label>추천 및 콘텐츠 지면 입찰가 (원)</label><input type="number" id="contents_network_bid_amt" value="100" min="70" max="100000" step="10"><div class="field-note" id="contents_network_bid_note">70원~100,000원, 10원 단위로 입력하세요.</div></div>
+                        <div class="form-group"><label>변경할 설정</label><select id="contents_network_bid_mode" onchange="syncContentsNetworkBidMode()"><option value="on">전용 입찰가 사용</option><option value="off">전용입찰가 사용안함</option></select></div>
+                        <div class="form-group"><label>추천 및 콘텐츠 지면 입찰가 (원)</label><input type="number" id="contents_network_bid_amt" value="100" min="50" max="100000" step="10" placeholder="예: 100"><div class="field-note" id="contents_network_bid_note">50원~100,000원, 10원 단위로 입력하세요.</div></div>
                         <div class="form-group">
                             <label>광고그룹명 포함 단어</label>
                             <input type="text" id="bid_filter_include_contents" placeholder="예: 메인, 일반">
@@ -13603,6 +13893,20 @@
                             <input type="text" id="bid_filter_exclude_contents" placeholder="예: 벌크, 테스트, 임시">
                         </div>
                         <button class="btn btn-primary" style="width:100%;" onclick="updateContentsNetworkBidAmt()">추천/콘텐츠 지면 입찰가 변경 실행</button>
+                        <div style="height:1px; background:var(--line); margin:16px 0;"></div>
+                        <div class="field-note" style="margin-bottom:10px;">CSV/XLSX 열: 광고그룹ID, 콘텐츠 입찰가. 입찰가 칸에 숫자를 넣으면 전용 입찰가를 적용하고, 설정 안함 또는 OFF를 넣으면 전용 입찰가를 해제합니다.</div>
+                        <div class="form-group">
+                            <label>대량 변경 파일</label>
+                            <input type="file" id="contents_bid_file" accept=".csv,.txt,.tsv,.xls,.xlsx">
+                        </div>
+                        <div class="btn-row">
+                            <button type="button" class="btn btn-sub" style="flex:1;" onclick="downloadContentsNetworkBidTemplate()">CSV 템플릿 다운로드</button>
+                            <button type="button" class="btn btn-primary" style="flex:1;" onclick="bulkUpdateContentsNetworkBidAmt()">CSV 기준 대량 변경</button>
+                        </div>
+                        <div class="form-group" style="margin-top:10px;">
+                            <label>대량 처리 결과</label>
+                            <textarea id="contents_bid_result" rows="8" readonly placeholder="실행 결과가 여기에 표시됩니다."></textarea>
+                        </div>
                     </div>
                     <div class="card">
                         <div class="card-title">상/하한 기준 자동 증감</div>
@@ -13725,7 +14029,7 @@
                     <div class="form-group"><label>공통 요일 선택</label><div class="schedule-grid" id="schedule_days"></div><div class="field-note" style="margin-top:6px;">구간별로 요일을 따로 지정하지 않으면 여기서 고른 요일을 공통으로 사용합니다.</div></div>
                     <div class="form-group">
                         <label>시간대별 가중치 개별 설정</label>
-                        <div class="field-note" style="margin-bottom:8px;">구간을 추가해 시간대마다 입찰가중치를 개별로 입력합니다. 화면의 종료 시각은 다음 시각 기준이라 00~06시를 적용하려면 00시~07시로 지정됩니다.</div>
+                        <div class="field-note" style="margin-bottom:8px;">구간을 추가해 시간대마다 입찰가중치를 개별로 입력합니다. 종료 시각은 다음 시각 기준이며, 종료가 시작보다 빠르면 자정을 넘는 구간으로 적용됩니다.</div>
                         <div class="schedule-block-toolbar" style="margin-bottom:8px;">
                             <button class="btn btn-sub" type="button" onclick="addScheduleBlock()">가중치 구간 추가</button>
                             <button class="btn btn-sub" type="button" onclick="clearScheduleBlocks()">구간 초기화</button>
@@ -13733,16 +14037,16 @@
                         <div id="schedule_blocks_container" class="schedule-blocks"></div>
                         <div class="field-note" style="margin-top:8px;">구간에 요일을 따로 지정하면 그 구간은 지정한 요일에만 적용됩니다. 지정하지 않으면 위 공통 요일을 사용합니다. 연속 시간은 하나의 구간으로 병합되어 적용됩니다. 예: 14~16시는 14:00~16:00 한 구간으로 저장됩니다.</div>
                     </div>
-                    <div class="form-group">
+                    <div class="form-group" id="schedule_quick_group">
                         <label>빠른 시간대 선택 (종료 시각 기준 자동 병합)</label>
                         <div class="hours-grid schedule-grid" id="schedule_hours"></div>
                         <div class="btn-row" style="margin-top:8px;">
-                            <button class="btn btn-sub" style="padding:4px 8px; font-size:12px;" onclick="selectAllScheduleHours(true)">시간 전체선택</button>
-                            <button class="btn btn-sub" style="padding:4px 8px; font-size:12px;" onclick="selectAllScheduleHours(false)">초기화</button>
+                            <button class="btn btn-sub" id="schedule_hours_select_all" style="padding:4px 8px; font-size:12px;" onclick="selectAllScheduleHours(true)">시간 전체선택</button>
+                            <button class="btn btn-sub" id="schedule_hours_clear" style="padding:4px 8px; font-size:12px;" onclick="selectAllScheduleHours(false)">초기화</button>
                         </div>
-                        <div class="field-note" style="margin-top:8px;">마지막으로 선택한 시각은 종료 시각으로 처리합니다. 예: 00·01·02·03 선택 → 00~03, 07~23 선택 → 07~24</div>
+                        <div class="field-note" id="schedule_quick_note" style="margin-top:8px;">마지막으로 선택한 시각은 종료 시각으로 처리합니다. 예: 00·01·02·03 선택 → 00~03, 07~23 선택 → 07~24</div>
                     </div>
-                    <div class="form-group" style="max-width:200px;"><label>입찰 가중치 (%)</label><input type="number" id="schedule_bid_weight" value="100" min="10" max="500"></div>
+                    <div class="form-group" id="schedule_common_bid_group" style="max-width:200px;"><label>입찰 가중치 (%)</label><input type="number" id="schedule_bid_weight" value="100" min="10" max="500"></div>
                     <button class="btn btn-primary" onclick="saveScheduleBySelection()">선택한 시간대로 변경</button>
                 </div>
             </div>
@@ -14621,7 +14925,7 @@
                 <div class="card" style="border-color: #fca5a5; background: #fef2f2;">
                     <div class="card-title" style="color:var(--red); border-bottom-color:#fca5a5;">하위 데이터 일괄 삭제 (위험)</div>
                     <div class="field-help" style="margin-bottom:16px; color:#991b1b; font-size:13px;">
-                        좌측 체크박스에서 선택한 <strong>캠페인 또는 광고그룹 하위의 키워드·소재·확장소재 데이터</strong>를 일괄 삭제합니다. 캠페인/광고그룹 자체 삭제는 위의 별도 관리 영역에서 실행합니다.
+                        좌측 체크박스에서 선택한 <strong>캠페인 또는 광고그룹 하위의 키워드·소재·확장소재·제외키워드 데이터</strong>를 일괄 삭제합니다. 캠페인/광고그룹 자체 삭제는 위의 별도 관리 영역에서 실행합니다.
                     </div>
                     <div class="grid-2">
                         <div class="form-group">
@@ -14638,7 +14942,25 @@
                                 <option value="keyword">키워드 일괄 삭제</option>
                                 <option value="ad">소재 일괄 삭제</option>
                                 <option value="extension">확장소재 일괄 삭제</option>
+                                <option value="restricted_keyword">제외키워드 일괄 삭제</option>
                             </select>
+                        </div>
+                    </div>
+                    <div id="bulk_del_negative_wrap" style="display:none;">
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label>삭제할 제외키워드</label>
+                                <textarea id="bulk_del_negative_text" rows="4" placeholder="무료&#10;중고"></textarea>
+                                <div class="field-note">엔터, 쉼표, 세미콜론으로 여러 개를 입력할 수 있습니다.</div>
+                            </div>
+                            <div class="form-group">
+                                <label>매칭 방식</label>
+                                <select id="bulk_del_negative_match_mode">
+                                    <option value="exact">정확히 일치하는 제외키워드만</option>
+                                    <option value="contains">입력 단어가 포함된 제외키워드</option>
+                                </select>
+                                <div class="field-note">기본값은 정확히 일치입니다. 포함 방식은 더 넓게 삭제됩니다.</div>
+                            </div>
                         </div>
                     </div>
                     <div id="bulk_del_ext_wrap" class="form-group" style="display:none;">
@@ -14801,6 +15123,8 @@ let accountStatusMap = {};
 let performanceStatsLastData = null;
 let performanceStatsSortState = { key: null, direction: 'desc', kind: 'number' };
 let performanceBidEditorState = { key: null };
+let performanceAdgroupCopyModeEnabled = false;
+let selectedPerformanceCopyAdgroupIds = new Set();
 const API_KEY_STORAGE_KEY = 'naver_api_key';
 const SECRET_KEY_STORAGE_KEY = 'naver_secret_key';
 const SAVE_KEYS_STORAGE_KEY = 'naver_save_keys';
@@ -15847,7 +16171,7 @@ function syncCampaignToggleSelectButton(items = null) {
     btn.setAttribute('aria-pressed', isAllSelected ? 'true' : 'false');
     btn.classList.toggle('is-selected', isAllSelected);
     btn.disabled = total === 0;
-    btn.title = total === 0 ? '선택할 캠페인이 없습니다.' : (isAllSelected ? '현재 조회 목록 선택 해제' : '현재 조회 목록 전체 체크');
+    btn.title = total === 0 ? '선택할 캠페인이 없습니다.' : (isAllSelected ? '캠페인/광고그룹 선택 전체 초기화' : '현재 조회 목록 전체 체크');
 }
 function toggleCampaignFilteredSelection() {
     const items = getFilteredMasterItems('campaign');
@@ -15857,8 +16181,12 @@ function toggleCampaignFilteredSelection() {
         return;
     }
     const isAllSelected = items.every(x => checkedCampaignIds.has(x.id));
-    if(isAllSelected) items.forEach(x => checkedCampaignIds.delete(x.id));
-    else items.forEach(x => checkedCampaignIds.add(x.id));
+    if(isAllSelected) {
+        checkedCampaignIds.clear();
+        checkedAdgroupIds.clear();
+    } else {
+        items.forEach(x => checkedCampaignIds.add(x.id));
+    }
     renderMasterList();
 }
 
@@ -15877,9 +16205,14 @@ function selectByType(type, targetType) {
     renderMasterList();
 }
 function clearSelectionByType(type, targetType = null) {
-    const items = getFilteredMasterItems(type).filter(x => !targetType || isTypeMatch(type, x, targetType));
     const set = type === 'campaign' ? checkedCampaignIds : checkedAdgroupIds;
-    items.forEach(x => set.delete(x.id));
+    if(!targetType) {
+        set.clear();
+        if(type === 'campaign') checkedAdgroupIds.clear();
+    } else {
+        const items = getFilteredMasterItems(type).filter(x => isTypeMatch(type, x, targetType));
+        items.forEach(x => set.delete(x.id));
+    }
     renderMasterList();
 }
 
@@ -17694,6 +18027,7 @@ window.onload = async function() {
         }
     }
     syncExtensionForm();
+    syncContentsNetworkBidMode();
     syncAvgPositionLimit();
     syncKeywordAvgPositionLimit();
     toggleBudgetInput('new_campaign_unlimited', 'new_campaign_budget');
@@ -17806,15 +18140,39 @@ function adgroupMatchesGlobalQuery(adgroupName, adgroupId, query, matchMode='par
 function getGlobalAdgroupSearchResultIds(rows = globalAdgroupSearchResults) {
     return (Array.isArray(rows) ? rows : []).map(row => String(row?.adgroup_id || '').trim()).filter(Boolean);
 }
+function getGlobalAdgroupSearchRowById(adgroupId) {
+    const id = String(adgroupId || '').trim();
+    if(!id) return null;
+    return (globalAdgroupSearchResults || []).find(row => String(row?.adgroup_id || '') === id) || null;
+}
+function getKnownAdgroupRow(adgroupId) {
+    const id = String(adgroupId || '').trim();
+    if(!id) return null;
+    const currentRow = (adgroups || []).find(row => String(row?.id || '') === id);
+    if(currentRow) return currentRow;
+    const globalRow = getGlobalAdgroupSearchRowById(id);
+    if(!globalRow) return null;
+    const adgroup = globalRow.adgroup && typeof globalRow.adgroup === 'object' ? globalRow.adgroup : {};
+    const raw = adgroup.raw && typeof adgroup.raw === 'object' ? adgroup.raw : adgroup;
+    return {
+        ...adgroup,
+        id,
+        name: adgroup.name || globalRow.adgroup_name || id,
+        adgroupType: adgroup.adgroupType || globalRow.adgroupType,
+        raw,
+    };
+}
+function refreshGlobalAdgroupSearchResultsIfVisible() {
+    if((globalAdgroupSearchResults || []).length) {
+        renderGlobalAdgroupSearchResults({ matches: globalAdgroupSearchResults });
+    }
+}
 function clearGlobalAdgroupResultSelection(showMessage = true) {
-    const ids = getGlobalAdgroupSearchResultIds();
-    let changed = 0;
-    ids.forEach(id => {
-        if(checkedAdgroupIds.delete(id)) changed += 1;
-    });
+    const changed = checkedAdgroupIds.size;
+    checkedAdgroupIds.clear();
     renderMasterList();
     renderGlobalAdgroupSearchResults({ matches: globalAdgroupSearchResults });
-    if(showMessage) showToast(changed ? `검색 결과 광고그룹 ${changed}개 선택을 해제했습니다.` : '해제할 검색 결과 선택이 없습니다.', changed ? 'success' : 'info');
+    if(showMessage) showToast(changed ? `광고그룹 ${changed}개 선택을 모두 해제했습니다.` : '해제할 광고그룹 선택이 없습니다.', changed ? 'success' : 'info');
 }
 function handleGlobalAdgroupSearchKeydown(event) {
     if(event.key !== 'Enter') return;
@@ -17862,6 +18220,7 @@ function renderGlobalAdgroupSearchResults(payload = {}) {
                         <span>${escapeHtml(row.campaign_name || campId || '-')}</span>
                         <span class="badge type-badge ${escapeAttr(getAdgroupTypeBadgeColor(adg))}">${escapeHtml(getAdgroupTypeLabel(adg))}</span>
                         <span>${escapeHtml(adgId)}</span>
+                        ${renderShoppingAdBidButton(adg)}
                     </div>
                 </div>
             </div>`;
@@ -17873,6 +18232,7 @@ function renderGlobalAdgroupSearchResults(payload = {}) {
         </div>
         ${items}
     `;
+    hydrateGlobalShoppingAdBids(rows).catch(() => {});
 }
 async function searchGlobalAdgroups(options = {}) {
     const input = document.getElementById('global_adgroup_search');
@@ -18426,8 +18786,12 @@ function toggleSelectAll(type) {
     const set = isCamp ? checkedCampaignIds : checkedAdgroupIds;
     const box = document.getElementById(isCamp ? 'camp_select_all' : 'adg_select_all');
     
-    if(box.checked) filtered.forEach(x => set.add(x.id));
-    else filtered.forEach(x => set.delete(x.id));
+    if(box.checked) {
+        filtered.forEach(x => set.add(x.id));
+    } else {
+        set.clear();
+        if(isCamp) checkedAdgroupIds.clear();
+    }
     renderMasterList();
 }
 
@@ -18875,7 +19239,7 @@ function updateSelectOptions() {
     const campaignIdSet = new Set(campaigns.map(x => String(x.id)));
     const adgroupIdSet = new Set(adgroups.map(x => String(x.id)));
     const campHtml = campaigns.map(x => `<option value="${escapeAttr(x.id)}">${escapeHtml(x.name)}</option>`).join('');
-    ['create_adgroup_campaign', 'copy_adgroup_target_campaign_select', 'copy_entity_target_campaign_select'].forEach(id => {
+    ['create_adgroup_campaign', 'copy_adgroup_target_campaign_select', 'copy_entity_target_campaign_select', 'performance_copy_target_campaign_select'].forEach(id => {
         const el = document.getElementById(id);
         if(el) {
             const prev = el.value;
@@ -18886,6 +19250,7 @@ function updateSelectOptions() {
     });
     syncCreateAdgroupForm();
     if(document.getElementById('copy_entity_target_campaign_select')) loadCopyEntityTargetAdgroups(false);
+    updatePerformanceCopyControls();
 
     const adgHtml = adgroups.map(x => `<option value="${escapeAttr(x.id)}">${escapeHtml(x.name)}</option>`).join('');
     const adgEmptyHtml = '<option value="">광고그룹 없음</option>';
@@ -19340,6 +19705,8 @@ function syncBulkDeleteTarget() {
     const target = document.getElementById('bulk_del_target')?.value || 'keyword';
     const extWrap = document.getElementById('bulk_del_ext_wrap');
     if(extWrap) extWrap.style.display = target === 'extension' ? 'block' : 'none';
+    const negativeWrap = document.getElementById('bulk_del_negative_wrap');
+    if(negativeWrap) negativeWrap.style.display = target === 'restricted_keyword' ? 'block' : 'none';
 
     const campaignScope = document.getElementById('bulk_del_scope_campaign');
     const adgroupScope = document.getElementById('bulk_del_scope_adgroup');
@@ -19357,7 +19724,11 @@ function syncBulkDeleteTarget() {
     } else {
         if(campaignScope) campaignScope.disabled = false;
         if(adgroupScope) adgroupScope.disabled = false;
-        if(scopeNote) scopeNote.textContent = '둘 다 체크하면 선택 캠페인 하위 그룹과 선택 광고그룹을 합쳐서 삭제 대상을 찾습니다.';
+        if(scopeNote) {
+            scopeNote.textContent = target === 'restricted_keyword'
+                ? '둘 다 체크하면 선택 캠페인 하위 그룹과 선택 광고그룹에서 입력한 제외키워드만 찾아 삭제합니다.'
+                : '둘 다 체크하면 선택 캠페인 하위 그룹과 선택 광고그룹을 합쳐서 삭제 대상을 찾습니다.';
+        }
     }
 }
 
@@ -19487,7 +19858,7 @@ function buildShoppingAdBidSummary(rows, adgroupBid=null) {
 function updateShoppingAdBidCacheFromRows(adgroupId, rows) {
     const id = String(adgroupId || '').trim();
     if (!id) return null;
-    const row = (adgroups || []).find(x => String(x?.id || '') === id) || {};
+    const row = getKnownAdgroupRow(id) || {};
     const summary = buildShoppingAdBidSummary(rows, row?.raw?.bidAmt ?? row?.bidAmt);
     shoppingAdBidCache.set(id, { status:'ready', ...summary });
     return summary;
@@ -19535,6 +19906,32 @@ async function hydrateVisibleShoppingAdBids(rows) {
     });
     await Promise.allSettled(jobs);
     if(String(currentCampaignId || '') === campaignAtStart) renderMasterList();
+}
+
+async function hydrateGlobalShoppingAdBids(rows = globalAdgroupSearchResults) {
+    const c = creds();
+    if(!c.api_key || !c.secret_key || !c.customer_id) return;
+    const visibleRows = Array.isArray(rows) ? rows : [];
+    const targets = visibleRows
+        .map(row => getKnownAdgroupRow(row?.adgroup_id) || row?.adgroup)
+        .filter(isShoppingLikeAdgroupRow)
+        .map(row => String(row?.id || '').trim())
+        .filter(Boolean)
+        .filter(id => !shoppingAdBidCache.has(id));
+    if(!targets.length) return;
+    const seqAtStart = globalAdgroupSearchSeq;
+    targets.forEach(id => shoppingAdBidCache.set(id, { status:'loading' }));
+    refreshGlobalAdgroupSearchResultsIfVisible();
+    const jobs = targets.map(async id => {
+        try {
+            const ads = await fetchJsonCached('/get_ads', { ...c, adgroup_id:id }, { ttlMs:30000 });
+            updateShoppingAdBidCacheFromRows(id, ads);
+        } catch(err) {
+            shoppingAdBidCache.set(id, { status:'error', message:err.message || String(err) });
+        }
+    });
+    await Promise.allSettled(jobs);
+    if(seqAtStart === globalAdgroupSearchSeq) refreshGlobalAdgroupSearchResultsIfVisible();
 }
 
 function getAdBody(ad) {
@@ -19619,30 +20016,69 @@ function isNormalIssueValue(value) {
     return ['ON','OK','NORMAL','NONE','NULL','TRUE','ACTIVE','ENABLED','ELIGIBLE','APPROVED','ACCEPTED','VALID','RUNNING','SERVING','검수완료','정상','사용'].includes(normalized);
 }
 
+const ASSET_ISSUE_REASON_KEYS = ['statusReason','statusDetail','statusMessage','statusDescription','inspectStatus','reason','reasonCode','servingStatus','servingState','servingReason','deliveryStatus','deliveryState','deliveryReason','displayStatus','displayState','displayReason','rejectReason','reviewStatus','reviewState','reviewReason','restrictionReason','restrictedReason','issueDetail','issueReason','systemReason','adStatus','adStatusReason','operationStatus'];
+
+function normalizeIssueReasonText(value) {
+    let clean = String(value == null ? '' : value).replace(/\s+/g, ' ').trim();
+    if(!clean) return '';
+    const half = clean.length / 2;
+    if(Number.isInteger(half) && half >= 4 && clean.slice(0, half) === clean.slice(half)) {
+        clean = clean.slice(0, half).trim();
+    }
+    const normalized = clean.replace(/[\s_\-./:]+/g, '').toUpperCase();
+    if(normalized.includes('ADABNORMALINTERLOCK') || normalized.includes('ABNORMALINTERLOCK')) return '중지: 소재 연동 상태 비정상';
+    if(normalized.includes('ADDISAPPROVED') || normalized.includes('DISAPPROVED')) return '중지: 소재 보류';
+    if(normalized === 'PENDING' || normalized.includes('INSPECTPENDING') || normalized.includes('REVIEWPENDING')) return '검수 대기';
+    if(normalized.includes('ADPAUSED') || normalized === 'PAUSED') return '사용자 OFF';
+    return clean;
+}
+
 function pushUniqueIssueReason(reasons, text) {
-    const clean = String(text || '').trim();
+    const clean = normalizeIssueReasonText(text);
     if(clean && !reasons.includes(clean)) reasons.push(clean);
+}
+
+function getAssetIssueReasonText(row, reasons = null) {
+    const values = Array.isArray(reasons) ? reasons : getDeepValuesByKeys(row, ASSET_ISSUE_REASON_KEYS);
+    return values.map(value => {
+        if(value && typeof value === 'object') return JSON.stringify(value);
+        return String(value == null ? '' : value);
+    }).join(' ').toLowerCase();
+}
+
+function hasSystemIssueReason(row, reasons = null) {
+    const text = getAssetIssueReasonText(row, reasons);
+    return /(소재\s*연동\s*상태\s*비정상|소재\s*보류|비정상|노출|제한|심사|검수|반려|거절|중지|보류|불가|abnormal|interlock|disapproved|pending|reject|inspect|review|restrict|limit|serving|delivery|display)/i.test(text);
+}
+
+function isUserOffIssue(row, reasons = null) {
+    const reasonText = getAssetIssueReasonText(row, reasons);
+    const statusLabel = getEntityStatusLabel(row);
+    const locked = parseBoolMaybe(row?.userLock ?? row?.userLocked ?? row?.isUserLocked);
+    const enabled = parseBoolMaybe(row?.enable ?? row?.enabled ?? row?.isEnabled);
+    if(hasSystemIssueReason(row, reasons)) return false;
+    if(locked === true || /사용자\s*잠금|사용자\s*off|userlock|offbyuser|pausebyuser|stopbyuser|adpaused/.test(reasonText)) return true;
+    return enabled === false || (statusLabel === 'OFF' && locked !== false && enabled !== true);
 }
 
 function getAssetIssueReasons(row) {
     const reasons = [];
     const statusLabel = getEntityStatusLabel(row);
-    if(statusLabel === 'OFF') pushUniqueIssueReason(reasons, 'OFF 또는 사용자잠금');
     const enabled = parseBoolMaybe(row?.enable ?? row?.enabled ?? row?.isEnabled);
-    if(enabled === false) pushUniqueIssueReason(reasons, '비활성');
     const locked = parseBoolMaybe(row?.userLock ?? row?.userLocked ?? row?.isUserLocked);
-    if(locked === true) pushUniqueIssueReason(reasons, '사용자잠금');
     const managed = parseBoolMaybe(row?.managedKeyword);
     if(managed === true) pushUniqueIssueReason(reasons, '관리키워드');
     const deleted = parseBoolMaybe(row?.delFlag ?? row?.deleted);
     if(deleted === true) pushUniqueIssueReason(reasons, '삭제 플래그');
 
-    const issueKeys = ['statusReason','inspectStatus','reason','reasonCode','servingStatus','servingReason','deliveryStatus','deliveryReason','displayStatus','displayReason','rejectReason','reviewStatus','reviewReason','restrictionReason','restrictedReason'];
-    getDeepValuesByKeys(row, issueKeys).forEach(value => {
+    getDeepValuesByKeys(row, ASSET_ISSUE_REASON_KEYS).forEach(value => {
         if(isNormalIssueValue(value)) return;
         const text = typeof value === 'object' ? JSON.stringify(value).slice(0, 160) : String(value);
         pushUniqueIssueReason(reasons, text);
     });
+    if(locked === true && !hasSystemIssueReason(row, reasons)) pushUniqueIssueReason(reasons, '사용자 OFF');
+    if(enabled === false && !hasSystemIssueReason(row, reasons)) pushUniqueIssueReason(reasons, '비활성');
+    if(statusLabel === 'OFF' && !reasons.length) pushUniqueIssueReason(reasons, 'OFF');
 
     const rawStatus = String(row?.rawStatus || row?.state || '').trim();
     if(rawStatus && rawStatus.toUpperCase() !== 'ON' && !isNormalIssueValue(rawStatus)) {
@@ -19653,38 +20089,14 @@ function getAssetIssueReasons(row) {
 
 function classifyAssetIssue(row, reasons = getAssetIssueReasons(row)) {
     const labels = [];
-    const reasonText = (Array.isArray(reasons) ? reasons.join(' ') : String(reasons || '')).toLowerCase();
-    const statusLabel = getEntityStatusLabel(row);
-    const locked = parseBoolMaybe(row?.userLock ?? row?.userLocked ?? row?.isUserLocked);
-    const enabled = parseBoolMaybe(row?.enable ?? row?.enabled ?? row?.isEnabled);
-    if(statusLabel === 'OFF' || locked === true || enabled === false || /사용자잠금|비활성|\boff\b/.test(reasonText)) {
-        labels.push('OFF');
-    }
-    const restrictedKeys = [
-        row?.statusReason,
-        row?.inspectStatus,
-        row?.servingStatus,
-        row?.servingReason,
-        row?.deliveryStatus,
-        row?.deliveryReason,
-        row?.displayStatus,
-        row?.displayReason,
-        row?.rejectReason,
-        row?.reviewStatus,
-        row?.reviewReason,
-        row?.restrictionReason,
-        row?.restrictedReason,
-    ];
-    const restrictedText = restrictedKeys.map(v => {
-        if(v && typeof v === 'object') return JSON.stringify(v);
-        return String(v == null ? '' : v);
-    }).join(' ').toLowerCase();
-    if(
-        restrictedKeys.some(v => !isNormalIssueValue(v))
-        || /(노출|제한|심사|검수|반려|거절|중지|보류|불가|reject|inspect|review|restrict|limit|serving|delivery|display)/i.test(`${restrictedText} ${reasonText}`)
-    ) {
+    const reasonText = getAssetIssueReasonText(row, reasons);
+    if(isUserOffIssue(row, reasons)) labels.push('사용자 OFF');
+    if(/소재\s*연동\s*상태\s*비정상|adabnormalinterlock|abnormalinterlock/i.test(reasonText)) labels.push('소재 연동 비정상');
+    else if(/소재\s*보류|disapproved|pending|비정상|중지|보류|불가|serving|delivery|display/i.test(reasonText) || (getEntityStatusLabel(row) === 'OFF' && !isUserOffIssue(row, reasons))) labels.push('시스템 중지');
+    if(/소재\s*보류|노출|제한|심사|검수|반려|거절|disapproved|pending|reject|inspect|review|restrict|limit/i.test(reasonText)) {
         labels.push('노출제한');
     }
+    if(!labels.length && getEntityStatusLabel(row) === 'OFF') labels.push('OFF');
     if(!labels.length && reasons.length) labels.push('기타');
     return labels;
 }
@@ -19697,8 +20109,11 @@ function getAccountIssueModeLabel(mode = accountIssueLookupMode) {
 
 function filterIssueRowsByMode(rows, mode = accountIssueLookupMode) {
     const list = Array.isArray(rows) ? rows : [];
-    if(mode === 'off') return list.filter(row => (row.issueTypes || []).includes('OFF'));
-    if(mode === 'restricted') return list.filter(row => (row.issueTypes || []).includes('노출제한'));
+    if(mode === 'off') return list.filter(row => (row.issueTypes || []).includes('사용자 OFF') || (row.issueTypes || []).includes('OFF'));
+    if(mode === 'restricted') {
+        const restrictedTypes = new Set(['노출제한', '시스템 중지', '소재 연동 비정상']);
+        return list.filter(row => (row.issueTypes || []).some(type => restrictedTypes.has(type)));
+    }
     return list;
 }
 
@@ -19997,11 +20412,18 @@ function isShoppingAccountAdRow(row) {
     return type.includes('SHOPPING') || type.includes('CATALOG') || campType.includes('SHOPPING') || adgroupType.includes('SHOPPING') || adgroupType.includes('CATALOG');
 }
 
+function getAccountIssuePath(row, fallbackKind = '') {
+    const campBucket = getCampaignTypeBucket({ campaignTp: row?.campaignType || row?.campaignTp || '' });
+    const typeLabel = campBucket === 'SHOPPING' ? '쇼핑검색' : (campBucket === 'WEB_SITE' ? '파워링크' : (fallbackKind || '대상'));
+    return [typeLabel, row?.campaignName, row?.adgroupName].map(v => String(v || '').trim()).filter(Boolean).join(' > ');
+}
+
 function buildAccountIssueRows() {
     const keywordRows = (Array.isArray(accountLookupKeywordRows) ? accountLookupKeywordRows : []).map(row => {
         const reasons = getAssetIssueReasons(row);
         return {
             kind: '파워링크 키워드',
+            path: getAccountIssuePath(row, '파워링크'),
             campaignName: row?.campaignName || '',
             adgroupName: row?.adgroupName || '',
             name: row?.keyword || row?.keywordNm || row?.keywordId || '-',
@@ -20016,6 +20438,7 @@ function buildAccountIssueRows() {
         const reasons = getAssetIssueReasons(row);
         return {
             kind: '쇼핑 소재',
+            path: getAccountIssuePath(row, '쇼핑검색'),
             campaignName: row?.campaignName || '',
             adgroupName: row?.adgroupName || '',
             name: firstTextValue(row?.productName, row?.headline, getAdProductName(row), getAdHeadline(row), row?.adId),
@@ -20037,8 +20460,7 @@ function renderAccountIssuesPreview() {
     renderAccountLookupTable('table_account_issues', [
         {k:'kind', l:'구분'},
         {k:'issueTypes', l:'유형', f:(v)=>Array.isArray(v) ? v.join(', ') : v},
-        {k:'campaignName', l:'캠페인명'},
-        {k:'adgroupName', l:'광고그룹명'},
+        {k:'path', l:'경로'},
         {k:'name', l:'이름'},
         {k:'statusHtml', l:'상태', f:(v)=>v, html:true},
         {k:'reasons', l:'특이사항', f:(v)=>Array.isArray(v) ? v.join(' / ') : v},
@@ -20148,11 +20570,12 @@ async function loadAccountExtensionsLookup() {
 async function loadAccountIssuesLookup(mode = 'all') {
     accountIssueLookupMode = mode === 'off' ? 'off' : (mode === 'restricted' ? 'restricted' : 'all');
     const payload = getAssetLookupPayload(); if(!payload) return;
+    const issuePayload = { ...payload, include_issue_detail: true, _cache_bust: `${payload._cache_bust || 0}:issues:${Date.now()}` };
     try {
         showLoader(`${getAccountIssueModeLabel()} 조회 중...`);
         const [kwData, adData] = await Promise.all([
-            fetchJsonCached('/query_account_keywords', payload, { ttlMs:60000 }),
-            fetchJsonCached('/query_account_ads', payload, { ttlMs:60000 }),
+            fetchJsonCached('/query_account_keywords', issuePayload, { ttlMs:60000, force:true }),
+            fetchJsonCached('/query_account_ads', issuePayload, { ttlMs:60000, force:true }),
         ]);
         accountLookupKeywordRows = Array.isArray(kwData?.rows) ? kwData.rows : [];
         accountLookupAdsRows = Array.isArray(adData?.rows) ? adData.rows : [];
@@ -20244,10 +20667,41 @@ async function downloadAccountKeywordsExcel() {
     catch(err) { showToast(`키워드 엑셀 실패: ${err.message}`, 'error'); }
 }
 
+async function downloadSelectedCampaignOffKeywordsExcel() {
+    const c = ensureReady(); if(!c) return;
+    const campaignIds = getCheckedCampaignIdsInViewOrder();
+    if(!campaignIds.length) {
+        showToast('좌측 체크박스에서 캠페인을 1개 이상 선택해주세요.', 'error');
+        return;
+    }
+    const payload = {
+        ...c,
+        scope: 'campaign',
+        campaign_ids: campaignIds,
+        adgroup_ids: [],
+        keyword_status_filter: 'off',
+        _cache_bust: apiLookupCacheVersion
+    };
+    try { await downloadPostFile('/export_account_keywords_excel', payload, '선택 캠페인 OFF 키워드 엑셀 생성 중...', 'selected_campaign_off_keywords.xlsx'); }
+    catch(err) { showToast(`OFF 키워드 엑셀 실패: ${err.message}`, 'error'); }
+}
+
 async function downloadAccountAdsExcel() {
     const payload = getAssetLookupPayload(); if(!payload) return;
     try { await downloadPostFile('/export_account_ads_excel', payload, '소재 엑셀 생성 중...', 'account_ads.xlsx'); }
     catch(err) { showToast(`소재 엑셀 실패: ${err.message}`, 'error'); }
+}
+
+async function downloadAccountIssuesExcel() {
+    const payload = getAssetLookupPayload(); if(!payload) return;
+    const mode = accountIssueLookupMode === 'off' ? 'off' : (accountIssueLookupMode === 'restricted' ? 'restricted' : 'all');
+    payload.issue_filter = mode;
+    payload.include_issue_detail = true;
+    payload._cache_bust = `${payload._cache_bust || 0}:issues-export:${Date.now()}`;
+    const label = mode === 'restricted' ? '노출제한' : (mode === 'off' ? 'OFF' : '특이사항 전체');
+    const fallback = mode === 'restricted' ? 'account_issues_restricted.xlsx' : (mode === 'off' ? 'account_issues_off.xlsx' : 'account_issues.xlsx');
+    try { await downloadPostFile('/export_account_issues_excel', payload, `${label} 엑셀 생성 중...`, fallback); }
+    catch(err) { showToast(`특이사항 엑셀 실패: ${err.message}`, 'error'); }
 }
 
 async function downloadAccountExtensionsExcel() {
@@ -21100,6 +21554,11 @@ function getTargetAdgroupIds(singleId, checkboxId) {
     return (useMulti && selected.length) ? selected : (singleId ? [singleId] : []);
 }
 
+function getTargetCampaignIds(checkboxId) {
+    const useCampaignScope = document.getElementById(checkboxId)?.checked;
+    return useCampaignScope ? Array.from(checkedCampaignIds || []).filter(Boolean) : [];
+}
+
 function insertKeywordToken(targetId) {
     const input = document.getElementById(targetId);
     if (!input) return;
@@ -21116,11 +21575,12 @@ async function createTextAd(keepInputs = false) {
     const c = ensureReady(); if(!c) return;
     const baseId = document.getElementById('create_ad_adgroup').value;
     const adgroupIds = getTargetAdgroupIds(baseId, 'create_ad_multi');
-    if(!adgroupIds.length) { showToast('대상 광고그룹이 없습니다.', 'error'); return; }
+    const campaignIds = getTargetCampaignIds('create_ad_campaign_multi');
+    if(!adgroupIds.length && !campaignIds.length) { showToast('대상 광고그룹 또는 캠페인이 없습니다.', 'error'); return; }
 
     try {
         const data = await postJson('/create_text_ad_simple', {
-            ...c, adgroup_ids: adgroupIds,
+            ...c, adgroup_ids: adgroupIds, campaign_ids: campaignIds,
             headline: document.getElementById('create_ad_headline').value, 
             description: document.getElementById('create_ad_desc').value,
             replace_keyword: document.getElementById('create_ad_replace_keyword').value,
@@ -21133,7 +21593,7 @@ async function createTextAd(keepInputs = false) {
             document.getElementById('create_ad_desc').value = '';
             document.getElementById('create_ad_replace_keyword').value = '';
         }
-        if(currentAdgroupId && adgroupIds.includes(currentAdgroupId)) await loadAdgroupDetails();
+        if(currentAdgroupId && (adgroupIds.includes(currentAdgroupId) || (currentCampaignId && campaignIds.includes(currentCampaignId)))) await loadAdgroupDetails();
     } catch(err) { showToast(err.message, 'error'); }
 }
 
@@ -21431,6 +21891,75 @@ async function bulkUpdateShoppingAdBids() {
     }
 }
 
+function downloadShoppingProductAdBidTemplate() {
+    const header = ['소재ID','변경 후 입찰가'];
+    const rows = [
+        ['nad-a001-01-000000000000001','280'],
+        ['nad-a001-01-000000000000002','300'],
+        ['nad-a001-01-000000000000003','320'],
+    ];
+    const csv = '\ufeff' + [header.join(','), ...rows.map(row => row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n');
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'shopping_product_ad_bid_change_template.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+}
+
+async function bulkUpdateShoppingProductAdBids() {
+    const c = ensureReady(); if(!c) return;
+    const input = document.getElementById('shopping_product_ad_bid_file');
+    const file = input?.files?.[0];
+    const resultBox = document.getElementById('shopping_product_ad_bid_result');
+    if(!file) { showToast('업로드 파일을 선택해주세요.', 'error'); return; }
+
+    const formData = new FormData();
+    formData.append('api_key', c.api_key);
+    formData.append('secret_key', c.secret_key);
+    formData.append('customer_id', c.customer_id);
+    formData.append('file', file);
+
+    showLoader('쇼핑 상품 소재 입찰가 대량 변경 중...');
+    try {
+        const res = await fetch('/bulk_update_shopping_product_ad_bids', { method: 'POST', body: formData });
+        const text = await res.text();
+        let data = {};
+        try { data = text ? JSON.parse(text) : {}; } catch(e) { data = { error: stripHtmlForErrorMessage(text) || text || `${res.status}` }; }
+        scheduleActionLogRefresh(res.ok ? 500 : 250);
+        if(res.ok) bumpLookupCacheVersion();
+        if(!res.ok) throw makeHttpErrorFromResponse(res, data, text);
+        const warnings = Array.isArray(data.warnings) ? data.warnings.map(x => `참고: ${x}`) : [];
+        const lines = Array.isArray(data.results)
+            ? data.results.map(item => {
+                const label = item.ok === true ? '성공' : (item.ok === false ? '실패' : '유지');
+                const bid = item.bidAmt ? `${Number(item.bidAmt).toLocaleString()}원` : '-';
+                const id = item.ad_id || item.referenceKey || '-';
+                return `${label} ${item.row_no || ''}행 | ${id} | ${item.name || '-'} | ${bid} | ${item.detail || ''}`;
+            })
+            : [];
+        if(resultBox) {
+            resultBox.value = [
+                `총 행 ${data.total || 0}건 / 적용 대상 ${data.targets || 0}개`,
+                `변경 ${data.success || 0}개 / 유지 ${data.unchanged || 0}개 / 실패 ${data.target_fail || 0}개 / 제외 행 ${data.invalid_rows || 0}건`,
+                ...warnings,
+                '',
+                ...lines
+            ].join('\n').trim();
+        }
+        showToast(data.message || '쇼핑 상품 소재 입찰가 대량 변경 완료', Number(data.fail || 0) > 0 ? 'info' : 'success');
+        await refreshDashboardAfterChange({ data, forceDetail: !!currentAdgroupId });
+    } catch(err) {
+        if(resultBox) resultBox.value = `실패: ${err.message}`;
+        showToast(err.message, 'error');
+    } finally {
+        hideLoader();
+    }
+}
+
 async function changeBidModeByScope() {
     const c = ensureReady(); if(!c) return;
     const scope = document.getElementById('bid_mode_scope_type').value;
@@ -21498,10 +22027,23 @@ function syncContentsNetworkBidMode() {
     const useContentsBid = (document.getElementById('contents_network_bid_mode')?.value || 'on') !== 'off';
     const input = document.getElementById('contents_network_bid_amt');
     const note = document.getElementById('contents_network_bid_note');
-    if(input) input.disabled = !useContentsBid;
+    if(input) {
+        if(!useContentsBid && String(input.value || '').trim()) {
+            input.dataset.enabledValue = input.value;
+        }
+        input.disabled = !useContentsBid;
+        input.readOnly = !useContentsBid;
+        input.setAttribute('aria-disabled', String(!useContentsBid));
+        input.placeholder = useContentsBid ? '예: 100' : '전용입찰가 사용안함';
+        if(!useContentsBid) {
+            input.value = '';
+        } else if(!String(input.value || '').trim() && input.dataset.enabledValue) {
+            input.value = input.dataset.enabledValue;
+        }
+    }
     if(note) note.textContent = useContentsBid
-        ? '70원~100,000원, 10원 단위로 입력하세요.'
-        : '설정 안함 선택 시 금액 입력 없이 전용 지면 입찰가 사용을 해제합니다.';
+        ? '50원~100,000원, 10원 단위로 입력하세요.'
+        : '전용입찰가 사용안함 선택 시 아래 입찰가 입력은 비활성화되고 전용 지면 입찰가 사용을 해제합니다.';
 }
 
 async function updateContentsNetworkBidAmt() {
@@ -21516,7 +22058,7 @@ async function updateContentsNetworkBidAmt() {
     const bidAmt = String(document.getElementById('contents_network_bid_amt')?.value || '').trim();
     let parsed = { ok:true, value:null };
     if(useContentsBid) {
-        parsed = parseStrictBidAmount(bidAmt, '추천 및 콘텐츠 지면 입찰가');
+        parsed = parseStrictBidAmount(bidAmt, '추천 및 콘텐츠 지면 입찰가', 50);
         if(!parsed.ok) {
             showToast(parsed.message, 'error');
             return;
@@ -21535,6 +22077,75 @@ async function updateContentsNetworkBidAmt() {
         await refreshDashboardAfterChange({ scope, ids, data });
     } catch(err) {
         showToast(`추천/콘텐츠 지면 입찰가 변경 실패: ${err.message}`, 'error');
+    }
+}
+
+function downloadContentsNetworkBidTemplate() {
+    const header = ['광고그룹ID','콘텐츠 입찰가'];
+    const rows = [
+        ['grp-a001-01-000000000000001','280'],
+        ['grp-a001-01-000000000000002','설정 안함'],
+        ['grp-a001-01-000000000000003','300'],
+    ];
+    const csv = '\ufeff' + [header.join(','), ...rows.map(row => row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n');
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'contents_network_bid_change_template.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+}
+
+async function bulkUpdateContentsNetworkBidAmt() {
+    const c = ensureReady(); if(!c) return;
+    const input = document.getElementById('contents_bid_file');
+    const file = input?.files?.[0];
+    const resultBox = document.getElementById('contents_bid_result');
+    if(!file) { showToast('업로드 파일을 선택해주세요.', 'error'); return; }
+
+    const formData = new FormData();
+    formData.append('api_key', c.api_key);
+    formData.append('secret_key', c.secret_key);
+    formData.append('customer_id', c.customer_id);
+    formData.append('file', file);
+
+    showLoader('추천/콘텐츠 지면 입찰가 대량 변경 중...');
+    try {
+        const res = await fetch('/bulk_update_contents_network_bid_amt', { method: 'POST', body: formData });
+        const text = await res.text();
+        let data = {};
+        try { data = text ? JSON.parse(text) : {}; } catch(e) { data = { error: stripHtmlForErrorMessage(text) || text || `${res.status}` }; }
+        scheduleActionLogRefresh(res.ok ? 500 : 250);
+        if(res.ok) bumpLookupCacheVersion();
+        if(!res.ok) throw makeHttpErrorFromResponse(res, data, text);
+        const warnings = Array.isArray(data.warnings) ? data.warnings.map(x => `참고: ${x}`) : [];
+        const lines = Array.isArray(data.results)
+            ? data.results.map(item => {
+                const label = item.ok === true ? '성공' : (item.ok === false ? '실패' : '유지/건너뜀');
+                const amount = item.contentsNetworkBidAmt ? `${Number(item.contentsNetworkBidAmt).toLocaleString()}원` : '-';
+                return `${label} ${item.row_no || ''}행 | ${item.name || '-'} | ${item.mode || '-'} | ${amount} | ${item.detail || ''}`;
+            })
+            : [];
+        if(resultBox) {
+            resultBox.value = [
+                `총 행 ${data.total || 0}건 / 적용 대상 ${data.targets || 0}개`,
+                `변경 ${data.success || 0}개 / 유지 ${data.unchanged || 0}개 / 실패 ${data.target_fail || 0}개 / 제외 행 ${data.invalid_rows || 0}건`,
+                ...warnings,
+                '',
+                ...lines
+            ].join('\n').trim();
+        }
+        const tone = Number(data.fail || 0) > 0 ? 'info' : 'success';
+        showToast(data.message || '추천/콘텐츠 지면 입찰가 대량 변경 완료', tone);
+        await refreshDashboardAfterChange({ data, forceDetail: !!currentAdgroupId });
+    } catch(err) {
+        if(resultBox) resultBox.value = `실패: ${err.message}`;
+        showToast(err.message, 'error');
+    } finally {
+        hideLoader();
     }
 }
 
@@ -21635,9 +22246,11 @@ function initScheduleControls() {
     const dayWrap = document.getElementById('schedule_days'); const hourWrap = document.getElementById('schedule_hours');
     if(!dayWrap || !hourWrap) return;
     const dayNames = {1:'월',2:'화',3:'수',4:'목',5:'금',6:'토',7:'일'};
+    const blockMode = Array.isArray(scheduleBlocks) && scheduleBlocks.length > 0;
     dayWrap.innerHTML = Object.entries(dayNames).map(([k,v])=>`<button type="button" class="day-chip ${selectedScheduleDays.has(Number(k)) ? 'active' : ''}" data-kind="day" data-value="${k}" onpointerdown="startScheduleDrag('day', ${k}, event)" onpointerenter="moveScheduleDrag('day', ${k}, event)" onclick="finishScheduleDrag(event)">${v}</button>`).join('');
-    hourWrap.innerHTML = Array.from({length:24}, (_,i)=>`<button type="button" class="mini-chip ${selectedScheduleHours.has(i) ? 'active' : ''}" data-kind="hour" data-value="${i}" onpointerdown="startScheduleDrag('hour', ${i}, event)" onpointerenter="moveScheduleDrag('hour', ${i}, event)" onclick="finishScheduleDrag(event)">${String(i).padStart(2,'0')}시</button>`).join('');
+    hourWrap.innerHTML = Array.from({length:24}, (_,i)=>`<button type="button" class="mini-chip ${selectedScheduleHours.has(i) ? 'active' : ''}" data-kind="hour" data-value="${i}" ${blockMode ? 'disabled' : ''} onpointerdown="startScheduleDrag('hour', ${i}, event)" onpointerenter="moveScheduleDrag('hour', ${i}, event)" onclick="finishScheduleDrag(event)">${String(i).padStart(2,'0')}시</button>`).join('');
     renderScheduleBlocks();
+    syncScheduleQuickControls();
 }
 function renderScheduleBlocks() {
     const wrap = document.getElementById('schedule_blocks_container');
@@ -21645,6 +22258,7 @@ function renderScheduleBlocks() {
     const dayEntries = Object.entries({1:'월',2:'화',3:'수',4:'목',5:'금',6:'토',7:'일'});
     if(!scheduleBlocks.length) {
         wrap.innerHTML = '<div class="field-note">아직 추가한 구간이 없습니다. 구간별 가중치를 쓰려면 "구간 추가"를 눌러주세요.</div>';
+        syncScheduleQuickControls();
         return;
     }
     wrap.innerHTML = scheduleBlocks.map((block, idx) => {
@@ -21661,7 +22275,7 @@ function renderScheduleBlocks() {
             </div>
             <div class="form-group">
                 <label>입찰 가중치 (%)</label>
-                <input type="number" min="10" max="500" value="${Number(block.bidWeight || 100)}" oninput="updateScheduleBlockField(${idx}, 'bidWeight', this.value)">
+                <input type="number" min="10" max="500" value="${escapeAttr(block.bidWeight ?? 100)}" oninput="updateScheduleBlockField(${idx}, 'bidWeight', this.value)" onblur="normalizeScheduleBlockBidWeight(${idx})">
             </div>
             <button class="btn btn-sub" type="button" onclick="removeScheduleBlock(${idx})">삭제</button>
             <div class="schedule-block-days">
@@ -21672,6 +22286,27 @@ function renderScheduleBlocks() {
             </div>
         </div>`;
     }).join('');
+    syncScheduleQuickControls();
+}
+function syncScheduleQuickControls() {
+    const blockMode = Array.isArray(scheduleBlocks) && scheduleBlocks.length > 0;
+    const quickGroup = document.getElementById('schedule_quick_group');
+    const bidGroup = document.getElementById('schedule_common_bid_group');
+    const note = document.getElementById('schedule_quick_note');
+    const bidInput = document.getElementById('schedule_bid_weight');
+    const selectAllBtn = document.getElementById('schedule_hours_select_all');
+    const clearBtn = document.getElementById('schedule_hours_clear');
+    quickGroup?.classList.toggle('schedule-quick-disabled', blockMode);
+    bidGroup?.classList.toggle('schedule-quick-disabled', blockMode);
+    document.querySelectorAll('#schedule_hours .mini-chip').forEach(btn => { btn.disabled = blockMode; });
+    if(selectAllBtn) selectAllBtn.disabled = blockMode;
+    if(clearBtn) clearBtn.disabled = blockMode;
+    if(bidInput) bidInput.disabled = blockMode;
+    if(note) {
+        note.textContent = blockMode
+            ? '시간대별 가중치 개별 설정을 사용 중이라 빠른 시간대 선택과 공통 입찰 가중치는 비활성화됩니다.'
+            : '마지막으로 선택한 시각은 종료 시각으로 처리합니다. 예: 00·01·02·03 선택 → 00~03, 07~23 선택 → 07~24';
+    }
 }
 function addScheduleBlock(startHour=0, endHour=24, bidWeight=100, days=[]) {
     const block = {
@@ -21680,8 +22315,9 @@ function addScheduleBlock(startHour=0, endHour=24, bidWeight=100, days=[]) {
         bidWeight: Math.max(10, Math.min(500, Number(bidWeight) || 100)),
         days: Array.isArray(days) ? days.map(Number).filter(v => Number.isInteger(v) && v >= 1 && v <= 7) : [],
     };
-    if(block.endHour <= block.startHour) block.endHour = Math.min(24, block.startHour + 1);
+    if(block.endHour === block.startHour) block.endHour = Math.min(24, block.startHour + 1);
     scheduleBlocks.push(block);
+    normalizeScheduleOvernightBlocks();
     renderScheduleBlocks();
 }
 function applySchedulePresetDawn50Day100() {
@@ -21724,26 +22360,54 @@ function updateScheduleBlockField(index, field, value) {
     const next = Number(value);
     if(field === 'startHour') {
         scheduleBlocks[index].startHour = Math.max(0, Math.min(23, next));
-        if(Number(scheduleBlocks[index].endHour) <= Number(scheduleBlocks[index].startHour)) {
+        if(Number(scheduleBlocks[index].endHour) === Number(scheduleBlocks[index].startHour)) {
             scheduleBlocks[index].endHour = Math.min(24, Number(scheduleBlocks[index].startHour) + 1);
         }
     } else if(field === 'endHour') {
         scheduleBlocks[index].endHour = Math.max(1, Math.min(24, next));
-        if(Number(scheduleBlocks[index].endHour) <= Number(scheduleBlocks[index].startHour)) {
-            scheduleBlocks[index].startHour = Math.max(0, Number(scheduleBlocks[index].endHour) - 1);
+        if(Number(scheduleBlocks[index].endHour) === Number(scheduleBlocks[index].startHour)) {
+            scheduleBlocks[index].endHour = Math.min(24, Number(scheduleBlocks[index].startHour) + 1);
         }
     } else if(field === 'bidWeight') {
-        scheduleBlocks[index].bidWeight = Math.max(10, Math.min(500, next || 100));
+        scheduleBlocks[index].bidWeight = String(value ?? '').replace(/[^\d]/g, '');
+        return;
     }
     renderScheduleBlocks();
 }
+function normalizeScheduleOvernightBlocks() {
+    const normalized = [];
+    (scheduleBlocks || []).forEach(block => {
+        const startHour = Number(block?.startHour);
+        const endHour = Number(block?.endHour);
+        const bidWeight = block?.bidWeight ?? 100;
+        const days = Array.isArray(block?.days) ? [...block.days] : [];
+        if(Number.isInteger(startHour) && Number.isInteger(endHour) && endHour < startHour) {
+            normalized.push({ startHour, endHour: 24, bidWeight, days: [...days] });
+            normalized.push({ startHour: 0, endHour, bidWeight, days: [...days] });
+        } else {
+            normalized.push(block);
+        }
+    });
+    scheduleBlocks = normalized;
+}
+function normalizeScheduleBlockBidWeight(index) {
+    if(!scheduleBlocks[index]) return;
+    const raw = String(scheduleBlocks[index].bidWeight ?? '').trim();
+    const next = Number(raw);
+    scheduleBlocks[index].bidWeight = Number.isFinite(next)
+        ? Math.max(10, Math.min(500, next || 100))
+        : 100;
+    normalizeScheduleOvernightBlocks();
+    renderScheduleBlocks();
+}
 function getValidScheduleBlocks() {
+    normalizeScheduleOvernightBlocks();
     return (scheduleBlocks || []).map(block => ({
         startHour: Number(block.startHour),
         endHour: Number(block.endHour),
         bidWeight: Number(block.bidWeight || 100),
         days: Array.isArray(block.days) ? block.days.map(Number).filter(v => Number.isInteger(v) && v >= 1 && v <= 7) : [],
-    })).filter(block => Number.isInteger(block.startHour) && Number.isInteger(block.endHour) && Number.isInteger(block.bidWeight) && block.startHour >= 0 && block.startHour <= 23 && block.endHour >= 1 && block.endHour <= 24 && block.endHour > block.startHour && block.bidWeight >= 10 && block.bidWeight <= 500);
+    })).filter(block => Number.isInteger(block.startHour) && Number.isInteger(block.endHour) && Number.isInteger(block.bidWeight) && block.startHour >= 0 && block.startHour <= 23 && block.endHour >= 1 && block.endHour <= 24 && block.endHour !== block.startHour && block.bidWeight >= 10 && block.bidWeight <= 500);
 }
 function getSelectedScheduleHourRanges() {
     const selected = Array.from(selectedScheduleHours || [])
@@ -21834,7 +22498,15 @@ function finishScheduleDrag(ev) {
     if(scheduleDragState.active) { if(ev) { ev.preventDefault(); ev.stopPropagation(); } stopScheduleDrag(); return false; }
     return true;
 }
-function selectAllScheduleHours(flag) { selectedScheduleHours = flag ? new Set(Array.from({length:24}, (_,i)=>i)) : new Set(); initScheduleControls(); }
+function selectAllScheduleHours(flag) {
+    if(Array.isArray(scheduleBlocks) && scheduleBlocks.length > 0) {
+        showToast('시간대별 가중치 개별 설정을 사용 중입니다. 빠른 시간대 선택을 쓰려면 구간 초기화를 눌러주세요.', 'info');
+        syncScheduleQuickControls();
+        return;
+    }
+    selectedScheduleHours = flag ? new Set(Array.from({length:24}, (_,i)=>i)) : new Set();
+    initScheduleControls();
+}
 function setDefaultScheduleTargetType() {
     // 시간대 설정의 기본 적용 단위는 캠페인입니다.
     // 다른 패치에서 option 순서가 바뀌거나 브라우저가 이전 값을 복원해도 최초 진입 시 캠페인을 기본값으로 고정합니다.
@@ -23330,14 +24002,17 @@ function clearPerformanceStatsResult() {
     }
     performanceStatsLastData = null;
     performanceBidEditorState = { key: null };
+    selectedPerformanceCopyAdgroupIds.clear();
     const wrap = document.getElementById('performance_stats_result');
     if(wrap) wrap.innerHTML = '<div class="log-empty">아직 조회한 결과가 없습니다.</div>';
+    updatePerformanceCopyControls();
     const purchaseWrap = document.getElementById('purchase_report_result');
     if(purchaseWrap) purchaseWrap.innerHTML = '<div class="log-empty">구매완료 현시점 리포트 결과가 없습니다.</div>';
 }
 
 function syncPerformanceDatePreset() {
     const custom = document.getElementById('performance_date_preset')?.value === 'custom';
+    document.querySelector('#tab_data > .performance-stats-card')?.classList.toggle('is-custom-date', custom);
     ['performance_since', 'performance_until'].forEach(id => {
         const el = document.getElementById(id);
         if(el) el.disabled = !custom;
@@ -23399,7 +24074,7 @@ function getPerformanceTotalLabel(level, campaignType) {
     return `${typeLabel} 종합`;
 }
 
-function renderPerformanceTotalRow(summary, level, includeActions = false) {
+function renderPerformanceTotalRow(summary, level, includeActions = false, includeSelection = false) {
     const metrics = summary || {};
     const campaignType = document.getElementById('performance_type_filter')?.value || 'all';
     const subLabel = [
@@ -23408,6 +24083,7 @@ function renderPerformanceTotalRow(summary, level, includeActions = false) {
     ].filter(Boolean).join(' · ');
     return `
         <tr class="performance-total-row">
+            ${includeSelection ? '<td class="performance-copy-select-cell"></td>' : ''}
             <td><strong>${escapeMaybe(getPerformanceTotalLabel(level, campaignType))}</strong><div class="field-note">${escapeMaybe(subLabel || '조회 조건 종합')}</div></td>
             <td>${performanceMetricCell(metrics, 'impCnt')}</td>
             <td>${performanceMetricCell(metrics, 'clkCnt')}</td>
@@ -23480,6 +24156,126 @@ function isPerformanceEditableLevel(level) {
     return level === 'campaign' || level === 'adgroup';
 }
 
+function isPerformanceCopyModeOn() {
+    return !!document.getElementById('performance_copy_mode_enabled')?.checked;
+}
+
+function getPerformanceCopyCandidateRows() {
+    const level = normalizePerformanceResultLevel(performanceStatsLastData?.result_level || 'type');
+    if(level !== 'adgroup') return [];
+    return (Array.isArray(performanceStatsLastData?.rows) ? performanceStatsLastData.rows : [])
+        .filter(row => getPerformanceRowId(row, 'adgroup'));
+}
+
+function prunePerformanceCopySelection() {
+    const valid = new Set(getPerformanceCopyCandidateRows().map(row => getPerformanceRowId(row, 'adgroup')));
+    selectedPerformanceCopyAdgroupIds = new Set(Array.from(selectedPerformanceCopyAdgroupIds || []).filter(id => valid.has(String(id))));
+}
+
+function updatePerformanceCopyControls() {
+    const enabled = isPerformanceCopyModeOn();
+    performanceAdgroupCopyModeEnabled = enabled;
+    const control = document.getElementById('performance_copy_control');
+    if(control) control.classList.toggle('is-active', enabled);
+    if(enabled) prunePerformanceCopySelection();
+    const selectedCount = enabled ? selectedPerformanceCopyAdgroupIds.size : 0;
+    const totalCount = getPerformanceCopyCandidateRows().length;
+    const status = document.getElementById('performance_copy_status');
+    if(status) status.textContent = enabled ? `ON · 선택 ${selectedCount.toLocaleString()}개 / 조회 ${totalCount.toLocaleString()}개` : 'OFF';
+    document.querySelectorAll('#performance_copy_control select, #performance_copy_control input:not(#performance_copy_mode_enabled), #performance_copy_control button').forEach(el => {
+        el.disabled = !enabled;
+    });
+}
+
+function syncPerformanceAdgroupCopyMode() {
+    performanceAdgroupCopyModeEnabled = isPerformanceCopyModeOn();
+    if(performanceAdgroupCopyModeEnabled) {
+        setPerformanceResultLevel('adgroup');
+        const level = normalizePerformanceResultLevel(performanceStatsLastData?.result_level || 'type');
+        if(performanceStatsLastData && level !== 'adgroup') {
+            fetchPerformanceStats({ silent: false }).catch(() => {});
+        } else if(performanceStatsLastData) {
+            renderPerformanceStatsResult(performanceStatsLastData);
+        }
+        showToast('성과 그룹 복사 모드를 켰습니다. 광고그룹별 결과에서 복사할 그룹을 체크하세요.', 'info');
+    } else {
+        selectedPerformanceCopyAdgroupIds.clear();
+        if(performanceStatsLastData) renderPerformanceStatsResult(performanceStatsLastData);
+    }
+    updatePerformanceCopyControls();
+}
+
+function togglePerformanceCopyAdgroup(adgroupId, checked) {
+    const id = String(adgroupId || '').trim();
+    if(!id) return;
+    if(checked) selectedPerformanceCopyAdgroupIds.add(id);
+    else selectedPerformanceCopyAdgroupIds.delete(id);
+    updatePerformanceCopyControls();
+}
+
+function selectPerformanceCopyRows(flag) {
+    if(!isPerformanceCopyModeOn()) {
+        showToast('성과 그룹 복사 모드를 먼저 ON으로 켜주세요.', 'error');
+        return;
+    }
+    if(flag) {
+        getPerformanceCopyCandidateRows().forEach(row => selectedPerformanceCopyAdgroupIds.add(getPerformanceRowId(row, 'adgroup')));
+    } else {
+        selectedPerformanceCopyAdgroupIds.clear();
+    }
+    if(performanceStatsLastData) renderPerformanceStatsResult(performanceStatsLastData);
+    updatePerformanceCopyControls();
+}
+
+function renderPerformanceCopySelectCell(row, level) {
+    if(!performanceAdgroupCopyModeEnabled || level !== 'adgroup') return '';
+    const adgroupId = getPerformanceRowId(row, 'adgroup');
+    const checked = selectedPerformanceCopyAdgroupIds.has(String(adgroupId)) ? 'checked' : '';
+    return `<td class="performance-copy-select-cell"><input type="checkbox" ${checked} onchange="togglePerformanceCopyAdgroup('${escapeAttr(adgroupId)}', this.checked)" aria-label="복사할 광고그룹 선택"></td>`;
+}
+
+async function copyPerformanceSelectedAdgroups() {
+    const c = ensureReady(); if(!c) return;
+    if(!isPerformanceCopyModeOn()) { showToast('성과 그룹 복사 모드를 ON으로 켜주세요.', 'error'); return; }
+    const sourceIds = Array.from(selectedPerformanceCopyAdgroupIds || []).filter(Boolean);
+    if(!sourceIds.length) { showToast('복사할 성과 광고그룹을 체크해주세요.', 'error'); return; }
+    const targetCampId = String(document.getElementById('performance_copy_target_campaign_select')?.value || '').trim();
+    if(!targetCampId) { showToast('붙여넣을 대상 캠페인을 선택해주세요.', 'error'); return; }
+    const suffix = String(document.getElementById('performance_copy_suffix')?.value || '_성과선별').trim() || '_성과선별';
+    const copyAsOff = document.getElementById('performance_copy_as_off')?.checked || false;
+    const targetCampaignName = summarizeSelectedNamesByIds([targetCampId], campaigns, 'id', 'name', 1);
+    if(!await showAppConfirm(`선택한 성과 광고그룹 ${sourceIds.length.toLocaleString()}개를\n${targetCampaignName || targetCampId} 캠페인으로 복사할까요?`, {
+        title: '성과 그룹 복사 확인',
+        confirmText: '선택 그룹 복사'
+    })) return;
+    const errorContext = { sourceIds, sourceCampaignIds: [], targetCampId, customNamesText: '', copyCount: 1, directMode: false };
+    try {
+        const data = await postJson('/copy_adgroups_to_target', {
+            ...c,
+            source_ids: sourceIds,
+            source_campaign_ids: [],
+            target_campaign_id: targetCampId,
+            suffix,
+            copy_count: 1,
+            custom_names_text: '',
+            include_keywords: true,
+            include_ads: true,
+            include_extensions: true,
+            include_negatives: true,
+            exclude_off_assets: document.getElementById('performance_copy_exclude_off_assets')?.checked || false,
+            copy_media: true,
+            copy_as_off: copyAsOff,
+            force_copy_on: !copyAsOff,
+        }, '성과 광고그룹 복사 중...');
+        showToast(formatOperationToastMessage(data, '성과 광고그룹 복사 완료'), resolveOperationToastTone(data));
+        await loadActionLogs(false);
+        if(String(currentCampaignId || '') === targetCampId) await refreshAdgroups();
+        else await refreshCampaigns(true);
+    } catch(err) {
+        await showAdgroupCopyError(err, errorContext);
+    }
+}
+
 function getPerformanceRowByKey(rowKey, level = null) {
     const dataLevel = normalizePerformanceResultLevel(level || performanceStatsLastData?.result_level || 'type');
     const rows = Array.isArray(performanceStatsLastData?.rows) ? performanceStatsLastData.rows : [];
@@ -23508,6 +24304,126 @@ function getPerformanceAdgroupSubLabel(row, typeLabel) {
     return parts.join(' · ');
 }
 
+function formatPerformanceItemCount(count, itemLabel) {
+    const n = Number(count || 0);
+    if(!Number.isFinite(n) || n <= 1) return '';
+    if(itemLabel === '그룹') return ` · ${formatMetricNumber(n)}개 그룹`;
+    if(itemLabel === '개') return ` · ${formatMetricNumber(n)}개`;
+    return ` · ${formatMetricNumber(n)}${itemLabel || '개'}`;
+}
+
+function formatPerformanceBidSummary(summary) {
+    const min = Number(summary?.min);
+    const max = Number(summary?.max);
+    const itemCount = Number(summary?.item_count || summary?.count || 0);
+    if(!Number.isFinite(min) || min <= 0 || !Number.isFinite(max) || max <= 0) {
+        const countText = formatPerformanceItemCount(itemCount, summary?.item_label || '개');
+        return `확인 불가${countText}`;
+    }
+    const amountText = min === max ? formatMetricWon(min) : `${formatMetricWon(min)}~${formatMetricWon(max)}`;
+    return `${amountText}${formatPerformanceItemCount(itemCount, summary?.item_label || '개')}`;
+}
+
+function getPerformanceBidSnapshot(row) {
+    return row?.bid_snapshot && typeof row.bid_snapshot === 'object' ? row.bid_snapshot : {};
+}
+
+function renderPerformanceInlineBidMeta(row, level) {
+    if(!isPerformanceEditableLevel(level)) return '';
+    const snapshot = getPerformanceBidSnapshot(row);
+    const chips = [];
+    if(snapshot.group?.count || snapshot.group?.min) {
+        chips.push(`<span class="performance-bid-chip">${escapeMaybe(snapshot.group.label || '그룹 입찰가')}: ${escapeMaybe(formatPerformanceBidSummary(snapshot.group))}</span>`);
+    }
+    if(snapshot.asset?.count || snapshot.asset?.item_count || snapshot.asset?.min) {
+        chips.push(`<span class="performance-bid-chip">${escapeMaybe(snapshot.asset.label || '소재/키워드 입찰가')}: ${escapeMaybe(formatPerformanceBidSummary(snapshot.asset))}</span>`);
+    }
+    return chips.length ? `<div class="performance-inline-bids">${chips.join('')}</div>` : '';
+}
+
+function renderPerformanceBidSnapshot(row, level) {
+    const snapshot = getPerformanceBidSnapshot(row);
+    const chips = [];
+    if(snapshot.group) {
+        chips.push(`<span class="performance-bid-chip">${escapeMaybe(snapshot.group.label || '그룹 입찰가')}: ${escapeMaybe(formatPerformanceBidSummary(snapshot.group))}</span>`);
+    }
+    if(snapshot.asset) {
+        chips.push(`<span class="performance-bid-chip">${escapeMaybe(snapshot.asset.label || '소재/키워드 입찰가')}: ${escapeMaybe(formatPerformanceBidSummary(snapshot.asset))}</span>`);
+    }
+    if(!chips.length) {
+        chips.push('<span class="performance-bid-chip">현재 입찰가: 확인 불가</span>');
+    }
+    return `<div class="performance-bid-snapshot">${chips.join('')}</div>`;
+}
+
+function getPerformanceDateRangeLabel() {
+    const since = performanceStatsLastData?.since || '';
+    const until = performanceStatsLastData?.until || '';
+    if(since && until) return since === until ? since : `${since} ~ ${until}`;
+    return document.getElementById('performance_date_preset')?.selectedOptions?.[0]?.textContent || '현재 기간';
+}
+
+function renderPerformancePeriodButtons(rowKey) {
+    const current = document.getElementById('performance_date_preset')?.value || 'today';
+    const presets = [
+        ['today', '오늘'],
+        ['yesterday', '어제'],
+        ['last7days', '최근 7일'],
+    ];
+    return presets.map(([value, label]) => `
+        <button type="button" class="performance-period-btn${current === value ? ' is-active' : ''}" onclick="setPerformanceQuickPeriod('${escapeAttr(value)}', '${escapeAttr(rowKey)}')">${escapeMaybe(label)}</button>
+    `).join('');
+}
+
+function setPerformanceQuickPeriod(preset, rowKey = '') {
+    const select = document.getElementById('performance_date_preset');
+    if(select) select.value = preset;
+    performanceBidEditorState = { key: String(rowKey || performanceBidEditorState?.key || '').trim() || null };
+    syncPerformanceDatePreset();
+    fetchPerformanceStats({ silent: false }).catch(() => {});
+}
+
+function renderPerformanceDailyTable(row) {
+    const days = Array.isArray(row?.daily_metrics) ? row.daily_metrics : [];
+    if(!days.length) {
+        return '<div class="log-empty">이 기간의 일자별 성과를 확인하지 못했습니다.</div>';
+    }
+    const rows = days.map(day => {
+        const metrics = day.metrics || {};
+        return `
+            <tr>
+                <td><strong>${escapeMaybe(day.date || '-')}</strong></td>
+                <td>${performanceMetricCell(metrics, 'impCnt')}</td>
+                <td>${performanceMetricCell(metrics, 'clkCnt')}</td>
+                <td>${performanceMetricCell(metrics, 'ccnt')}</td>
+                <td>${performanceMetricCell(metrics, 'purchaseCcnt')}</td>
+                <td>${performanceMetricCell(metrics, 'purchaseRor', 'percent')}</td>
+                <td>${performanceMetricCell(metrics, 'salesAmt', 'won')}</td>
+                <td>${performanceMetricCell(metrics, 'cpc', 'won')}</td>
+            </tr>
+        `;
+    }).join('');
+    return `
+        <div class="performance-detail-table-shell">
+            <table>
+                <thead>
+                    <tr>
+                        <th>일자</th>
+                        <th>노출수</th>
+                        <th>클릭수</th>
+                        <th>전환수</th>
+                        <th>구매완료수</th>
+                        <th>구매완료 ROAS</th>
+                        <th>총비용</th>
+                        <th>CPC</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+    `;
+}
+
 function renderPerformanceNameCell(row, level, name, sub) {
     const campaignId = String(row?.campaign_id || row?.id || '').trim();
     const adgroupId = String(row?.adgroup_id || row?.id || '').trim();
@@ -23531,11 +24447,20 @@ function renderPerformanceNameCell(row, level, name, sub) {
                         <span class="performance-meta-chip">유형: ${escapeMaybe(typeLabel)}</span>
                         ${adCountHtml}
                     </div>
+                    ${renderPerformanceInlineBidMeta(row, level)}
                 </div>
             </td>
         `;
     }
-    return `<td>${nameHtml}<div class="field-note">${escapeMaybe(sub)}</div></td>`;
+    return `
+        <td>
+            <div class="performance-name-stack">
+                ${nameHtml}
+                <div class="field-note">${escapeMaybe(sub)}</div>
+                ${renderPerformanceInlineBidMeta(row, level)}
+            </div>
+        </td>
+    `;
 }
 
 function renderPerformanceBidCell(row, level) {
@@ -23544,7 +24469,7 @@ function renderPerformanceBidCell(row, level) {
     const open = performanceBidEditorState?.key === rowKey;
     return `
         <td class="performance-bid-cell">
-            <button type="button" class="performance-bid-toggle${open ? ' is-open' : ''}" onclick="togglePerformanceBidEditor('${escapeAttr(rowKey)}')">${open ? '닫기' : '입찰'}</button>
+            <button type="button" class="performance-bid-toggle${open ? ' is-open' : ''}" onclick="togglePerformanceBidEditor('${escapeAttr(rowKey)}')">${open ? '닫기' : '상세'}</button>
         </td>
     `;
 }
@@ -23573,14 +24498,31 @@ function renderPerformanceBidEditorRow(row, level, colCount) {
         ? `${getPerformanceRowName(row)} 하위 항목 입찰가 변경`
         : `${getPerformanceRowName(row)} 입찰가 변경`;
     return `
-        <tr class="performance-bid-editor-row">
+        <tr class="performance-detail-row">
             <td colspan="${Number(colCount) || 9}">
-                <div class="performance-bid-editor">
-                    <div class="performance-bid-editor-label">${escapeMaybe(label)}</div>
-                    <select id="performance_bid_mode_${escapeAttr(rowKey)}" aria-label="입찰 변경 대상">${options}</select>
-                    <input id="performance_bid_amount_${escapeAttr(rowKey)}" type="number" inputmode="numeric" min="50" step="10" placeholder="입찰가">
-                    <button type="button" class="btn btn-primary" onclick="applyPerformanceBidEditor('${escapeAttr(rowKey)}')">적용</button>
-                    <button type="button" class="btn btn-sub" onclick="togglePerformanceBidEditor('${escapeAttr(rowKey)}', true)">취소</button>
+                <div class="performance-row-detail">
+                    <div class="performance-detail-panel">
+                        <div class="performance-detail-title">
+                            <span>현재 입찰가</span>
+                        </div>
+                        ${renderPerformanceBidSnapshot(row, level)}
+                        <div class="performance-bid-editor">
+                            <div class="performance-bid-editor-label">${escapeMaybe(label)}</div>
+                            <select id="performance_bid_mode_${escapeAttr(rowKey)}" aria-label="입찰 변경 대상">${options}</select>
+                            <input id="performance_bid_amount_${escapeAttr(rowKey)}" type="number" inputmode="numeric" min="50" step="10" placeholder="입찰가">
+                            <button type="button" class="btn btn-primary" onclick="applyPerformanceBidEditor('${escapeAttr(rowKey)}')">적용</button>
+                            <button type="button" class="btn btn-sub" onclick="togglePerformanceBidEditor('${escapeAttr(rowKey)}', true)">취소</button>
+                        </div>
+                    </div>
+                    <div class="performance-detail-panel">
+                        <div class="performance-detail-title">
+                            <span>기간별 성과 · ${escapeMaybe(getPerformanceDateRangeLabel())}</span>
+                            <div class="performance-period-actions" aria-label="성과 기간 빠른 보기">
+                                ${renderPerformancePeriodButtons(rowKey)}
+                            </div>
+                        </div>
+                        ${renderPerformanceDailyTable(row)}
+                    </div>
                 </div>
             </td>
         </tr>
@@ -23671,9 +24613,10 @@ function renderPerformanceSortHeader(key, label, kind = 'number') {
     `;
 }
 
-function renderPerformanceTableHeader(nameLabel, includeActions = false) {
+function renderPerformanceTableHeader(nameLabel, includeActions = false, includeSelection = false) {
     return `
         <tr>
+            ${includeSelection ? '<th class="performance-copy-select-cell">선택</th>' : ''}
             ${renderPerformanceSortHeader('name', nameLabel, 'text')}
             ${renderPerformanceSortHeader('impCnt', '노출수')}
             ${renderPerformanceSortHeader('clkCnt', '클릭수')}
@@ -23697,8 +24640,11 @@ function renderPerformanceStatsResult(data) {
     const errors = Array.isArray(data?.errors) ? data.errors : [];
     const level = normalizePerformanceResultLevel(data?.result_level || 'type');
     const includeActions = isPerformanceEditableLevel(level);
-    const colCount = includeActions ? 9 : 8;
+    const includeSelection = performanceAdgroupCopyModeEnabled && level === 'adgroup';
+    if(includeSelection) prunePerformanceCopySelection();
+    const colCount = 8 + (includeActions ? 1 : 0) + (includeSelection ? 1 : 0);
     syncPerformanceResultLevelTabs(level);
+    updatePerformanceCopyControls();
     const nameLabel = level === 'adgroup' ? '광고그룹 / 캠페인' : (level === 'campaign' ? '캠페인' : '유형');
     const header = `
         <div class="field-note" style="margin-bottom:8px;">
@@ -23709,7 +24655,7 @@ function renderPerformanceStatsResult(data) {
     const warnHtml = warnings.length ? `<div class="field-note" style="margin-bottom:8px;color:#92400e;">참고: ${escapeMaybe(warnings.join(' / '))}</div>` : '';
     const errorHtml = errors.length ? `<div class="field-note" style="margin-bottom:8px;color:#b91c1c;">오류: ${escapeMaybe(errors.join(' / '))}</div>` : '';
     if(!rows.length) {
-        wrap.innerHTML = `${header}${warnHtml}${errorHtml}<div class="detail-table-shell"><table><thead>${renderPerformanceTableHeader(nameLabel, includeActions)}</thead><tbody>${renderPerformanceTotalRow(summary, level, includeActions)}</tbody></table></div><div class="log-empty" style="margin-top:12px;">표시할 개별 성과 데이터가 없습니다.</div>`;
+        wrap.innerHTML = `${header}${warnHtml}${errorHtml}<div class="detail-table-shell"><table><thead>${renderPerformanceTableHeader(nameLabel, includeActions, includeSelection)}</thead><tbody>${renderPerformanceTotalRow(summary, level, includeActions, includeSelection)}</tbody></table></div><div class="log-empty" style="margin-top:12px;">표시할 개별 성과 데이터가 없습니다.</div>`;
         return;
     }
     const tableRows = sortPerformanceRows(rows).map(row => {
@@ -23722,6 +24668,7 @@ function renderPerformanceStatsResult(data) {
         const navigable = level === 'campaign' || level === 'adgroup';
         return `
             <tr class="performance-row${navigable ? ' is-navigable' : ''}">
+                ${renderPerformanceCopySelectCell(row, level)}
                 ${renderPerformanceNameCell(row, level, name, sub)}
                 <td>${performanceMetricCell(metrics, 'impCnt')}</td>
                 <td>${performanceMetricCell(metrics, 'clkCnt')}</td>
@@ -23735,13 +24682,13 @@ function renderPerformanceStatsResult(data) {
             ${renderPerformanceBidEditorRow(row, level, colCount)}
         `;
     }).join('');
-    const totalRow = renderPerformanceTotalRow(summary, level, includeActions);
+    const totalRow = renderPerformanceTotalRow(summary, level, includeActions, includeSelection);
     wrap.innerHTML = `
         ${header}${warnHtml}${errorHtml}
         <div class="detail-table-shell">
             <table>
                 <thead>
-                    ${renderPerformanceTableHeader(nameLabel, includeActions)}
+                    ${renderPerformanceTableHeader(nameLabel, includeActions, includeSelection)}
                 </thead>
                 <tbody>${totalRow}${tableRows}</tbody>
             </table>
@@ -24311,19 +25258,22 @@ async function quickUpdateShoppingAdBid(adgroupId, event) {
     const c = ensureReady(); if(!c) return;
     const id = String(adgroupId || '').trim();
     if(!id) { showToast('광고그룹 ID를 확인할 수 없습니다.', 'error'); return; }
-    const adgroup = adgroups.find(x => String(x.id || '') === id) || {};
+    const adgroup = getKnownAdgroupRow(id) || {};
     const adgroupName = String(adgroup.name || id).trim();
     let cached = shoppingAdBidCache.get(id);
     if(!cached || cached.status !== 'ready') {
         try {
             shoppingAdBidCache.set(id, { status:'loading' });
             renderMasterList();
+            refreshGlobalAdgroupSearchResultsIfVisible();
             const ads = await fetchJsonCached('/get_ads', { ...c, adgroup_id:id }, { loadingText:'쇼핑 소재 입찰가 조회 중...', ttlMs:30000, force:true });
             cached = updateShoppingAdBidCacheFromRows(id, ads);
             renderMasterList();
+            refreshGlobalAdgroupSearchResultsIfVisible();
         } catch(err) {
             shoppingAdBidCache.set(id, { status:'error', message:err.message || String(err) });
             renderMasterList();
+            refreshGlobalAdgroupSearchResultsIfVisible();
             showToast(`쇼핑 소재 입찰가 조회 실패: ${err.message}`, 'error');
             return;
         }
@@ -24361,6 +25311,7 @@ async function quickUpdateShoppingAdBid(adgroupId, event) {
         } else {
             renderMasterList();
         }
+        refreshGlobalAdgroupSearchResultsIfVisible();
     } catch(err) { showToast(`쇼핑 소재 입찰가 변경 실패: ${err.message}`, 'error'); }
 }
 
@@ -25455,10 +26406,22 @@ async function executeBulkDelete() {
         }
         if(extTypes.includes('ALL')) extTypes = ['ALL'];
     }
+    let restrictedKeywordText = '';
+    let restrictedKeywordMatchMode = 'exact';
+    if(target === 'restricted_keyword') {
+        restrictedKeywordText = String(document.getElementById('bulk_del_negative_text')?.value || '').trim();
+        restrictedKeywordMatchMode = document.getElementById('bulk_del_negative_match_mode')?.value || 'exact';
+        if(!restrictedKeywordText) {
+            showToast('삭제할 제외키워드를 1개 이상 입력해주세요.', 'error');
+            return;
+        }
+    }
 
-    let targetName = ({campaign:'캠페인', adgroup:'광고그룹', keyword:'키워드', ad:'소재', extension:'확장소재'}[target] || '삭제 대상');
+    let targetName = ({campaign:'캠페인', adgroup:'광고그룹', keyword:'키워드', ad:'소재', extension:'확장소재', restricted_keyword:'제외키워드'}[target] || '삭제 대상');
     if(target === 'extension') {
         targetName += `(${extTypes.map(x => extTypeLabels[x] || x).join(', ')})`;
+    } else if(target === 'restricted_keyword') {
+        targetName += restrictedKeywordMatchMode === 'contains' ? '(입력 단어 포함)' : '(정확히 일치)';
     }
 
     const scopeParts = [];
@@ -25504,8 +26467,10 @@ async function executeBulkDelete() {
             adgroup_ids: adgroupIds,
             target_entity: target,
             ext_types: extTypes,
-            ext_type: extTypes[0] || 'ALL'
-        }, target === 'campaign' ? '캠페인 삭제 진행 중...' : target === 'adgroup' ? '광고그룹 삭제 진행 중...' : '대량 일괄 삭제 진행 중...');
+            ext_type: extTypes[0] || 'ALL',
+            restricted_keywords: restrictedKeywordText,
+            restricted_keyword_match_mode: restrictedKeywordMatchMode
+        }, target === 'campaign' ? '캠페인 삭제 진행 중...' : target === 'adgroup' ? '광고그룹 삭제 진행 중...' : target === 'restricted_keyword' ? '제외키워드 일괄 삭제 진행 중...' : '대량 일괄 삭제 진행 중...');
         showToast(data.message || '성공적으로 일괄 삭제되었습니다.', (data.fail || 0) > 0 ? 'info' : 'success');
         await refreshCampaigns(true);
         if(currentCampaignId) await refreshAdgroups(true);
@@ -25668,6 +26633,8 @@ async function executeBulkDelete() {
 
 document.addEventListener('DOMContentLoaded', () => {
     if (typeof syncThresholdClampMode === 'function') syncThresholdClampMode();
+    if (typeof syncContentsNetworkBidMode === 'function') syncContentsNetworkBidMode();
+    if (typeof updatePerformanceCopyControls === 'function') updatePerformanceCopyControls();
 });
 
 
