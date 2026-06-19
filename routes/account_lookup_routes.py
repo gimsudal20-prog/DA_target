@@ -41,6 +41,10 @@ def create_account_lookup_blueprint(service):
     def export_account_ads_excel():
         return _json_or_file(*service.export_ads_excel(request.get_json(silent=True) or {}))
 
+    @bp.route("/export_account_issues_excel", methods=["POST"])
+    def export_account_issues_excel():
+        return _json_or_file(*service.export_issues_excel(request.get_json(silent=True) or {}))
+
     @bp.route("/export_account_extensions_excel", methods=["POST"])
     def export_account_extensions_excel():
         return _json_or_file(*service.export_extensions_excel(request.get_json(silent=True) or {}))

@@ -1,0 +1,62 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>delete 1123 runner</title>
+<pre id="out">준비 중...</pre>
+<script>
+(async () => {
+  const out = document.getElementById('out');
+  const write = (msg) => { out.textContent += `\n${msg}`; };
+  const get = (key) => localStorage.getItem(key) || sessionStorage.getItem(key) || '';
+  const auth = {
+    api_key: get('naver_api_key'),
+    secret_key: get('naver_secret_key'),
+    customer_id: get('naver_customer_id') || '366371'
+  };
+  out.textContent = '삭제 실행 시작';
+  if (!auth.api_key || !auth.secret_key || !auth.customer_id) {
+    write('인증정보를 찾지 못했습니다. 기존 앱 탭에서 키 저장 체크가 켜져 있는지 확인이 필요합니다.');
+    return;
+  }
+  let targets = {};
+  try {
+    if (location.hash.length > 1) {
+      targets = JSON.parse(decodeURIComponent(escape(atob(location.hash.slice(1)))));
+    } else {
+      const targetRes = await fetch('/static/delete_1123_targets.json?ts=' + Date.now(), {cache: 'no-store'});
+      if (!targetRes.ok) throw new Error(`대상 파일 로드 실패: ${targetRes.status}`);
+      targets = await targetRes.json();
+    }
+  } catch (err) {
+    write(`대상 ID 파싱 실패: ${err.message}`);
+    return;
+  }
+  const postJson = async (url, payload) => {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const text = await res.text();
+    let data = {};
+    try { data = text ? JSON.parse(text) : {}; } catch (_) { data = {error:text}; }
+    if (!res.ok) throw new Error(data.error || data.details || text || res.status);
+    return data;
+  };
+  const keywordIds = Array.isArray(targets.keyword) ? targets.keyword : [];
+  const adIds = Array.isArray(targets.ad) ? targets.ad : [];
+  write(`키워드 대상 ${keywordIds.length}개`);
+  const keywordResult = keywordIds.length
+    ? await postJson('/delete_selected', {...auth, entity_type:'keyword', ids:keywordIds})
+    : {success:0, fail:0, total:0};
+  write(`키워드 삭제: 성공 ${keywordResult.success || 0} / 실패 ${keywordResult.fail || 0}`);
+  write(`소재 대상 ${adIds.length}개`);
+  const adResult = adIds.length
+    ? await postJson('/delete_selected', {...auth, entity_type:'ad', ids:adIds})
+    : {success:0, fail:0, total:0};
+  write(`소재 삭제: 성공 ${adResult.success || 0} / 실패 ${adResult.fail || 0}`);
+  write('완료');
+  window.__delete1123Result = {keywordResult, adResult};
+})().catch(err => {
+  document.getElementById('out').textContent += `\n실패: ${err.message || err}`;
+});
+</script>

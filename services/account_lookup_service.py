@@ -71,6 +71,8 @@ class AccountLookupService:
             "scope": scope,
             "campaign_ids": sorted(campaign_ids),
             "adgroup_ids": sorted(adgroup_ids),
+            "include_issue_detail": bool((payload or {}).get("include_issue_detail")),
+            "include_ad_relevance": bool((payload or {}).get("include_ad_relevance")),
             "cache_bust": str((payload or {}).get("_cache_bust") or "0"),
         }
         return hashlib.sha256(json.dumps(raw, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
@@ -130,7 +132,13 @@ class AccountLookupService:
         ctx, error, status = self._collect_contexts(payload, "소재 조회 실패")
         if error:
             return error, status
-        rows, row_warnings = self.collect_lookup_ads(ctx["api_key"], ctx["secret_key"], ctx["cid"], ctx["contexts"])
+        rows, row_warnings = self.collect_lookup_ads(
+            ctx["api_key"],
+            ctx["secret_key"],
+            ctx["cid"],
+            ctx["contexts"],
+            include_issue_detail=bool((payload or {}).get("include_issue_detail")),
+        )
         warnings = list(ctx["warnings"] or [])
         warnings.extend(row_warnings)
         result = api_ok(
@@ -185,7 +193,13 @@ class AccountLookupService:
         if error:
             return error, status
         warnings = list(ctx["warnings"] or [])
-        rows, row_warnings = self.collect_lookup_keywords(ctx["api_key"], ctx["secret_key"], ctx["cid"], ctx["contexts"])
+        rows, row_warnings = self.collect_lookup_keywords(
+            ctx["api_key"],
+            ctx["secret_key"],
+            ctx["cid"],
+            ctx["contexts"],
+            include_ad_relevance=bool((payload or {}).get("include_ad_relevance")),
+        )
         warnings.extend(row_warnings)
         result = api_ok(
             scope=ctx["scope"],
@@ -382,17 +396,26 @@ class AccountLookupService:
         return prepared
 
     def export_keywords_excel(self, payload: Dict[str, Any]):
-        result, status = self._collect_keywords_result(payload, use_cache=True)
+        export_payload = dict(payload or {})
+        export_payload["include_ad_relevance"] = True
+        result, status = self._collect_keywords_result(export_payload, use_cache=True)
         if status != 200:
             return result, status
         rows = result.get("rows") or []
+        status_filter = str((payload or {}).get("keyword_status_filter") or "").strip().lower()
+        if status_filter in {"off", "paused", "disabled"}:
+            rows = [row for row in rows if str((row or {}).get("status") or "").strip().upper() == "OFF"]
         if not rows:
+            if status_filter in {"off", "paused", "disabled"}:
+                return api_error("내보낼 OFF 키워드가 없습니다."), 400
             return api_error("내보낼 등록 키워드가 없습니다."), 400
-        return self._export_result(rows, "계정 등록 키워드 조회", result.get("scope") or "account", [
+        scope_suffix = "OFF 키워드" if status_filter in {"off", "paused", "disabled"} else None
+        title = "계정 등록 OFF 키워드 조회" if scope_suffix else "계정 등록 키워드 조회"
+        return self._export_result(rows, title, result.get("scope") or "account", [
             ("campaignName", "캠페인명"), ("adgroupName", "광고그룹명"), ("keyword", "키워드"), ("status", "상태"),
-            ("bidAmt", "입찰가"), ("useGroupBidAmt", "그룹입찰가사용"), ("matchType", "매치유형"),
+            ("adRelevanceIndex", "광고 연관지수"), ("contentsNetworkBidAmt", "콘텐츠 영역 입찰가"), ("bidAmt", "입찰가"), ("useGroupBidAmt", "그룹입찰가사용"), ("matchType", "매치유형"),
             ("keywordId", "키워드 ID"), ("campaignId", "캠페인 ID"), ("adgroupId", "광고그룹 ID"),
-        ], "account_keywords")
+        ], "account_keywords", scope_suffix=scope_suffix)
 
     def export_ads_excel(self, payload: Dict[str, Any]):
         result, status = self._collect_ads_result(payload, use_cache=True)
@@ -406,9 +429,239 @@ class AccountLookupService:
             ("type", "소재유형"), ("status", "상태"),
             ("headline", "소재 제목"), ("description", "소재 설명"), ("productName", "상품명"),
             ("pcFinalUrl", "PC 연결 URL"), ("mobileFinalUrl", "모바일 연결 URL"),
-            ("summary", "요약"), ("effectiveBidAmt", "적용입찰가"), ("adBidAmt", "소재입찰가"), ("adUseGroupBidAmt", "그룹입찰가사용"), ("adgroupBidAmt", "광고그룹입찰가"),
+            ("summary", "요약"), ("effectiveBidAmt", "적용입찰가"), ("adBidAmt", "소재입찰가"), ("adUseGroupBidAmt", "그룹입찰가사용"), ("adgroupBidAmt", "광고그룹입찰가"), ("contentsNetworkBidAmt", "콘텐츠 영역 입찰가"),
             ("adId", "소재 ID"), ("referenceKey", "참조키"), ("campaignId", "캠페인 ID"), ("adgroupId", "광고그룹 ID"),
         ], "account_ads")
+
+    @staticmethod
+    def _normalize_issue_reason_text(value: Any) -> str:
+        clean = " ".join(str(value or "").split()).strip()
+        if not clean:
+            return ""
+        half = len(clean) / 2
+        if half.is_integer() and half >= 4 and clean[: int(half)] == clean[int(half):]:
+            clean = clean[: int(half)].strip()
+        normalized = "".join(ch for ch in clean.upper() if ch.isalnum())
+        if "ADABNORMALINTERLOCK" in normalized or "ABNORMALINTERLOCK" in normalized:
+            return "중지: 소재 연동 상태 비정상"
+        if "ADDISAPPROVED" in normalized or "DISAPPROVED" in normalized:
+            return "중지: 소재 보류"
+        if normalized == "PENDING" or "INSPECTPENDING" in normalized or "REVIEWPENDING" in normalized:
+            return "검수 대기"
+        if "ADPAUSED" in normalized or normalized == "PAUSED":
+            return "사용자 OFF"
+        return clean
+
+    @staticmethod
+    def _parse_bool_maybe(value: Any) -> Optional[bool]:
+        if isinstance(value, bool):
+            return value
+        text = str(value if value is not None else "").strip().lower()
+        if text in {"true", "1", "y", "yes", "on", "사용"}:
+            return True
+        if text in {"false", "0", "n", "no", "off", "미사용", "중지"}:
+            return False
+        return None
+
+    @staticmethod
+    def _issue_status_label(row: Dict[str, Any]) -> str:
+        raw = str((row or {}).get("status") or "").strip().upper()
+        if raw == "OFF":
+            return "OFF"
+        if raw == "ON":
+            return "ON"
+        locked = AccountLookupService._parse_bool_maybe((row or {}).get("userLock"))
+        enabled = AccountLookupService._parse_bool_maybe((row or {}).get("enable"))
+        if locked is True or enabled is False:
+            return "OFF"
+        if locked is False or enabled is True:
+            return "ON"
+        return raw or "-"
+
+    @staticmethod
+    def _is_normal_issue_value(value: Any) -> bool:
+        text = str(value if value is not None else "").strip()
+        if not text:
+            return True
+        normalized = "".join(ch for ch in text.upper() if ch.isalnum())
+        return normalized in {
+            "ON", "OK", "NORMAL", "NONE", "NULL", "TRUE", "ACTIVE", "ENABLED",
+            "ELIGIBLE", "APPROVED", "ACCEPTED", "VALID", "RUNNING", "SERVING",
+            "검수완료", "정상", "사용",
+        }
+
+    @classmethod
+    def _issue_reasons(cls, row: Dict[str, Any]) -> List[str]:
+        reasons: List[str] = []
+        issue_keys = [
+            "statusReason", "statusDetail", "statusMessage", "statusDescription",
+            "inspectStatus", "reason", "reasonCode", "servingStatus", "servingState",
+            "servingReason", "deliveryStatus", "deliveryState", "deliveryReason",
+            "displayStatus", "displayState", "displayReason", "rejectReason",
+            "reviewStatus", "reviewState", "reviewReason", "restrictionReason",
+            "restrictedReason", "issueDetail", "issueReason", "systemReason",
+            "adStatus", "adStatusReason", "operationStatus",
+        ]
+        for key in issue_keys:
+            raw = (row or {}).get(key)
+            if raw is None:
+                continue
+            values = raw if isinstance(raw, list) else [raw]
+            for value in values:
+                if isinstance(value, dict):
+                    text = json.dumps(value, ensure_ascii=False)[:160]
+                else:
+                    if cls._is_normal_issue_value(value):
+                        continue
+                    text = str(value or "")
+                clean = cls._normalize_issue_reason_text(text)
+                if clean and clean not in reasons:
+                    reasons.append(clean)
+        locked = cls._parse_bool_maybe((row or {}).get("userLock"))
+        enabled = cls._parse_bool_maybe((row or {}).get("enable"))
+        reason_text = " ".join(reasons).lower()
+        has_system = cls._has_system_issue_reason(reason_text)
+        if locked is True and not has_system and "사용자 OFF" not in reasons:
+            reasons.append("사용자 OFF")
+        if enabled is False and not has_system and "비활성" not in reasons:
+            reasons.append("비활성")
+        raw_status = str((row or {}).get("rawStatus") or (row or {}).get("state") or "").strip()
+        if raw_status and raw_status.upper() != "ON" and not cls._is_normal_issue_value(raw_status):
+            text = cls._normalize_issue_reason_text(f"상태: {raw_status}")
+            if text and text not in reasons:
+                reasons.append(text)
+        if cls._issue_status_label(row) == "OFF" and not reasons:
+            reasons.append("OFF")
+        return reasons
+
+    @staticmethod
+    def _has_system_issue_reason(reason_text: str) -> bool:
+        text = str(reason_text or "").lower()
+        needles = [
+            "소재 연동 상태 비정상", "소재 보류", "비정상", "노출", "제한", "심사", "검수",
+            "반려", "거절", "중지", "보류", "불가", "abnormal", "interlock", "disapproved",
+            "pending", "reject", "inspect", "review", "restrict", "limit", "serving", "delivery", "display",
+        ]
+        return any(needle in text for needle in needles)
+
+    @classmethod
+    def _classify_issue_types(cls, row: Dict[str, Any], reasons: List[str]) -> List[str]:
+        labels: List[str] = []
+        reason_text = " ".join(reasons).lower()
+        locked = cls._parse_bool_maybe((row or {}).get("userLock"))
+        enabled = cls._parse_bool_maybe((row or {}).get("enable"))
+        is_user_off = False
+        if not cls._has_system_issue_reason(reason_text):
+            is_user_off = (
+                locked is True
+                or enabled is False
+                or cls._issue_status_label(row) == "OFF"
+                or "사용자 off" in reason_text
+                or "adpaused" in reason_text
+            )
+        if is_user_off:
+            labels.append("사용자 OFF")
+        if "소재 연동 상태 비정상" in reason_text or "adabnormalinterlock" in reason_text or "abnormalinterlock" in reason_text:
+            labels.append("소재 연동 비정상")
+        elif (
+            any(token in reason_text for token in ["소재 보류", "disapproved", "pending", "비정상", "중지", "보류", "불가", "serving", "delivery", "display"])
+            or (cls._issue_status_label(row) == "OFF" and not is_user_off)
+        ):
+            labels.append("시스템 중지")
+        if any(token in reason_text for token in ["소재 보류", "노출", "제한", "심사", "검수", "반려", "거절", "disapproved", "pending", "reject", "inspect", "review", "restrict", "limit"]):
+            labels.append("노출제한")
+        if not labels and cls._issue_status_label(row) == "OFF":
+            labels.append("OFF")
+        if not labels and reasons:
+            labels.append("기타")
+        return labels
+
+    @staticmethod
+    def _issue_path(row: Dict[str, Any], fallback_kind: str) -> str:
+        campaign_type = str((row or {}).get("campaignType") or "").upper()
+        if "SHOPPING" in campaign_type or "CATALOG" in campaign_type:
+            type_label = "쇼핑검색"
+        elif campaign_type in {"WEB_SITE", "POWER_LINK"}:
+            type_label = "파워링크"
+        else:
+            type_label = fallback_kind
+        return " > ".join([x for x in [type_label, str((row or {}).get("campaignName") or "").strip(), str((row or {}).get("adgroupName") or "").strip()] if x])
+
+    @classmethod
+    def _prepare_issue_export_rows(cls, keyword_rows: List[Dict[str, Any]], ad_rows: List[Dict[str, Any]], mode: str) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        for row in keyword_rows or []:
+            reasons = cls._issue_reasons(row)
+            if not reasons:
+                continue
+            issue_types = cls._classify_issue_types(row, reasons)
+            rows.append({
+                "kind": "파워링크 키워드",
+                "issueTypes": ", ".join(issue_types),
+                "path": cls._issue_path(row, "파워링크"),
+                "campaignName": row.get("campaignName") or "",
+                "adgroupName": row.get("adgroupName") or "",
+                "name": row.get("keyword") or row.get("keywordNm") or row.get("keywordId") or "-",
+                "status": cls._issue_status_label(row),
+                "reasons": " / ".join(reasons),
+                "id": row.get("keywordId") or row.get("nccKeywordId") or row.get("id") or "",
+            })
+        for row in ad_rows or []:
+            type_text = " ".join([
+                str(row.get("type") or row.get("adType") or ""),
+                str(row.get("campaignType") or ""),
+                str(row.get("adgroupType") or ""),
+            ]).upper()
+            if not any(token in type_text for token in ("SHOPPING", "CATALOG", "PRODUCT")):
+                continue
+            reasons = cls._issue_reasons(row)
+            if not reasons:
+                continue
+            issue_types = cls._classify_issue_types(row, reasons)
+            rows.append({
+                "kind": "쇼핑 소재",
+                "issueTypes": ", ".join(issue_types),
+                "path": cls._issue_path(row, "쇼핑검색"),
+                "campaignName": row.get("campaignName") or "",
+                "adgroupName": row.get("adgroupName") or "",
+                "name": row.get("productName") or row.get("headline") or row.get("summary") or row.get("adId") or "-",
+                "status": cls._issue_status_label(row),
+                "reasons": " / ".join(reasons),
+                "id": row.get("adId") or row.get("nccAdId") or row.get("id") or "",
+            })
+        mode = str(mode or "all").strip().lower()
+        if mode == "off":
+            rows = [row for row in rows if "사용자 OFF" in str(row.get("issueTypes") or "") or str(row.get("issueTypes") or "") == "OFF"]
+        elif mode == "restricted":
+            rows = [row for row in rows if any(label in str(row.get("issueTypes") or "") for label in ["노출제한", "시스템 중지", "소재 연동 비정상"])]
+        return rows
+
+    def export_issues_excel(self, payload: Dict[str, Any]):
+        issue_payload = dict(payload or {})
+        issue_payload["include_issue_detail"] = True
+        keyword_result, keyword_status = self._collect_keywords_result(issue_payload, use_cache=True)
+        if keyword_status != 200:
+            return keyword_result, keyword_status
+        ad_result, ad_status = self._collect_ads_result(issue_payload, use_cache=True)
+        if ad_status != 200:
+            return ad_result, ad_status
+        mode = str((payload or {}).get("issue_filter") or (payload or {}).get("account_issue_filter") or "all").strip().lower()
+        rows = self._prepare_issue_export_rows(keyword_result.get("rows") or [], ad_result.get("rows") or [], mode)
+        if not rows:
+            label = "노출제한" if mode == "restricted" else ("OFF" if mode == "off" else "특이사항")
+            return api_error(f"내보낼 {label} 항목이 없습니다."), 400
+        suffix = "노출제한" if mode == "restricted" else ("OFF" if mode == "off" else "특이사항")
+        return self._export_result(rows, f"계정 특이사항 조회 - {suffix}", ad_result.get("scope") or keyword_result.get("scope") or "account", [
+            ("kind", "구분"),
+            ("issueTypes", "유형"),
+            ("path", "경로"),
+            ("campaignName", "캠페인명"),
+            ("adgroupName", "광고그룹명"),
+            ("name", "이름"),
+            ("status", "상태"),
+            ("reasons", "특이사항"),
+            ("id", "ID"),
+        ], "account_issues", scope_suffix=suffix)
 
     @classmethod
     def _extension_export_columns(cls, extension_type: Any, rows: List[Dict[str, Any]] | None = None):

@@ -4,7 +4,12 @@ from __future__ import annotations
 import json
 import time
 from collections import defaultdict
+from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Tuple
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -23,6 +28,14 @@ PURCHASE_STAT_FIELDS = [
     "purchaseConvAmt",
     "purchaseRor",
 ]
+
+KST_ZONE = ZoneInfo("Asia/Seoul") if ZoneInfo else None
+
+
+def _today_kst() -> str:
+    if KST_ZONE:
+        return datetime.now(KST_ZONE).date().isoformat()
+    return (datetime.utcnow() + timedelta(hours=9)).date().isoformat()
 
 
 def _number(value: Any) -> float:
@@ -112,7 +125,7 @@ class PurchaseReportService:
             rows = []
         return res, [x for x in rows if isinstance(x, dict) and not bool(x.get("delFlag"))]
 
-    def _fetch_today_stats(self, api_key: str, secret_key: str, cid: str, campaign_ids: List[str]):
+    def _fetch_today_stats(self, api_key: str, secret_key: str, cid: str, campaign_ids: List[str], today: str):
         rows: List[Dict[str, Any]] = []
         errors: List[str] = []
         cycle_base_tm = ""
@@ -124,7 +137,7 @@ class PurchaseReportService:
             params = {
                 "ids": ",".join(batch),
                 "fields": json.dumps(PURCHASE_STAT_FIELDS, separators=(",", ":")),
-                "datePreset": "today",
+                "timeRange": json.dumps({"since": today, "until": today}, separators=(",", ":")),
                 "timeIncrement": "allDays",
             }
             res = self.request("GET", api_key, secret_key, cid, "/stats", params=params)
@@ -150,7 +163,8 @@ class PurchaseReportService:
         if getattr(res_camp, "status_code", 0) != 200:
             return api_error("캠페인 조회 실패", getattr(res_camp, "text", "")), 400
         campaign_map = {_campaign_id(row): row for row in campaigns if _campaign_id(row)}
-        stat_rows, errors, cycle_base_tm, comp_tm = self._fetch_today_stats(api_key, secret_key, cid, list(campaign_map.keys()))
+        today = _today_kst()
+        stat_rows, errors, cycle_base_tm, comp_tm = self._fetch_today_stats(api_key, secret_key, cid, list(campaign_map.keys()), today)
         stat_by_campaign = {str(row.get("id") or "").strip(): row for row in stat_rows if str(row.get("id") or "").strip()}
 
         detail_rows: List[Dict[str, Any]] = []
@@ -164,7 +178,6 @@ class PurchaseReportService:
             "purchaseCcnt": 0.0,
             "purchaseConvAmt": 0.0,
         })
-        today = time.strftime("%Y-%m-%d")
         for campaign_id, stat in stat_by_campaign.items():
             campaign = campaign_map.get(campaign_id) or {}
             type_code = _campaign_type_code(campaign)

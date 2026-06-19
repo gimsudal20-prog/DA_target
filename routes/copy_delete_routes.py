@@ -33,6 +33,7 @@ def create_copy_delete_blueprint(service):
         ("/copy_adgroups_to_target", "copy_adgroups_to_target"),
         ("/bulk_delete_by_parent", "bulk_delete_by_parent"),
         ("/bulk_delete", "bulk_delete"),
+        ("/bulk_delete_asset_ids", "bulk_delete_asset_ids"),
         ("/bulk_delete_powerlink_ads_excel", "bulk_delete_powerlink_ads_excel"),
         ("/bulk_delete_extensions_excel", "bulk_delete_extensions_excel"),
         ("/delete_selected", "delete_selected"),

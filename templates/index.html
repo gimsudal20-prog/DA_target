@@ -105,6 +105,17 @@
     .form-group { margin-bottom: 14px; }
     .form-group label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
     .field-help { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+    .char-count-helper {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1.35;
+    }
+    .char-count-helper.is-over { color: var(--red); }
+    .char-count-helper.is-empty { font-weight: 600; }
     .media-detail-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:8px; }
     .media-detail-group { border:1px solid var(--border); border-radius:12px; padding:10px 12px; background:#fafafa; }
     .media-detail-group .title { font-weight:700; font-size:12px; margin-bottom:8px; color:var(--text); }
@@ -3245,6 +3256,8 @@
     .workflow-guide-card.is-create .workflow-step-num { background:#059669; }
     .workflow-guide-card.is-lookup .workflow-guide-kicker { background:#f8fafc; color:#334155; }
     .workflow-guide-card.is-lookup .workflow-step-num { background:#111827; }
+    .workflow-guide-card.is-report .workflow-guide-kicker { background:#ecfdf5; color:#047857; }
+    .workflow-guide-card.is-report .workflow-step-num { background:#059669; }
     .compact-help .workflow-guide-desc,
     .compact-help .workflow-guide-steps { display: none; }
     .compact-help .workflow-guide-card {
@@ -5042,6 +5055,29 @@
       position: relative;
       z-index: 1;
     }
+    #powerlink_keyword_lookup_result .keyword-lookup-result-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin: 0 0 10px 0;
+    }
+    #powerlink_keyword_lookup_result .keyword-lookup-result-title {
+      min-width: 0;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 900;
+    }
+    #powerlink_keyword_lookup_result .keyword-lookup-result-nav .keyword-back-btn {
+      flex: 0 0 auto;
+      min-height: 30px;
+      border-radius: 7px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+      box-shadow: none;
+    }
     #powerlink_keyword_lookup_result .keyword-lookup-result-summary {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5145,6 +5181,8 @@
       #b_keyword_inspect .keyword-diagnosis-utility-strip { grid-template-columns: 1fr; }
       #b_keyword_inspect .keyword-common-bid-control { grid-template-columns: 1fr; }
       #powerlink_keyword_lookup_result .keyword-lookup-result-summary { grid-template-columns: 1fr; }
+      #powerlink_keyword_lookup_result .keyword-lookup-result-nav { align-items: stretch; flex-direction: column; }
+      #powerlink_keyword_lookup_result .keyword-lookup-result-nav .keyword-back-btn { width: 100%; }
       #powerlink_keyword_lookup_result .keyword-lookup-row { grid-template-columns: 1fr !important; }
       #powerlink_keyword_lookup_result .keyword-lookup-actions { justify-content: flex-start; }
       #powerlink_keyword_lookup_result .keyword-bid-adjust { width: 100%; grid-template-columns: 1fr 1fr; }
@@ -5499,6 +5537,7 @@
     .workflow-guide-card.is-copy::before { background: var(--ux-purple); }
     .workflow-guide-card.is-delete::before { background: var(--ux-red); }
     .workflow-guide-card.is-lookup::before { background: var(--ux-primary); }
+    .workflow-guide-card.is-report::before { background: var(--ux-naver-dark); }
     .workflow-guide-kicker,
     .workflow-next-kicker {
       border: 1px solid rgba(0,0,0,.04);
@@ -6625,6 +6664,7 @@
     .workflow-guide-card.is-change::before { background: var(--ops-primary) !important; }
     .workflow-guide-card.is-copy::before { background: var(--ops-purple) !important; }
     .workflow-guide-card.is-delete::before { background: var(--ops-danger) !important; }
+    .workflow-guide-card.is-report::before { background: var(--ops-success) !important; }
     .workflow-guide-kicker,
     .workflow-next-kicker {
       border-radius: 6px !important;
@@ -10898,6 +10938,7 @@
     body #tab_data > .performance-stats-card > .btn-row,
     body #tab_data > .performance-stats-card > .performance-result-viewbar,
     body #tab_data > .performance-stats-card > .performance-copy-control,
+    body #tab_data > .performance-stats-card > .performance-text-report-panel,
     body #tab_data > .performance-stats-card > #performance_stats_result,
     body #tab_data > .performance-stats-card > #purchase_report_result {
       margin-left: 22px !important;
@@ -11029,6 +11070,94 @@
       background: #eff6ff !important;
       color: #0b5fce !important;
       font-weight: 950 !important;
+    }
+    body #tab_data > .performance-stats-card > .performance-text-report-panel {
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 12px !important;
+      margin-top: 14px !important;
+      padding: 12px !important;
+      border: 1px solid #d8e2ef !important;
+      border-radius: 8px !important;
+      background: #fbfcfe !important;
+    }
+    body #tab_data > .performance-stats-card .performance-text-report-head {
+      display: flex !important;
+      align-items: center !important;
+      justify-content: space-between !important;
+      gap: 12px !important;
+    }
+    body #tab_data > .performance-stats-card .performance-text-report-title {
+      color: #0f172a !important;
+      font-size: 12px !important;
+      font-weight: 900 !important;
+      white-space: nowrap !important;
+    }
+    body #tab_data > .performance-stats-card .performance-text-report-status {
+      color: #64748b !important;
+      font-size: 12px !important;
+      font-weight: 800 !important;
+      text-align: right !important;
+    }
+    body #tab_data > .performance-stats-card .performance-text-report-controls {
+      display: grid !important;
+      grid-template-columns: minmax(170px, 220px) auto auto 1fr !important;
+      gap: 10px !important;
+      align-items: end !important;
+      padding-top: 10px !important;
+      border-top: 1px solid #e2e8f0 !important;
+    }
+    body #tab_data > .performance-stats-card .performance-report-check {
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 6px !important;
+      min-height: 42px !important;
+      margin: 0 !important;
+      color: #475569 !important;
+      font-size: 12px !important;
+      font-weight: 800 !important;
+      white-space: nowrap !important;
+    }
+    body #tab_data > .performance-stats-card .performance-report-check input {
+      width: 14px !important;
+      height: 14px !important;
+      min-height: 14px !important;
+      margin: 0 !important;
+    }
+    body #tab_data > .performance-stats-card .performance-text-report-actions {
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: flex-end !important;
+      gap: 6px !important;
+      flex-wrap: wrap !important;
+    }
+    body #tab_data > .performance-stats-card .performance-text-report-actions .btn {
+      min-height: 34px !important;
+      padding: 0 11px !important;
+      border-radius: 7px !important;
+      font-size: 12px !important;
+      font-weight: 850 !important;
+      white-space: nowrap !important;
+    }
+    body #tab_data > .performance-stats-card .performance-text-report-output {
+      display: none !important;
+      width: 100% !important;
+      min-height: 240px !important;
+      max-height: 520px !important;
+      resize: vertical !important;
+      padding: 12px !important;
+      border: 1px solid #cbd5e1 !important;
+      border-radius: 8px !important;
+      background: #fff !important;
+      color: #0f172a !important;
+      font-family: Consolas, "Courier New", monospace !important;
+      font-size: 12.5px !important;
+      line-height: 1.55 !important;
+      white-space: pre !important;
+      overflow: auto !important;
+    }
+    body #tab_data > .performance-stats-card .performance-text-report-output.has-report {
+      display: block !important;
     }
     body #tab_data > .performance-stats-card > .performance-copy-control {
       display: flex !important;
@@ -11465,6 +11594,15 @@
         align-items: stretch !important;
         flex-direction: column !important;
       }
+      body #tab_data > .performance-stats-card .performance-text-report-controls {
+        grid-template-columns: 1fr !important;
+      }
+      body #tab_data > .performance-stats-card .performance-text-report-actions {
+        justify-content: stretch !important;
+      }
+      body #tab_data > .performance-stats-card .performance-text-report-actions .btn {
+        flex: 1 1 150px !important;
+      }
       body #tab_data > .performance-stats-card .performance-result-tabs {
         width: 100% !important;
       }
@@ -11506,6 +11644,9 @@
       body #tab_data > .performance-stats-card > .grid-3,
       body #tab_data > .performance-stats-card > .grid-2,
       body #tab_data > .performance-stats-card > .btn-row,
+      body #tab_data > .performance-stats-card > .performance-result-viewbar,
+      body #tab_data > .performance-stats-card > .performance-copy-control,
+      body #tab_data > .performance-stats-card > .performance-text-report-panel,
       body #tab_data > .performance-stats-card > #performance_stats_result,
       body #tab_data > .performance-stats-card > #purchase_report_result {
         margin-left: 10px !important;
@@ -11523,6 +11664,190 @@
       body #tab_data > .performance-stats-card > .btn-row .btn {
         width: 100% !important;
         flex: 0 0 auto !important;
+      }
+    }
+    body #tab_report > .text-report-page-card {
+      margin-top: 18px !important;
+      padding: 0 0 22px !important;
+      overflow: hidden !important;
+      border: 1px solid #d8e2f0 !important;
+      border-radius: 8px !important;
+      background: #fff !important;
+      box-shadow: 0 1px 2px rgba(16,24,40,.04) !important;
+    }
+    body #tab_report .text-report-page-head {
+      display: flex !important;
+      align-items: center !important;
+      justify-content: space-between !important;
+      gap: 16px !important;
+      min-height: 64px !important;
+      padding: 0 22px !important;
+      border-bottom: 1px solid #d8e2f0 !important;
+      background: #fbfcfe !important;
+    }
+    body #tab_report .text-report-page-head .card-title {
+      margin: 0 !important;
+      border: 0 !important;
+      padding: 0 !important;
+      color: #0f172a !important;
+      font-size: 14px !important;
+      font-weight: 850 !important;
+      letter-spacing: 0 !important;
+    }
+    body #tab_report .text-report-page-head .field-note {
+      margin-top: 5px !important;
+      color: #667085 !important;
+      font-size: 12px !important;
+      line-height: 1.35 !important;
+    }
+    body #tab_report .text-report-status {
+      flex: 0 0 auto !important;
+      color: #64748b !important;
+      font-size: 12px !important;
+      font-weight: 850 !important;
+      text-align: right !important;
+      white-space: nowrap !important;
+    }
+    body #tab_report .text-report-layout {
+      display: grid !important;
+      grid-template-columns: minmax(260px, 340px) minmax(0, 1fr) !important;
+      gap: 18px !important;
+      padding: 18px 22px 0 !important;
+    }
+    body #tab_report .text-report-controls {
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 12px !important;
+      min-width: 0 !important;
+    }
+    body #tab_report .form-group {
+      margin-bottom: 0 !important;
+      min-width: 0 !important;
+    }
+    body #tab_report label {
+      display: block !important;
+      margin-bottom: 7px !important;
+      color: #344054 !important;
+      font-size: 12px !important;
+      font-weight: 800 !important;
+    }
+    body #tab_report select,
+    body #tab_report input {
+      width: 100% !important;
+      height: 42px !important;
+      min-height: 42px !important;
+      border-radius: 8px !important;
+      border: 1px solid #cbd5e1 !important;
+      background-color: #fff !important;
+      color: #101828 !important;
+      font-size: 12.5px !important;
+      font-weight: 650 !important;
+      box-shadow: none !important;
+    }
+    body #tab_report .text-report-custom-dates {
+      display: none !important;
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      gap: 10px !important;
+    }
+    body #tab_report.is-custom-date .text-report-custom-dates {
+      display: grid !important;
+    }
+    body #tab_report .text-report-options {
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 8px !important;
+      padding: 12px !important;
+      border: 1px solid #e2e8f0 !important;
+      border-radius: 8px !important;
+      background: #f8fafc !important;
+    }
+    body #tab_report .text-report-options label {
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 7px !important;
+      margin: 0 !important;
+      color: #475569 !important;
+      font-weight: 800 !important;
+      white-space: nowrap !important;
+    }
+    body #tab_report .text-report-options input {
+      width: 14px !important;
+      height: 14px !important;
+      min-height: 14px !important;
+      margin: 0 !important;
+    }
+    body #tab_report .text-report-actions {
+      display: grid !important;
+      grid-template-columns: 1fr 1fr !important;
+      gap: 8px !important;
+    }
+    body #tab_report .text-report-actions .btn {
+      min-height: 38px !important;
+      border-radius: 7px !important;
+      padding: 8px 10px !important;
+      font-size: 12px !important;
+      font-weight: 850 !important;
+      white-space: nowrap !important;
+    }
+    body #tab_report .text-report-actions .btn:first-child {
+      grid-column: 1 / -1 !important;
+    }
+    body #tab_report .text-report-output-wrap {
+      min-width: 0 !important;
+      min-height: 620px !important;
+    }
+    body #tab_report .text-report-output {
+      width: 100% !important;
+      min-height: 620px !important;
+      height: calc(100vh - 330px) !important;
+      max-height: 900px !important;
+      resize: vertical !important;
+      padding: 16px !important;
+      border: 1px solid #cbd5e1 !important;
+      border-radius: 8px !important;
+      background: #fff !important;
+      color: #0f172a !important;
+      font-family: Consolas, "Courier New", monospace !important;
+      font-size: 13px !important;
+      line-height: 1.6 !important;
+      white-space: pre !important;
+      overflow: auto !important;
+      box-shadow: inset 0 1px 2px rgba(16,24,40,.04) !important;
+    }
+    @media (max-width: 980px) {
+      body #tab_report .text-report-layout {
+        grid-template-columns: 1fr !important;
+      }
+      body #tab_report .text-report-output-wrap,
+      body #tab_report .text-report-output {
+        min-height: 420px !important;
+        height: 520px !important;
+      }
+    }
+    @media (max-width: 640px) {
+      body #tab_report > .text-report-page-card {
+        margin-top: 12px !important;
+      }
+      body #tab_report .text-report-page-head {
+        align-items: flex-start !important;
+        flex-direction: column !important;
+        padding: 14px 10px !important;
+      }
+      body #tab_report .text-report-status {
+        text-align: left !important;
+      }
+      body #tab_report .text-report-layout {
+        padding: 14px 10px 0 !important;
+      }
+      body #tab_report .text-report-actions {
+        grid-template-columns: 1fr !important;
+      }
+      body #tab_report .text-report-actions .btn:first-child {
+        grid-column: auto !important;
+      }
+      body #tab_report .text-report-custom-dates,
+      body #tab_report.is-custom-date .text-report-custom-dates {
+        grid-template-columns: 1fr !important;
       }
     }
     body #b_keyword_inspect .keyword-workbench-title-row {
@@ -13191,6 +13516,7 @@
         <div class="tabs main-tabs workflow-main-tabs" aria-label="작업 목적 선택">
           <span class="workflow-active-pill" aria-hidden="true"></span>
           <button class="tab-btn active" data-workflow="lookup" onclick="switchWorkflowTab('lookup', this)">조회</button>
+          <button class="tab-btn" data-workflow="report" onclick="switchWorkflowTab('report', this)">보고서</button>
           <button class="tab-btn" data-workflow="create" onclick="switchWorkflowTab('create', this)">등록</button>
           <button class="tab-btn" data-workflow="change" onclick="switchWorkflowTab('change', this)">변경</button>
           <button class="tab-btn" data-workflow="copy" onclick="switchWorkflowTab('copy', this)">복사</button>
@@ -13534,6 +13860,77 @@
           </div>
         </div>
 
+        <div id="tab_report" class="tab-content">
+          <div class="card text-report-page-card">
+            <div class="text-report-page-head">
+              <div>
+                <div class="card-title">텍스트 성과보고서</div>
+                <div class="field-note">선택한 광고주와 좌측 선택 범위를 기준으로 공유용 텍스트 보고서를 생성합니다.</div>
+              </div>
+              <div class="text-report-status" id="text_report_status">미생성</div>
+            </div>
+            <div class="text-report-layout">
+              <div class="text-report-controls">
+                <div class="form-group">
+                  <label>광고 유형</label>
+                  <select id="text_report_type_filter">
+                    <option value="all">파워링크 + 쇼핑검색</option>
+                    <option value="WEB_SITE">파워링크</option>
+                    <option value="SHOPPING">쇼핑검색</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>조회 범위</label>
+                  <select id="text_report_target_scope">
+                    <option value="account">계정 전체</option>
+                    <option value="selected_campaigns">선택 캠페인</option>
+                    <option value="selected_adgroups">선택 광고그룹</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>기간</label>
+                  <select id="text_report_date_preset" onchange="syncTextReportDatePreset()">
+                    <option value="today">오늘</option>
+                    <option value="yesterday">어제</option>
+                    <option value="last7days">최근 7일</option>
+                    <option value="custom">직접 기간</option>
+                  </select>
+                </div>
+                <div class="text-report-custom-dates">
+                  <div class="form-group">
+                    <label>시작일</label>
+                    <input type="date" id="text_report_since" disabled>
+                  </div>
+                  <div class="form-group">
+                    <label>종료일</label>
+                    <input type="date" id="text_report_until" disabled>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>데이터 기준</label>
+                  <select id="text_report_metric">
+                    <option value="conversion">보고서 전환</option>
+                    <option value="purchase">구매완료 데이터</option>
+                  </select>
+                </div>
+                <div class="text-report-options">
+                  <label><input type="checkbox" id="text_report_include_type" checked> 유형별 요약 포함</label>
+                  <label><input type="checkbox" id="text_report_include_campaign"> 캠페인별 요약 포함</label>
+                </div>
+                <div class="text-report-actions">
+                  <button type="button" class="btn btn-primary" onclick="generatePerformanceTextReport()">텍스트 보고서 생성</button>
+                  <button type="button" class="btn btn-sub" onclick="copyPerformanceTextReport()">복사</button>
+                  <button type="button" class="btn btn-sub" onclick="downloadPerformanceTextReport()">TXT 다운로드</button>
+                  <button type="button" class="btn btn-sub" onclick="clearPerformanceTextReport()">비우기</button>
+                </div>
+              </div>
+              <div class="text-report-output-wrap">
+                <textarea id="text_report_output" class="text-report-output" readonly placeholder="텍스트 보고서를 생성하면 여기에 표시됩니다."></textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div id="tab_create" class="tab-content">
             <div class="tabs sub-tabs">
                 <button class="tab-btn active" onclick="switchSubTab('c_camp_adg', this, '#tab_create')">캠페인/그룹</button>
@@ -13666,20 +14063,28 @@
                         <div class="form-group">
                             <label>제목 (최대 15자)</label>
                             <input type="text" id="create_ad_headline" placeholder="예: {키워드} 공식 홈페이지">
+                            <div class="char-count-helper is-empty" id="create_ad_headline_count">0자 / 최대 15자</div>
                         </div>
                         <div class="form-group">
                             <label>설명 (최대 45자)</label>
                             <input type="text" id="create_ad_desc" placeholder="예: 빠르고 정확한 서비스를 제공합니다.">
+                            <div class="char-count-helper is-empty" id="create_ad_desc_count">0자 / 최대 45자</div>
                         </div>
                         <div class="btn-row" style="margin-top:-6px; margin-bottom:12px;">
                             <button type="button" class="btn btn-sub keyword-token-insert-btn" style="padding:6px 10px; font-size:12px;" onclick="insertKeywordToken('create_ad_headline')">제목 키워드삽입</button>
                             <button type="button" class="btn btn-sub keyword-token-insert-btn" style="padding:6px 10px; font-size:12px;" onclick="insertKeywordToken('create_ad_desc')">설명 키워드삽입</button>
                         </div>
-                        <div class="form-group">
-                            <label>대체키워드 (키워드삽입용)</label>
-                            <input type="text" id="create_ad_replace_keyword" placeholder="대체키워드 입력">
-                            <div class="field-help">위 버튼으로 {키워드}를 넣고, 대체키워드에는 실제 치환될 기본 문구를 입력합니다.</div>
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label>제목 대체키워드</label>
+                                <input type="text" id="create_ad_headline_replace_keyword" placeholder="제목용 대체문구">
+                            </div>
+                            <div class="form-group">
+                                <label>설명 대체키워드</label>
+                                <input type="text" id="create_ad_description_replace_keyword" placeholder="설명용 대체문구">
+                            </div>
                         </div>
+                        <div class="field-help" style="margin-top:-6px; margin-bottom:12px;">{키워드:문구}처럼 직접 입력한 문구가 있으면 그 값을 우선 사용합니다.</div>
                         <div class="grid-2">
                             <div class="form-group"><label>PC 연결 URL</label><input type="text" id="create_ad_pc" placeholder="https://..."></div>
                             <div class="form-group"><label>모바일 연결 URL</label><input type="text" id="create_ad_mobile" placeholder="https://..."></div>
@@ -13725,6 +14130,7 @@
                                 <option value="SHOPPING_EXTRA">쇼핑상품부가정보</option>
                                 <option value="DESCRIPTION_EXTRA">추가설명</option>
                                 <option value="SUB_LINKS">서브링크</option>
+                                <option value="WEBSITE_INFO">웹사이트 정보</option>
                             </select>
                         </div>
                         
@@ -13740,11 +14146,14 @@
                         </div>
 
                         <div id="ext_position_wrap"><div class="form-group"><label>노출 위치</label><select id="create_ext_position"><option value="1">1번</option><option value="2">2번</option></select></div></div>
-                        <div id="ext_headline_wrap" class="form-group"><label>내용 (문구)</label><input type="text" id="create_ext_text" placeholder="내용 입력"></div>
+                        <div id="ext_headline_wrap" class="form-group"><label>내용 (문구)</label><input type="text" id="create_ext_text" placeholder="내용 입력"><div class="char-count-helper is-empty" id="create_ext_text_count">0자</div></div>
+                        <div id="ext_website_info_wrap" class="form-group" style="display:none;">
+                            <label style="display:flex; gap:6px; font-size:12px; margin:0; color:var(--muted);"><input type="checkbox" id="create_ext_website_info_agree" checked> 웹사이트정보 활용 동의</label>
+                        </div>
                         <div id="ext_shopping_promo_wrap" style="display:none;">
                             <div class="grid-2" style="grid-template-columns: 1fr 1fr;">
-                                <div class="form-group"><label>문구 1</label><input type="text" id="create_ext_basic_text" placeholder="10자 이내" maxlength="10"></div>
-                                <div class="form-group"><label>문구 2</label><input type="text" id="create_ext_additional_text" placeholder="30자 이내" maxlength="30"></div>
+                                <div class="form-group"><label>문구 1</label><input type="text" id="create_ext_basic_text" placeholder="10자 이내" maxlength="10"><div class="char-count-helper is-empty" id="create_ext_basic_text_count">0자 / 최대 10자</div></div>
+                                <div class="form-group"><label>문구 2</label><input type="text" id="create_ext_additional_text" placeholder="30자 이내" maxlength="30"><div class="char-count-helper is-empty" id="create_ext_additional_text_count">0자 / 최대 30자</div></div>
                             </div>
                             <div class="field-help">문구 1은 필수, 문구 2는 선택입니다.</div>
                         </div>
@@ -13752,10 +14161,10 @@
                         <div id="ext_sublinks_wrap" style="display:none;">
                             <div class="field-help">서브링크명 및 URL을 입력하세요. (최소 3개)</div>
                             <div class="grid-2">
-                                <div class="form-group"><label>이름 1</label><input type="text" id="ext_link_name_1"></div><div class="form-group"><label>URL 1</label><input type="text" id="ext_link_url_1"></div>
-                                <div class="form-group"><label>이름 2</label><input type="text" id="ext_link_name_2"></div><div class="form-group"><label>URL 2</label><input type="text" id="ext_link_url_2"></div>
-                                <div class="form-group"><label>이름 3</label><input type="text" id="ext_link_name_3"></div><div class="form-group"><label>URL 3</label><input type="text" id="ext_link_url_3"></div>
-                                <div class="form-group"><label>이름 4</label><input type="text" id="ext_link_name_4"></div><div class="form-group"><label>URL 4</label><input type="text" id="ext_link_url_4"></div>
+                                <div class="form-group"><label>이름 1</label><input type="text" id="ext_link_name_1"></div><div class="form-group"><label>URL 1</label><input type="text" id="ext_link_url_1" placeholder="https://"></div>
+                                <div class="form-group"><label>이름 2</label><input type="text" id="ext_link_name_2"></div><div class="form-group"><label>URL 2</label><input type="text" id="ext_link_url_2" placeholder="https://"></div>
+                                <div class="form-group"><label>이름 3</label><input type="text" id="ext_link_name_3"></div><div class="form-group"><label>URL 3</label><input type="text" id="ext_link_url_3" placeholder="https://"></div>
+                                <div class="form-group"><label>이름 4</label><input type="text" id="ext_link_name_4"></div><div class="form-group"><label>URL 4</label><input type="text" id="ext_link_url_4" placeholder="https://"></div>
                             </div>
                         </div>
                         <label style="display:flex; gap:6px; font-size:12px; margin-bottom:8px; color:var(--muted);"><input type="checkbox" id="create_ext_multi"> 좌측에서 선택(체크)한 그룹 전체 등록</label>
@@ -13830,15 +14239,15 @@
                             <textarea id="shopping_ad_bid_result" rows="8" readonly placeholder="실행 결과가 여기에 표시됩니다."></textarea>
                         </div>
                         <div style="height:1px; background:var(--line); margin:16px 0;"></div>
-                        <div class="card-title" style="font-size:13px; margin-bottom:8px;">쇼핑 상품 소재별 입찰가 대량 변경</div>
-                        <div class="field-note" style="margin-bottom:12px;">업로드 열: 소재ID, 변경 후 입찰가. 소재ID 기준으로 해당 쇼핑 상품 소재의 개별 입찰가만 변경합니다.</div>
+                        <div class="card-title" style="font-size:13px; margin-bottom:8px;">쇼핑검색 소재 입찰가 대량 변경 (소재ID 기준)</div>
+                        <div class="field-note" style="margin-bottom:12px;">업로드 열: 소재ID, 소재 입찰가. 소재ID 기준으로 해당 쇼핑검색 소재의 개별 입찰가만 변경합니다.</div>
                         <div class="form-group">
-                            <label>상품 소재별 파일</label>
+                            <label>소재ID 기준 파일</label>
                             <input type="file" id="shopping_product_ad_bid_file" accept=".csv,.txt,.tsv,.xls,.xlsx">
                         </div>
                         <div class="btn-row">
                             <button type="button" class="btn btn-sub" style="flex:1;" onclick="downloadShoppingProductAdBidTemplate()">CSV 템플릿 다운로드</button>
-                            <button type="button" class="btn btn-primary" style="flex:1;" onclick="bulkUpdateShoppingProductAdBids()">상품 소재 입찰가 변경</button>
+                            <button type="button" class="btn btn-primary" style="flex:1;" onclick="bulkUpdateShoppingProductAdBids()">소재 입찰가 변경 실행</button>
                         </div>
                         <div class="form-group" style="margin-top:10px;">
                             <label>처리 결과</label>
@@ -14142,6 +14551,10 @@
                             <button class="btn btn-sub" onclick="clearPowerlinkKeywordLookupResult()">결과 비우기</button>
                         </div>
                         <div id="powerlink_keyword_lookup_result" class="keyword-lookup-result-panel">
+                            <div class="keyword-lookup-result-nav">
+                                <span class="keyword-lookup-result-title">키워드 진단 결과</span>
+                                <button type="button" class="btn btn-sub keyword-back-btn" onclick="returnToAccountLookupFromKeywordInspect()">← 뒤로</button>
+                            </div>
                             <div class="log-empty">아직 조회한 결과가 없습니다.</div>
                         </div>
                     </div>
@@ -14264,9 +14677,10 @@
                                 <label>중복 판단 방식</label>
                                 <select id="duplicate_keyword_scope">
                                     <option value="selected_campaigns" selected>전체 중복 포함</option>
+                                    <option value="between_campaigns">캠페인 간만</option>
                                     <option value="within_campaign">캠페인 내부만</option>
                                 </select>
-                                <div class="field-note">예: DA_경기도와 DA_서울에 같은 키워드가 있으면 전체 중복에서 잡힙니다.</div>
+                                <div class="field-note">캠페인 간만을 선택하면 같은 캠페인 안 PC/MO 그룹 중복은 제외합니다.</div>
                             </div>
                         </div>
                         <div class="btn-row" style="margin-bottom:12px;">
@@ -14396,9 +14810,29 @@
                             <div style="display:flex; gap:12px; font-size:12px; flex-wrap:wrap;">
                                 <label><input type="checkbox" id="copy_include_keywords" checked> 키워드</label>
                                 <label><input type="checkbox" id="copy_include_ads" checked> 소재</label>
-                                <label><input type="checkbox" id="copy_include_extensions" checked> 확장소재</label>
+                                <label><input type="checkbox" id="copy_include_extensions" checked onchange="syncCopyExtensionTypeOptions()"> 확장소재</label>
                                 <label><input type="checkbox" id="copy_include_negatives" checked> 제외키워드</label>
                                 <label><input type="checkbox" id="copy_exclude_off_assets" checked> OFF 원본 광고그룹/소재/확장소재 제외</label>
+                            </div>
+                            <div id="copy_extension_type_wrap" style="margin-top:10px; padding:10px 12px; border:1px solid var(--line); border-radius:6px; background:#fff;">
+                                <label style="display:block; margin-bottom:8px;">복사할 확장소재 유형</label>
+                                <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:8px 12px; font-size:12px;">
+                                    <label><input type="checkbox" class="copy-ext-type" value="ALL" checked onchange="syncCopyExtensionTypes(this)"> 모든 확장소재</label>
+                                    <label><input type="checkbox" class="copy-ext-type" value="HEADLINE" onchange="syncCopyExtensionTypes(this)"> 추가제목</label>
+                                    <label><input type="checkbox" class="copy-ext-type" value="DESCRIPTION" onchange="syncCopyExtensionTypes(this)"> 홍보문구</label>
+                                    <label><input type="checkbox" class="copy-ext-type" value="DESCRIPTION_EXTRA" onchange="syncCopyExtensionTypes(this)"> 추가설명</label>
+                                    <label><input type="checkbox" class="copy-ext-type" value="SUB_LINKS" onchange="syncCopyExtensionTypes(this)"> 서브링크</label>
+                                    <label><input type="checkbox" class="copy-ext-type" value="IMAGE_SUB_LINKS" onchange="syncCopyExtensionTypes(this)"> 이미지형 서브링크</label>
+                                    <label><input type="checkbox" class="copy-ext-type" value="POWER_LINK_IMAGE" onchange="syncCopyExtensionTypes(this)"> 파워링크 이미지</label>
+                                    <label><input type="checkbox" class="copy-ext-type" value="WEBSITE_INFO" onchange="syncCopyExtensionTypes(this)"> 웹사이트 정보</label>
+                                    <label><input type="checkbox" class="copy-ext-type" value="PHONE" onchange="syncCopyExtensionTypes(this)"> 전화번호</label>
+                                    <label><input type="checkbox" class="copy-ext-type" value="LOCATION" onchange="syncCopyExtensionTypes(this)"> 위치정보</label>
+                                    <label><input type="checkbox" class="copy-ext-type" value="PROMOTION" onchange="syncCopyExtensionTypes(this)"> 프로모션</label>
+                                    <label><input type="checkbox" class="copy-ext-type" value="PRICE_LINKS" onchange="syncCopyExtensionTypes(this)"> 가격링크</label>
+                                    <label><input type="checkbox" class="copy-ext-type" value="SHOPPING_PROMO_TEXT" onchange="syncCopyExtensionTypes(this)"> 쇼핑 추가홍보문구</label>
+                                    <label><input type="checkbox" class="copy-ext-type" value="SHOPPING_EXTRA" onchange="syncCopyExtensionTypes(this)"> 쇼핑상품부가정보</label>
+                                </div>
+                                <div class="field-note">확장소재를 체크한 경우에만 적용됩니다. 예: 추가제목과 이미지형 서브링크만 체크하면 해당 유형만 복사합니다.</div>
                             </div>
                             <div class="field-note">기본 ON입니다. 체크 시 OFF 상태인 원본 광고그룹은 건너뛰고, OFF 소재와 확장소재는 생성 요청 전 서버에서 제외합니다.</div>
                         </div>
@@ -14601,7 +15035,7 @@
                 <div id="bulk_extension_grid" class="grid-2 bulk-extension-grid" style="margin-top:16px;">
                     <div id="bulk_card_description" class="card bulk-extension-card bulk-upload-card">
                         <div class="card-title">추가설명 대량등록</div>
-                        <div class="field-help" style="margin-bottom:14px;">업로드 열: <strong>그룹id 또는 소재ID, 추가설명</strong><br><span class="field-note">그룹ID를 넣으면 해당 그룹의 파워링크 소재ID를 찾아 소재별로 등록합니다.</span></div>
+                        <div class="field-help" style="margin-bottom:14px;">업로드 열: <strong>그룹id 또는 소재ID, 추가설명</strong><br><span class="field-note">추가설명은 파워링크 광고그룹 기준으로 등록합니다. 소재ID를 넣은 경우 해당 소재의 광고그룹으로 변환합니다.</span></div>
                         <div class="grid-2">
                             <div class="form-group"><label>업로드 파일</label><input type="file" id="bulk_description_file" accept=".csv,.txt,.tsv,.xls,.xlsx"><div class="field-note">csv / xls / xlsx 지원</div></div>
                             <div class="form-group"><label>템플릿/실행</label><div class="btn-row"><button type="button" class="btn btn-sub" style="flex:1;" onclick="downloadBulkExtensionTemplate('DESCRIPTION_EXTRA')">CSV 템플릿</button><button type="button" class="btn btn-primary" style="flex:1;" onclick="bulkUploadExtensions('DESCRIPTION_EXTRA')">추가설명 대량등록</button></div></div>
@@ -14638,12 +15072,22 @@
                         </div>
                         <div class="form-group" style="margin-top:8px;"><label>처리 결과</label><textarea id="bulk_image_sublinks_result" rows="8" readonly placeholder="실행 결과가 여기에 표시됩니다."></textarea></div>
                     </div>
+
+                    <div id="bulk_card_website_info" class="card bulk-extension-card bulk-upload-card">
+                        <div class="card-title">웹사이트 정보 대량등록</div>
+                        <div class="field-help" style="margin-bottom:14px;">업로드 열: <strong>그룹id, 비즈채널ID(선택), 활용동의</strong><br><span class="field-note">웹사이트 정보는 광고그룹당 1개 등록되며 랜딩페이지 구조화 데이터를 활용합니다.</span></div>
+                        <div class="grid-2">
+                            <div class="form-group"><label>업로드 파일</label><input type="file" id="bulk_website_info_file" accept=".csv,.txt,.tsv,.xls,.xlsx"><div class="field-note">csv / xls / xlsx 지원</div></div>
+                            <div class="form-group"><label>템플릿/실행</label><div class="btn-row"><button type="button" class="btn btn-sub" style="flex:1;" onclick="downloadBulkExtensionTemplate('WEBSITE_INFO')">CSV 템플릿</button><button type="button" class="btn btn-primary" style="flex:1;" onclick="bulkUploadExtensions('WEBSITE_INFO')">웹사이트 정보 대량등록</button></div></div>
+                        </div>
+                        <div class="form-group" style="margin-top:8px;"><label>처리 결과</label><textarea id="bulk_website_info_result" rows="8" readonly placeholder="실행 결과가 여기에 표시됩니다."></textarea></div>
+                    </div>
                 </div>
 
                 <div class="card" style="margin-top:16px; border-color:#bfdbfe; background:#f8fbff;">
-                    <div class="card-title">ID별 소재/확장소재 ON/OFF</div>
+                    <div class="card-title">ID별 소재/확장소재 ON/OFF/삭제</div>
                     <div class="field-help" style="margin-bottom:14px;">
-                        대량등록 후 받은 <strong>소재ID 또는 확장소재ID</strong>를 줄바꿈/쉼표로 붙여넣어 ON/OFF 상태를 바로 변경합니다. 좌측 캠페인/그룹 선택과 관계없이 입력한 ID만 처리합니다.
+                        대량등록 후 받은 <strong>소재ID 또는 확장소재ID</strong>를 줄바꿈/쉼표로 붙여넣어 ON/OFF 상태 변경 또는 삭제를 바로 실행합니다. 좌측 캠페인/그룹 선택과 관계없이 입력한 ID만 처리합니다.
                     </div>
                     <div class="grid-2">
                         <div class="form-group">
@@ -14652,6 +15096,7 @@
                             <div class="btn-row" style="margin-top:8px;">
                                 <button type="button" class="btn btn-green" style="flex:1;" onclick="executeAssetStateByIds('bulkad', 'ad', true)">소재ID ON</button>
                                 <button type="button" class="btn btn-sub" style="flex:1; color:var(--red); border-color:var(--red);" onclick="executeAssetStateByIds('bulkad', 'ad', false)">소재ID OFF</button>
+                                <button type="button" class="btn btn-red" style="flex:1;" onclick="executeAssetDeleteByIds('bulkad', 'ad')">소재ID 삭제</button>
                             </div>
                         </div>
                         <div class="form-group">
@@ -14660,10 +15105,11 @@
                             <div class="btn-row" style="margin-top:8px;">
                                 <button type="button" class="btn btn-green" style="flex:1;" onclick="executeAssetStateByIds('bulkad', 'ad_extension', true)">확장소재ID ON</button>
                                 <button type="button" class="btn btn-sub" style="flex:1; color:var(--red); border-color:var(--red);" onclick="executeAssetStateByIds('bulkad', 'ad_extension', false)">확장소재ID OFF</button>
+                                <button type="button" class="btn btn-red" style="flex:1;" onclick="executeAssetDeleteByIds('bulkad', 'ad_extension')">확장소재ID 삭제</button>
                             </div>
                         </div>
                     </div>
-                    <textarea id="bulkad_asset_state_id_result" readonly placeholder="ID별 상태 변경 결과가 여기에 표시됩니다." style="margin-top:12px; min-height:120px;"></textarea>
+                    <textarea id="bulkad_asset_state_id_result" readonly placeholder="ID별 상태 변경/삭제 결과가 여기에 표시됩니다." style="margin-top:12px; min-height:120px;"></textarea>
                 </div>
             </div>
 
@@ -15034,9 +15480,9 @@
                 </div>
 
                 <div class="card" style="border-color:#bfdbfe; background:#f8fbff;">
-                    <div class="card-title">ID별 소재/확장소재 상태변경</div>
+                    <div class="card-title">ID별 소재/확장소재 상태변경/삭제</div>
                     <div class="field-help" style="margin-bottom:14px; color:#1e3a8a; font-size:13px;">
-                        삭제하지 않고 <strong>소재ID/확장소재ID 기준으로 ON/OFF만 변경</strong>할 때 사용합니다. 줄바꿈, 쉼표, 엑셀에서 복사한 한 열 붙여넣기를 지원합니다.
+                        <strong>소재ID/확장소재ID 기준으로 ON/OFF 변경 또는 삭제</strong>할 때 사용합니다. 줄바꿈, 쉼표, 엑셀에서 복사한 한 열 붙여넣기를 지원합니다.
                     </div>
                     <div class="grid-2">
                         <div class="form-group">
@@ -15045,6 +15491,7 @@
                             <div class="btn-row" style="margin-top:8px;">
                                 <button type="button" class="btn btn-green" style="flex:1;" onclick="executeAssetStateByIds('delete', 'ad', true)">소재ID ON</button>
                                 <button type="button" class="btn btn-sub" style="flex:1; color:var(--red); border-color:var(--red);" onclick="executeAssetStateByIds('delete', 'ad', false)">소재ID OFF</button>
+                                <button type="button" class="btn btn-red" style="flex:1;" onclick="executeAssetDeleteByIds('delete', 'ad')">소재ID 삭제</button>
                             </div>
                         </div>
                         <div class="form-group">
@@ -15053,10 +15500,11 @@
                             <div class="btn-row" style="margin-top:8px;">
                                 <button type="button" class="btn btn-green" style="flex:1;" onclick="executeAssetStateByIds('delete', 'ad_extension', true)">확장소재ID ON</button>
                                 <button type="button" class="btn btn-sub" style="flex:1; color:var(--red); border-color:var(--red);" onclick="executeAssetStateByIds('delete', 'ad_extension', false)">확장소재ID OFF</button>
+                                <button type="button" class="btn btn-red" style="flex:1;" onclick="executeAssetDeleteByIds('delete', 'ad_extension')">확장소재ID 삭제</button>
                             </div>
                         </div>
                     </div>
-                    <textarea id="delete_asset_state_id_result" readonly placeholder="ID별 상태 변경 결과가 여기에 표시됩니다." style="margin-top:12px; min-height:120px;"></textarea>
+                    <textarea id="delete_asset_state_id_result" readonly placeholder="ID별 상태 변경/삭제 결과가 여기에 표시됩니다." style="margin-top:12px; min-height:120px;"></textarea>
                 </div>
 
             </div>
@@ -15121,6 +15569,7 @@ const ACCOUNT_FAVORITES_KEY = 'naver_account_favorites';
 const ACCOUNT_STATUS_KEY = 'naver_account_status_v1';
 let accountStatusMap = {};
 let performanceStatsLastData = null;
+let performanceTextReportLastData = null;
 let performanceStatsSortState = { key: null, direction: 'desc', kind: 'number' };
 let performanceBidEditorState = { key: null };
 let performanceAdgroupCopyModeEnabled = false;
@@ -17597,6 +18046,7 @@ const WORKFLOW_COMMANDS = [
     { label: '선택 그룹 상세', desc: '선택한 광고그룹의 키워드·소재·제외키워드 확인', action: 'lookup-detail', group: '조회', keywords: '광고그룹 상세 키워드 소재 제외키워드' },
     { label: '키워드 진단', desc: '중복 키워드, 개수, 검색어 기준 키워드 점검', action: 'lookup-keyword', group: '조회', keywords: '키워드 진단 중복 개수 검색어' },
     { label: '엑셀 내보내기', desc: '키워드·소재·확장소재 목록을 엑셀로 저장', action: 'lookup-excel', group: '조회', keywords: '엑셀 다운로드 내보내기 export 소재 확장소재 키워드' },
+    { label: '텍스트 보고서', desc: '성과 요약을 텍스트로 생성하고 복사 또는 TXT로 저장', action: 'report-text', group: '보고서', keywords: '텍스트 보고서 리포트 성과 요약 복사 다운로드 txt' },
     { label: '캠페인/그룹 등록', desc: '캠페인 또는 광고그룹을 새로 생성', action: 'create-campaign', group: '등록', keywords: '등록 생성 캠페인 광고그룹 만들기' },
     { label: '키워드 등록', desc: '선택 광고그룹에 키워드 등록', action: 'create-keyword', group: '등록', keywords: '등록 생성 키워드 추가' },
     { label: '소재 등록', desc: '파워링크/쇼핑검색 소재 등록', action: 'create-ad', group: '등록', keywords: '등록 생성 소재 광고 text shopping' },
@@ -17609,7 +18059,7 @@ const WORKFLOW_COMMANDS = [
     { label: '복사 작업', desc: '캠페인/그룹/키워드/소재/확장소재 복사', action: 'copy', group: '복사', keywords: '복사 캠페인 그룹 키워드 소재 확장소재 제외키워드' },
     { label: '삭제 작업', desc: '캠페인·그룹·키워드·소재·확장소재 삭제', action: 'delete', group: '삭제', keywords: '삭제 캠페인 그룹 키워드 소재 확장소재 제외키워드' }
 ].map((item, idx) => ({ ...item, index: idx }));
-const WORKFLOW_COMMAND_GROUPS = ['전체', '조회', '등록', '변경', '복사', '삭제'];
+const WORKFLOW_COMMAND_GROUPS = ['전체', '조회', '보고서', '등록', '변경', '복사', '삭제'];
 let workflowCommandGroupFilter = '전체';
 
 function normalizeWorkflowCommandText(value) {
@@ -17846,17 +18296,28 @@ function updateWorkflowNextActionCard(forcedWorkflow=null) {
             buttons: [{ label: '광고주 선택', action: 'account', primary: true }]
         };
     } else if (!hasSelection) {
-        data = {
-            empty: true,
-            kicker: '대상 선택 필요',
-            title: '캠페인 또는 광고그룹을 체크하세요',
-            desc: '대상을 선택하면 변경·복사·삭제 같은 작업으로 바로 이동할 수 있습니다. 조회는 계정 전체로도 실행 가능합니다.',
-            pills: [`광고주 ${currentCustomerId}`, '선택 0개'],
-            buttons: [
-                { label: '대상 선택', action: 'target', primary: true },
-                { label: '계정 조회', action: 'lookup-account' }
-            ]
-        };
+        if (workflow === 'report') {
+            data = {
+                empty: false,
+                kicker: '계정 전체 보고서',
+                title: '선택 없이 계정 전체 보고서를 만들 수 있습니다',
+                desc: '캠페인이나 광고그룹을 체크하면 선택 범위 보고서로 좁힐 수 있습니다.',
+                pills: [`광고주 ${currentCustomerId}`, '계정 전체'],
+                buttons: [{ label: '텍스트 보고서', action: 'report-text', primary: true }]
+            };
+        } else {
+            data = {
+                empty: true,
+                kicker: '대상 선택 필요',
+                title: '캠페인 또는 광고그룹을 체크하세요',
+                desc: '대상을 선택하면 변경·복사·삭제 같은 작업으로 바로 이동할 수 있습니다. 조회는 계정 전체로도 실행 가능합니다.',
+                pills: [`광고주 ${currentCustomerId}`, '선택 0개'],
+                buttons: [
+                    { label: '대상 선택', action: 'target', primary: true },
+                    { label: '계정 조회', action: 'lookup-account' }
+                ]
+            };
+        }
     } else {
         const label = `캠페인 ${campCount}개 · 그룹 ${adgCount}개 선택됨`;
         const byWorkflow = {
@@ -17869,6 +18330,12 @@ function updateWorkflowNextActionCard(forcedWorkflow=null) {
                     { label: '키워드 진단', action: 'lookup-keyword' },
                     { label: '엑셀', action: 'lookup-excel' }
                 ]
+            },
+            report: {
+                kicker: '선택 완료',
+                title: `${label} — 보고서 생성 준비가 됐습니다`,
+                desc: '선택 범위를 보고서 조건으로 사용해 텍스트 성과보고서를 만들 수 있습니다.',
+                buttons: [{ label: '텍스트 보고서', action: 'report-text', primary: true }]
             },
             create: {
                 kicker: '선택 완료',
@@ -19467,6 +19934,10 @@ function openWorkflowQuick(action, targetSelector=null) {
             switchWorkflowTab('lookup');
             workflowFocusTarget('#tab_data > .account-lookup-card .btn-row');
             break;
+        case 'report-text':
+            switchWorkflowTab('report');
+            workflowFocusTarget('#tab_report > .text-report-page-card');
+            break;
         case 'create-campaign':
             switchWorkflowTab('create');
             runAfterSwitch(() => { workflowActivateSubTab('#tab_create', 'c_camp_adg'); workflowFocusTarget('#c_camp_adg'); });
@@ -19530,6 +20001,13 @@ function updateWorkflowQuickCards(workflow) {
                 ['엑셀 내보내기', '키워드·소재·확장소재 목록을 엑셀로 저장', 'lookup-excel', 'lookup']
             ]
         },
+        report: {
+            title: '어떤 보고서를 만들까요?',
+            sub: '성과 데이터를 공유하기 좋은 텍스트 형태로 정리합니다.',
+            cards: [
+                ['텍스트 성과보고서', '기간·범위·데이터 기준을 고르고 보고서 생성', 'report-text', 'report']
+            ]
+        },
         create: {
             title: '무엇을 등록할까요?',
             sub: '새로 만들 항목을 고르면 기존 등록 폼으로 이동합니다.',
@@ -19590,6 +20068,13 @@ function updateWorkflowGuide(workflow) {
             desc: '좌측에서 계정과 캠페인/그룹을 고른 뒤, 키워드·소재·확장소재를 조회하거나 엑셀로 내려받습니다.',
             steps: ['좌측에서 대상 선택', '조회 범위 선택', '조회 또는 엑셀 실행', '결과 확인']
         },
+        report: {
+            cls: 'is-report',
+            kicker: '보고서',
+            title: '성과 요약을 텍스트 보고서로 정리하세요',
+            desc: '기간과 범위를 고른 뒤 텍스트를 생성하고, 복사하거나 TXT 파일로 저장합니다.',
+            steps: ['광고주 선택', '보고서 조건 선택', '텍스트 생성', '복사 또는 다운로드']
+        },
         create: {
             cls: 'is-create',
             kicker: '등록',
@@ -19639,6 +20124,7 @@ function switchWorkflowTab(workflow, btn=null) {
     if (workflow === 'bulkad') return switchCreateBulkAdTab();
     const config = {
         lookup: { parent: 'tab_data', sub: null, main: 'lookup' },
+        report: { parent: 'tab_report', sub: null, main: 'report' },
         create: { parent: 'tab_create', sub: null, main: 'create' },
         change: { parent: 'tab_bulk', sub: 'b_bid', main: 'change' },
         'change-restricted-media': { parent: 'tab_bulk', sub: 'b_media_restrict', main: 'change' },
@@ -19680,7 +20166,7 @@ function switchWorkflowTab(workflow, btn=null) {
     });
 }
 
-requestAnimationFrame(() => { updateWorkflowQuickCards('lookup'); updateWorkflowNextActionCard('lookup'); renderWorkflowShortcutPanel(); updateWorkflowMainTabPill(); updateDetailMainSubTabPill(); scheduleAccountPreviewSubTabPillUpdate(); syncPerformanceResultLevelTabs(); });
+requestAnimationFrame(() => { updateWorkflowQuickCards('lookup'); updateWorkflowNextActionCard('lookup'); renderWorkflowShortcutPanel(); updateWorkflowMainTabPill(); updateDetailMainSubTabPill(); scheduleAccountPreviewSubTabPillUpdate(); syncPerformanceResultLevelTabs(); if (typeof syncTextReportDatePreset === 'function') syncTextReportDatePreset(); });
 window.addEventListener('resize', () => requestAnimationFrame(() => { updateWorkflowMainTabPill(); updateDetailMainSubTabPill(); scheduleAccountPreviewSubTabPillUpdate(); }));
 window.addEventListener('load', () => { scheduleAccountPreviewSubTabPillUpdate(); syncPerformanceResultLevelTabs(); });
 document.querySelector('.workspace-content > .workflow-main-tabs')?.addEventListener('scroll', () => requestAnimationFrame(updateWorkflowMainTabPill), { passive: true });
@@ -19692,13 +20178,107 @@ function openWorkflowUtility(kind) {
     if (kind === 'bulkad') return switchWorkflowTab('bulkad');
 }
 
+function countInputChars(value) {
+    return Array.from(String(value || '')).length;
+}
+
+function countKeywordExpandedChars(value, fallbackText = '') {
+    const fallback = String(fallbackText || '').trim();
+    const expanded = String(value || '').replace(/\{(?:키워드|keyword)(?::([^}]*))?\}/gi, (_, alt) => {
+        const tokenAlt = String(alt || '').trim();
+        return tokenAlt || fallback || '키워드';
+    });
+    return countInputChars(expanded);
+}
+
+function updateTextAdCharCount(inputId, countId, maxChars, fallbackText = '') {
+    const input = document.getElementById(inputId);
+    const counter = document.getElementById(countId);
+    if(!input || !counter) return;
+    const raw = String(input.value || '');
+    const hasToken = /\{(?:키워드|keyword)(?::([^}]*))?\}/i.test(raw);
+    const length = countKeywordExpandedChars(raw, fallbackText);
+    const max = Number(maxChars);
+    counter.textContent = `${hasToken ? '치환 후 ' : ''}${length}자 / 최대 ${max}자`;
+    counter.classList.toggle('is-over', Number.isFinite(max) && length > max);
+    counter.classList.toggle('is-empty', length === 0);
+}
+
+function updateTextAdCharCounts() {
+    const headlineReplace = document.getElementById('create_ad_headline_replace_keyword')?.value || '';
+    const descriptionReplace = document.getElementById('create_ad_description_replace_keyword')?.value || '';
+    updateTextAdCharCount('create_ad_headline', 'create_ad_headline_count', 15, headlineReplace);
+    updateTextAdCharCount('create_ad_desc', 'create_ad_desc_count', 45, descriptionReplace);
+}
+
+function bindTextAdCharCounters() {
+    ['create_ad_headline', 'create_ad_desc', 'create_ad_headline_replace_keyword', 'create_ad_description_replace_keyword'].forEach(id => {
+        const input = document.getElementById(id);
+        if(!input || input.dataset.charCounterBound === '1') return;
+        input.dataset.charCounterBound = '1';
+        input.addEventListener('input', updateTextAdCharCounts);
+        input.addEventListener('change', updateTextAdCharCounts);
+    });
+    updateTextAdCharCounts();
+}
+
+function updateInputCharCount(inputId, countId, maxChars = null) {
+    const input = document.getElementById(inputId);
+    const counter = document.getElementById(countId);
+    if(!input || !counter) return;
+    const length = countInputChars(input.value);
+    const max = Number(maxChars);
+    const hasMax = Number.isFinite(max) && max > 0;
+    counter.textContent = hasMax ? `${length}자 / 최대 ${max}자` : `${length}자`;
+    counter.classList.toggle('is-over', hasMax && length > max);
+    counter.classList.toggle('is-empty', length === 0);
+}
+
+function updateExtensionCharCounts() {
+    const type = document.getElementById('create_ext_type')?.value || '';
+    const textLimit = { HEADLINE: 15, DESCRIPTION: 14 }[type] || null;
+    updateInputCharCount('create_ext_text', 'create_ext_text_count', textLimit);
+    updateInputCharCount('create_ext_basic_text', 'create_ext_basic_text_count', 10);
+    updateInputCharCount('create_ext_additional_text', 'create_ext_additional_text_count', 30);
+}
+
+function bindExtensionCharCounters() {
+    ['create_ext_text', 'create_ext_basic_text', 'create_ext_additional_text'].forEach(id => {
+        const input = document.getElementById(id);
+        if(!input || input.dataset.charCounterBound === '1') return;
+        input.dataset.charCounterBound = '1';
+        input.addEventListener('input', updateExtensionCharCounts);
+        input.addEventListener('change', updateExtensionCharCounts);
+    });
+    updateExtensionCharCounts();
+}
+
+function normalizeSublinkUrl(value) {
+    const url = String(value || '').trim();
+    if(!url || /^[a-z][a-z0-9+.-]*:\/\//i.test(url)) return url;
+    return `https://${url.replace(/^\/+/, '')}`;
+}
+
+function bindSublinkUrlInputs() {
+    [1, 2, 3, 4].forEach(i => {
+        const input = document.getElementById(`ext_link_url_${i}`);
+        if(!input || input.dataset.urlNormalizerBound === '1') return;
+        input.dataset.urlNormalizerBound = '1';
+        input.addEventListener('blur', () => { input.value = normalizeSublinkUrl(input.value); });
+        input.addEventListener('change', () => { input.value = normalizeSublinkUrl(input.value); });
+    });
+}
+
 function syncExtensionForm() {
     const type = document.getElementById('create_ext_type').value;
     document.getElementById('ext_position_wrap').style.display = type==='HEADLINE' ? '' : 'none';
-    document.getElementById('ext_headline_wrap').style.display = (type==='SUB_LINKS' || type==='SHOPPING_PROMO_TEXT' || type==='SHOPPING_EXTRA') ? 'none' : '';
+    document.getElementById('ext_headline_wrap').style.display = (type==='SUB_LINKS' || type==='SHOPPING_PROMO_TEXT' || type==='SHOPPING_EXTRA' || type==='WEBSITE_INFO') ? 'none' : '';
     document.getElementById('ext_sublinks_wrap').style.display = type==='SUB_LINKS' ? '' : 'none';
     document.getElementById('ext_promo_type_wrap').style.display = type==='DESCRIPTION' ? '' : 'none';
     document.getElementById('ext_shopping_promo_wrap').style.display = type==='SHOPPING_PROMO_TEXT' ? '' : 'none';
+    const websiteInfoWrap = document.getElementById('ext_website_info_wrap');
+    if(websiteInfoWrap) websiteInfoWrap.style.display = type==='WEBSITE_INFO' ? '' : 'none';
+    updateExtensionCharCounts();
 }
 
 function syncBulkDeleteTarget() {
@@ -19732,8 +20312,10 @@ function syncBulkDeleteTarget() {
     }
 }
 
+window.setTimeout(() => { bindTextAdCharCounters(); bindExtensionCharCounters(); bindSublinkUrlInputs(); syncExtensionForm(); }, 0);
 window.setTimeout(syncBulkDeleteTarget, 0);
 window.setTimeout(syncEntityDeleteManager, 0);
+window.setTimeout(syncCopyExtensionTypeOptions, 0);
 
 function syncBulkDeleteExtTypes(changed) {
     const boxes = Array.from(document.querySelectorAll('.bulk-del-ext-type'));
@@ -19749,6 +20331,40 @@ function syncBulkDeleteExtTypes(changed) {
     if(!boxes.some(x => x.checked)) {
         allBox.checked = true;
     }
+}
+
+function syncCopyExtensionTypes(changed) {
+    const boxes = Array.from(document.querySelectorAll('.copy-ext-type'));
+    const allBox = boxes.find(x => String(x.value || '').toUpperCase() === 'ALL');
+    if(!boxes.length || !allBox) return;
+    if(changed && String(changed.value || '').toUpperCase() === 'ALL' && changed.checked) {
+        boxes.forEach(x => { if(x !== allBox) x.checked = false; });
+        return;
+    }
+    if(changed && changed.checked && changed !== allBox) {
+        allBox.checked = false;
+    }
+    if(!boxes.some(x => x.checked)) {
+        allBox.checked = true;
+    }
+}
+
+function getCopyExtensionSelectedTypes() {
+    let values = Array.from(document.querySelectorAll('.copy-ext-type:checked'))
+        .map(x => String(x.value || '').trim())
+        .filter(Boolean);
+    if(!values.length || values.some(x => x.toUpperCase() === 'ALL')) values = ['ALL'];
+    return values;
+}
+
+function syncCopyExtensionTypeOptions() {
+    const includeExtensions = document.getElementById('copy_include_extensions')?.checked !== false;
+    const wrap = document.getElementById('copy_extension_type_wrap');
+    if(wrap) {
+        wrap.style.opacity = includeExtensions ? '1' : '0.45';
+        wrap.style.pointerEvents = includeExtensions ? 'auto' : 'none';
+    }
+    document.querySelectorAll('.copy-ext-type').forEach(box => { box.disabled = !includeExtensions; });
 }
 
 function getAvgPositionMaxRank(targetType, device) {
@@ -21569,6 +22185,7 @@ function insertKeywordToken(targetId) {
     input.focus();
     const nextPos = start + token.length;
     try { input.setSelectionRange(nextPos, nextPos); } catch (e) {}
+    input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
 async function createTextAd(keepInputs = false) {
@@ -21583,7 +22200,8 @@ async function createTextAd(keepInputs = false) {
             ...c, adgroup_ids: adgroupIds, campaign_ids: campaignIds,
             headline: document.getElementById('create_ad_headline').value, 
             description: document.getElementById('create_ad_desc').value,
-            replace_keyword: document.getElementById('create_ad_replace_keyword').value,
+            headline_replace_keyword: document.getElementById('create_ad_headline_replace_keyword')?.value || '',
+            description_replace_keyword: document.getElementById('create_ad_description_replace_keyword')?.value || '',
             pc_url: document.getElementById('create_ad_pc').value,
             mobile_url: document.getElementById('create_ad_mobile').value
         }, '기본 소재 등록 중...');
@@ -21591,7 +22209,11 @@ async function createTextAd(keepInputs = false) {
         if(!keepInputs) {
             document.getElementById('create_ad_headline').value = '';
             document.getElementById('create_ad_desc').value = '';
-            document.getElementById('create_ad_replace_keyword').value = '';
+            const headlineReplace = document.getElementById('create_ad_headline_replace_keyword');
+            const descReplace = document.getElementById('create_ad_description_replace_keyword');
+            if(headlineReplace) headlineReplace.value = '';
+            if(descReplace) descReplace.value = '';
+            updateTextAdCharCounts();
         }
         if(currentAdgroupId && (adgroupIds.includes(currentAdgroupId) || (currentCampaignId && campaignIds.includes(currentCampaignId)))) await loadAdgroupDetails();
     } catch(err) { showToast(err.message, 'error'); }
@@ -21628,12 +22250,19 @@ async function collectExtensionAdgroupIdsByCampaigns(c, campaignIds, options = {
     const ids = [];
     const skippedByName = [];
     const excludeWords = splitAdgroupNameFilterWords(options.excludeNameText);
+    const onlyPowerlink = !!options.onlyPowerlink;
     for (const campaignId of (campaignIds || [])) {
+        if(onlyPowerlink) {
+            const campaign = campaigns.find(x => String(x?.id || x?.nccCampaignId || '') === String(campaignId || ''));
+            if(campaign && getCampaignTypeBucket(campaign) !== 'WEB_SITE') continue;
+        }
         const rows = await postJson('/get_adgroups', { ...c, campaign_id: campaignId });
         (Array.isArray(rows) ? rows : []).forEach(r => {
             if(!r || !r.id) return;
             const name = String(r.name || r.adgroupName || '');
             const nameNorm = name.toLowerCase();
+            const adgroupType = String(r?.adgroupType || r?.raw?.adgroupType || '').toUpperCase();
+            if(onlyPowerlink && adgroupType && adgroupType !== 'WEB_SITE') return;
             if(excludeWords.length && excludeWords.some(word => nameNorm.includes(word))) {
                 skippedByName.push({ id: String(r.id), name, campaignId: String(campaignId || '') });
                 return;
@@ -21662,12 +22291,19 @@ async function collectShoppingAdOwnerIdsFromAdgroups(c, adgroupIds) {
 async function collectPowerlinkTextAdOwnerIdsFromAdgroups(c, adgroupIds) {
     const ownerIds = [];
     for (const adgroupId of (adgroupIds || [])) {
+        if(isShoppingAdgroupId(adgroupId)) continue;
         const ads = await fetchJsonCached('/get_ads', { ...c, adgroup_id: adgroupId }, { ttlMs:30000 });
         (Array.isArray(ads) ? ads : []).forEach(ad => {
             const adId = getAdIdentifier(ad);
-            const t = String(ad?.type || ad?.adType || '').toUpperCase();
-            const isShopping = ['SHOPPING_PRODUCT_AD', 'CATALOG_PRODUCT_AD', 'CATALOG_AD', 'SHOPPING_BRAND_AD'].includes(t);
-            const isPowerlinkText = !isShopping && (t === 'TEXT_45' || t === 'RSA_AD' || t.includes('RSA') || t.startsWith('TEXT') || !t);
+            const body = getAdBody(ad);
+            const t = String(ad?.type || ad?.adType || body?.type || body?.adType || '').toUpperCase();
+            const hasShoppingSignal = (
+                ['SHOPPING_PRODUCT_AD', 'CATALOG_PRODUCT_AD', 'CATALOG_AD', 'SHOPPING_BRAND_AD'].includes(t) ||
+                t.includes('SHOPPING') || t.includes('CATALOG') ||
+                !!firstTextValue(ad?.referenceKey, body?.referenceKey, ad?.productName, body?.productName, ad?.mallProductName, body?.mallProductName)
+            );
+            const hasTextSignal = !!firstTextValue(getAdHeadline(ad), getAdDescription(ad), body?.pc?.final, body?.pc?.finalUrl, body?.mobile?.final, body?.mobile?.finalUrl);
+            const isPowerlinkText = !hasShoppingSignal && (t === 'TEXT_45' || t === 'RSA_AD' || t.includes('RSA') || t.startsWith('TEXT') || (!t && hasTextSignal));
             if (isPowerlinkText && adId) ownerIds.push(adId);
         });
     }
@@ -21681,7 +22317,7 @@ async function resolveExtensionOwnerIds(c, type, adgroupIds) {
         return await collectShoppingAdOwnerIdsFromAdgroups(c, ids);
     }
     if (type === 'DESCRIPTION_EXTRA') {
-        return await collectPowerlinkTextAdOwnerIdsFromAdgroups(c, ids);
+        return ids;
     }
     return ids;
 }
@@ -21700,7 +22336,19 @@ async function createExtensionEasy() {
     if(useCampaignMulti) {
         sourceCampaignIds = Array.from(checkedCampaignIds || []).filter(Boolean);
         if(!sourceCampaignIds.length) { showToast('좌측 체크박스에서 캠페인을 선택해주세요.', 'error'); return; }
-        const adgroupIds = await collectExtensionAdgroupIdsByCampaigns(c, sourceCampaignIds);
+        if(type === 'DESCRIPTION_EXTRA') {
+            const beforeCount = sourceCampaignIds.length;
+            sourceCampaignIds = sourceCampaignIds.filter(id => {
+                const campaign = campaigns.find(x => String(x?.id || x?.nccCampaignId || '') === String(id || ''));
+                return !campaign || getCampaignTypeBucket(campaign) === 'WEB_SITE';
+            });
+            if(!sourceCampaignIds.length) {
+                showToast('추가설명은 파워링크 캠페인/소재에만 등록할 수 있습니다. 파워링크 캠페인을 선택해주세요.', 'error');
+                return;
+            }
+            if(sourceCampaignIds.length < beforeCount) showToast('파워링크가 아닌 캠페인은 제외하고 진행합니다.', 'info');
+        }
+        const adgroupIds = await collectExtensionAdgroupIdsByCampaigns(c, sourceCampaignIds, { onlyPowerlink: type === 'DESCRIPTION_EXTRA' });
         refreshAdgroupIds = adgroupIds.slice();
         ownerIds = await resolveExtensionOwnerIds(c, type, adgroupIds);
     } else {
@@ -21711,7 +22359,7 @@ async function createExtensionEasy() {
     }
 
     if(type !== 'SHOPPING_EXTRA' && !ownerIds.length) {
-        showToast(type === 'DESCRIPTION_EXTRA' ? '선택 광고그룹에 추가설명을 연결할 파워링크 소재가 없습니다.' : '대상 광고그룹이 없습니다.', 'error');
+        showToast(type === 'DESCRIPTION_EXTRA' ? '추가설명을 등록할 파워링크 광고그룹이 없습니다.' : '대상 광고그룹이 없습니다.', 'error');
         return;
     }
     if(type === 'SHOPPING_EXTRA' && !ownerIds.length && !refreshAdgroupIds.length && !sourceCampaignIds.length) {
@@ -21729,7 +22377,12 @@ async function createExtensionEasy() {
     };
     
     if(type === 'SUB_LINKS') {
-        body.links = [1,2,3,4].map(i => ({ name: document.getElementById(`ext_link_name_${i}`).value.trim(), final: document.getElementById(`ext_link_url_${i}`).value.trim() }));
+        body.links = [1,2,3,4].map(i => {
+            const input = document.getElementById(`ext_link_url_${i}`);
+            const final = normalizeSublinkUrl(input.value);
+            input.value = final;
+            return { name: document.getElementById(`ext_link_name_${i}`).value.trim(), final };
+        });
     } else if (type === 'SHOPPING_PROMO_TEXT') {
         const basicText = document.getElementById('create_ext_basic_text').value.trim();
         const additionalText = document.getElementById('create_ext_additional_text').value.trim();
@@ -21738,6 +22391,10 @@ async function createExtensionEasy() {
         body.additional_text = additionalText;
     } else if (type === 'SHOPPING_EXTRA') {
         // 쇼핑상품부가정보는 쇼핑에 연동된 정보를 사용하는 타입이라 별도 입력값이 없습니다.
+    } else if (type === 'WEBSITE_INFO') {
+        const agree = !!document.getElementById('create_ext_website_info_agree')?.checked;
+        if(!agree) { showToast('웹사이트정보 활용 동의가 필요합니다.', 'error'); return; }
+        body.agree = true;
     } else {
         const textVal = document.getElementById('create_ext_text').value.trim();
         if(!textVal) { showToast('내용을 입력해주세요.', 'error'); return; }
@@ -21892,18 +22549,18 @@ async function bulkUpdateShoppingAdBids() {
 }
 
 function downloadShoppingProductAdBidTemplate() {
-    const header = ['소재ID','변경 후 입찰가'];
+    const header = ['소재ID','소재 입찰가'];
     const rows = [
-        ['nad-a001-01-000000000000001','280'],
-        ['nad-a001-01-000000000000002','300'],
-        ['nad-a001-01-000000000000003','320'],
+        ['nad-a001-02-000000527397809','150'],
+        ['nad-a001-02-000000527397817','350'],
+        ['nad-a001-02-000000527397831','450'],
     ];
     const csv = '\ufeff' + [header.join(','), ...rows.map(row => row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n');
     const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'shopping_product_ad_bid_change_template.csv';
+    a.download = 'search_area_material_bid_bulk_change.csv';
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -21923,7 +22580,7 @@ async function bulkUpdateShoppingProductAdBids() {
     formData.append('customer_id', c.customer_id);
     formData.append('file', file);
 
-    showLoader('쇼핑 상품 소재 입찰가 대량 변경 중...');
+    showLoader('쇼핑검색 소재 입찰가 대량 변경 중...');
     try {
         const res = await fetch('/bulk_update_shopping_product_ad_bids', { method: 'POST', body: formData });
         const text = await res.text();
@@ -21950,7 +22607,7 @@ async function bulkUpdateShoppingProductAdBids() {
                 ...lines
             ].join('\n').trim();
         }
-        showToast(data.message || '쇼핑 상품 소재 입찰가 대량 변경 완료', Number(data.fail || 0) > 0 ? 'info' : 'success');
+        showToast(data.message || '쇼핑검색 소재 입찰가 대량 변경 완료', Number(data.fail || 0) > 0 ? 'info' : 'success');
         await refreshDashboardAfterChange({ data, forceDetail: !!currentAdgroupId });
     } catch(err) {
         if(resultBox) resultBox.value = `실패: ${err.message}`;
@@ -23609,6 +24266,15 @@ async function setSelectedPowerlinkKeywordLookupState(enabled) {
     }
 }
 
+function keywordLookupResultBackNavHtml() {
+    return `
+        <div class="keyword-lookup-result-nav">
+            <span class="keyword-lookup-result-title">키워드 진단 결과</span>
+            <button type="button" class="btn btn-sub keyword-back-btn" onclick="returnToAccountLookupFromKeywordInspect()">← 뒤로</button>
+        </div>
+    `;
+}
+
 function clearPowerlinkKeywordLookupResult() {
     const wrap = document.getElementById('powerlink_keyword_lookup_result');
     const previewEl = document.getElementById('keyword_lookup_preview_token');
@@ -23616,7 +24282,7 @@ function clearPowerlinkKeywordLookupResult() {
     selectedPowerlinkKeywordLookupIds = new Set();
     keywordBidAdjustDrafts = {};
     powerlinkKeywordLookupRenderLimit = KEYWORD_LOOKUP_INITIAL_RENDER_LIMIT;
-    if(wrap) wrap.innerHTML = '<div class="log-empty">아직 조회한 결과가 없습니다.</div>';
+    if(wrap) wrap.innerHTML = `${keywordLookupResultBackNavHtml()}<div class="log-empty">아직 조회한 결과가 없습니다.</div>`;
     if(previewEl) previewEl.value = '';
 }
 
@@ -23654,6 +24320,7 @@ function renderPowerlinkKeywordLookupResult(data, options = {}) {
     wrap.dataset.warningsJson = JSON.stringify(warnings);
     wrap.dataset.searchGroupsJson = JSON.stringify(searchGroups);
     wrap.dataset.scannedKeywordCount = String(data?.scanned_keyword_count || 0);
+    const resultBackNav = keywordLookupResultBackNavHtml();
     const header = data?.message ? `<div class="field-note" style="margin-bottom:8px; white-space:pre-line;">${escapeMaybe(data.message)}</div>` : '';
     const summary = `
         <div class="keyword-lookup-result-summary">
@@ -23669,7 +24336,7 @@ function renderPowerlinkKeywordLookupResult(data, options = {}) {
     `;
     const warningHtml = warnings.length ? `<div class="field-note" style="margin-bottom:8px; color:#b91c1c;">오류: ${escapeMaybe(warnings.join(' / '))}</div>` : '';
     if(!rows.length) {
-        wrap.innerHTML = `${header}${summary}${warningHtml}<div class="log-empty">일치하는 키워드가 없습니다.</div>`;
+        wrap.innerHTML = `${resultBackNav}${header}${summary}${warningHtml}<div class="log-empty">일치하는 키워드가 없습니다.</div>`;
         updatePowerlinkKeywordLookupSelectionSummary();
         return;
     }
@@ -23733,7 +24400,7 @@ function renderPowerlinkKeywordLookupResult(data, options = {}) {
           </div>
         </div>`;
     }).join('');
-    wrap.innerHTML = `${header}${summary}${warningHtml}${renderNotice}${toolbar}<div class="keyword-lookup-result-list">${items}</div>`;
+    wrap.innerHTML = `${resultBackNav}${header}${summary}${warningHtml}${renderNotice}${toolbar}<div class="keyword-lookup-result-list">${items}</div>`;
     updatePowerlinkKeywordLookupSelectionSummary();
 }
 
@@ -24838,6 +25505,127 @@ function getPerformanceStatsPayload() {
     };
 }
 
+function getPerformanceTextReportPayload() {
+    const c = ensureReady(); if(!c) return null;
+    const scope = document.getElementById('text_report_target_scope')?.value || 'account';
+    const campaignIds = getCheckedCampaignIdsInViewOrder();
+    const adgroupIds = getCheckedAdgroupIdsInViewOrder();
+    if(scope === 'selected_campaigns' && !campaignIds.length) {
+        showToast('좌측에서 캠페인을 체크해주세요.', 'error');
+        return null;
+    }
+    if(scope === 'selected_adgroups' && !adgroupIds.length) {
+        showToast('좌측에서 광고그룹을 체크해주세요.', 'error');
+        return null;
+    }
+    return {
+        ...c,
+        account_name: getSelectedAccountNameForReport(),
+        target_scope: scope,
+        campaign_ids: campaignIds,
+        adgroup_ids: adgroupIds,
+        campaign_type: document.getElementById('text_report_type_filter')?.value || 'all',
+        date_preset: document.getElementById('text_report_date_preset')?.value || 'today',
+        since: document.getElementById('text_report_since')?.value || '',
+        until: document.getElementById('text_report_until')?.value || '',
+        report_metric_mode: document.getElementById('text_report_metric')?.value || 'conversion',
+        include_type_breakdown: !!document.getElementById('text_report_include_type')?.checked,
+        include_campaign_breakdown: !!document.getElementById('text_report_include_campaign')?.checked,
+    };
+}
+
+function setPerformanceTextReportStatus(text) {
+    const el = document.getElementById('text_report_status');
+    if(el) el.textContent = text || '미생성';
+}
+
+function syncTextReportDatePreset() {
+    const custom = document.getElementById('text_report_date_preset')?.value === 'custom';
+    document.getElementById('tab_report')?.classList.toggle('is-custom-date', custom);
+    ['text_report_since', 'text_report_until'].forEach(id => {
+        const el = document.getElementById(id);
+        if(el) el.disabled = !custom;
+    });
+}
+
+function renderPerformanceTextReport(data) {
+    performanceTextReportLastData = data || null;
+    const output = document.getElementById('text_report_output');
+    const text = String(data?.report_text || '');
+    if(output) {
+        output.value = text;
+    }
+    const warnings = Array.isArray(data?.warnings) ? data.warnings.length : 0;
+    const errors = Array.isArray(data?.errors) ? data.errors.length : 0;
+    const statusBits = [];
+    if(data?.since) statusBits.push(data.until && data.until !== data.since ? `${data.since}~${data.until}` : data.since);
+    if(warnings) statusBits.push(`참고 ${warnings}건`);
+    if(errors) statusBits.push(`오류 ${errors}건`);
+    setPerformanceTextReportStatus(statusBits.join(' · ') || '생성 완료');
+}
+
+async function generatePerformanceTextReport() {
+    const payload = getPerformanceTextReportPayload();
+    if(!payload) return;
+    const requestCustomerId = String(payload.customer_id || '');
+    try {
+        const data = await postJson('/get_performance_text_report', payload, '텍스트 보고서 생성 중...');
+        if(String(currentCustomerId || '') !== requestCustomerId) return;
+        renderPerformanceTextReport(data);
+        showToast(data?.message || '텍스트 보고서 생성 완료', 'success');
+    } catch(err) {
+        if(String(currentCustomerId || '') !== requestCustomerId) return;
+        showToast(`텍스트 보고서 생성 실패: ${err.message}`, 'error');
+    }
+}
+
+async function copyPerformanceTextReport() {
+    const text = String(document.getElementById('text_report_output')?.value || performanceTextReportLastData?.report_text || '');
+    if(!text.trim()) {
+        showToast('먼저 텍스트 보고서를 생성해주세요.', 'error');
+        return;
+    }
+    try {
+        if(navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(text);
+        } else {
+            const output = document.getElementById('text_report_output');
+            output?.focus();
+            output?.select();
+            document.execCommand('copy');
+        }
+        showToast('텍스트 보고서를 복사했습니다.', 'success');
+    } catch(err) {
+        showToast(`복사 실패: ${err.message}`, 'error');
+    }
+}
+
+function downloadPerformanceTextReport() {
+    const text = String(document.getElementById('text_report_output')?.value || performanceTextReportLastData?.report_text || '');
+    if(!text.trim()) {
+        showToast('먼저 텍스트 보고서를 생성해주세요.', 'error');
+        return;
+    }
+    const filename = String(performanceTextReportLastData?.filename || 'text_performance_report.txt');
+    const blob = new Blob(['\ufeff', text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showToast('텍스트 보고서를 다운로드했습니다.', 'success');
+}
+
+function clearPerformanceTextReport() {
+    performanceTextReportLastData = null;
+    const output = document.getElementById('text_report_output');
+    if(output) output.value = '';
+    setPerformanceTextReportStatus('미생성');
+}
+
 async function fetchPerformanceStats(options = {}) {
     const payload = getPerformanceStatsPayload();
     if(!payload) return;
@@ -25085,6 +25873,7 @@ async function execCopyEntities() {
     const c = ensureReady(); if(!c) return;
     const sourceIds = getCheckedAdgroupIdsInViewOrder();
     const targetAdgroupIds = getCopyEntityTargetAdgroupIds();
+    const includeExtensions = document.getElementById('copy_include_extensions')?.checked !== false;
     if(!sourceIds.length) { showToast('좌측에서 복사 원본(광고그룹)을 체크해주세요.', 'error'); return; }
     if(!targetAdgroupIds.length) { showToast('대상 광고그룹을 1개 이상 선택해주세요.', 'error'); return; }
 
@@ -25093,7 +25882,8 @@ async function execCopyEntities() {
             ...c, source_ids: sourceIds, target_adgroup_ids: targetAdgroupIds,
             include_keywords: document.getElementById('copy_include_keywords').checked,
             include_ads: document.getElementById('copy_include_ads').checked,
-            include_extensions: document.getElementById('copy_include_extensions').checked,
+            include_extensions: includeExtensions,
+            extension_types: getCopyExtensionSelectedTypes(),
             include_negatives: document.getElementById('copy_include_negatives').checked,
             exclude_off_assets: document.getElementById('copy_exclude_off_assets')?.checked || false
         }, '항목 복사 중...');
@@ -25977,6 +26767,14 @@ const BULK_EXTENSION_UI = {
         filename: 'extension_image_sublinks_bulk_template.csv',
         header: ['그룹id','링크명1','링크URL1','이미지ID1','링크명2','링크URL2','이미지ID2','링크명3','링크URL3','이미지ID3','비즈채널ID'],
         rows: [['grp-a001-01-000000000000000','상담문의','https://www.example.com/contact','img-a001-000000000000001','가격안내','https://www.example.com/price','img-a001-000000000000002','오시는길','https://www.example.com/map','img-a001-000000000000003','']]
+    },
+    WEBSITE_INFO: {
+        label: '웹사이트 정보',
+        fileId: 'bulk_website_info_file',
+        resultId: 'bulk_website_info_result',
+        filename: 'extension_website_info_bulk_template.csv',
+        header: ['그룹id','비즈채널ID','활용동의'],
+        rows: [['grp-a001-01-000000000000000','','동의함'], ['grp-a001-01-000000000000001','bsn-a001-01-000000000000000','동의함']]
     }
 };
 
@@ -26146,33 +26944,60 @@ function parseAssetStateIdText(text) {
         .filter(x => !['id','소재id','소재아이디','광고id','광고아이디','확장소재id','확장소재아이디','adid','nccadid','adextensionid','nccadextensionid','extensionid'].includes(x.replace(/[^0-9a-zA-Z가-힣]/g, '').toLowerCase()));
 }
 
+function inferAssetIdEntityType(id) {
+    const s = String(id || '').trim().replace(/^['"]+|['"]+$/g, '').toLowerCase();
+    if(/^(ext|nex|adx)-/.test(s) || /^(adextension|nccadextension)/.test(s)) return 'ad_extension';
+    if(/^(nad|ad)-a\d{3}-/.test(s)) return 'ad';
+    return '';
+}
+
+function resolveAssetIdOperation(ids, fallbackEntity) {
+    const fallback = ['ad_extension', 'extension', 'ext'].includes(String(fallbackEntity || '').toLowerCase()) ? 'ad_extension' : 'ad';
+    const counts = { ad: 0, ad_extension: 0, unknown: 0 };
+    (ids || []).forEach(id => {
+        const inferred = inferAssetIdEntityType(id);
+        if(inferred === 'ad' || inferred === 'ad_extension') counts[inferred] += 1;
+        else counts.unknown += 1;
+    });
+    const detectedTypes = ['ad', 'ad_extension'].filter(type => counts[type] > 0);
+    const entity = detectedTypes.length === 1 && counts.unknown === 0 ? detectedTypes[0] : fallback;
+    const label = detectedTypes.length > 1
+        ? '소재/확장소재'
+        : (entity === 'ad_extension' ? '확장소재' : '소재');
+    const autoNote = detectedTypes.length === 1 && detectedTypes[0] !== fallback
+        ? `\n\n입력한 ID prefix 기준으로 ${label} API로 자동 처리합니다.`
+        : (detectedTypes.length > 1 ? '\n\n입력한 ID prefix 기준으로 소재와 확장소재를 나누어 처리합니다.' : '');
+    return { entity, label, autoNote };
+}
+
 async function executeAssetStateByIds(prefix, entityType, enabled) {
     const c = ensureReady(); if(!c) return;
     const normalized = String(entityType || '').toLowerCase();
     const isExt = ['ad_extension', 'extension', 'ext'].includes(normalized);
-    const entity = isExt ? 'ad_extension' : 'ad';
+    const fallbackEntity = isExt ? 'ad_extension' : 'ad';
     const textareaId = `${prefix}_${isExt ? 'ext' : 'ad'}_state_ids`;
     const resultId = `${prefix}_asset_state_id_result`;
     const input = document.getElementById(textareaId);
     const resultBox = document.getElementById(resultId);
     const rawText = input?.value || '';
     const ids = parseAssetStateIdText(rawText);
-    const label = isExt ? '확장소재' : '소재';
     const stateLabel = enabled ? 'ON' : 'OFF';
+    const operation = resolveAssetIdOperation(ids, fallbackEntity);
+    const label = operation.label;
     if(!ids.length) {
         showToast(`${label}ID를 1개 이상 입력해주세요.`, 'error');
         return;
     }
     const preview = ids.slice(0, 5).join('\n');
     const more = ids.length > 5 ? `\n외 ${ids.length - 5}건` : '';
-    if(!await showAppConfirm(`입력한 ${label}ID ${ids.length.toLocaleString()}건을 ${stateLabel} 처리할까요?\n\n${preview}${more}`, {
+    if(!await showAppConfirm(`입력한 ${label}ID ${ids.length.toLocaleString()}건을 ${stateLabel} 처리할까요?\n\n${preview}${more}${operation.autoNote}`, {
         title: `${label}ID를 ${stateLabel} 처리할까요?`,
         confirmText: `${stateLabel} 처리`
     })) return;
     try {
         const data = await postJson('/set_asset_state_by_ids', {
             ...c,
-            entity_type: entity,
+            entity_type: operation.entity,
             ids,
             raw_text: rawText,
             enabled: !!enabled
@@ -26182,6 +27007,49 @@ async function executeAssetStateByIds(prefix, entityType, enabled) {
             : [];
         if(resultBox) resultBox.value = [data?.message || `${label}ID 상태 변경 완료`, '', ...lines].join('\n').trim();
         showToast(data?.message || `${label}ID ${stateLabel} 변경 완료`, Number(data?.fail || 0) > 0 ? 'info' : 'success');
+        if(currentAdgroupId) await loadAdgroupDetails();
+    } catch(err) {
+        if(resultBox) resultBox.value = `실패: ${err.message}`;
+        showToast(err.message, 'error');
+    }
+}
+
+async function executeAssetDeleteByIds(prefix, entityType) {
+    const c = ensureReady(); if(!c) return;
+    const normalized = String(entityType || '').toLowerCase();
+    const isExt = ['ad_extension', 'extension', 'ext'].includes(normalized);
+    const fallbackEntity = isExt ? 'ad_extension' : 'ad';
+    const textareaId = `${prefix}_${isExt ? 'ext' : 'ad'}_state_ids`;
+    const resultId = `${prefix}_asset_state_id_result`;
+    const input = document.getElementById(textareaId);
+    const resultBox = document.getElementById(resultId);
+    const rawText = input?.value || '';
+    const ids = parseAssetStateIdText(rawText);
+    const operation = resolveAssetIdOperation(ids, fallbackEntity);
+    const label = operation.label;
+    if(!ids.length) {
+        showToast(`${label}ID를 1개 이상 입력해주세요.`, 'error');
+        return;
+    }
+    const preview = ids.slice(0, 5).join('\n');
+    const more = ids.length > 5 ? `\n외 ${ids.length - 5}건` : '';
+    if(!await showAppConfirm(`입력한 ${label}ID ${ids.length.toLocaleString()}건을 삭제할까요?\n\n${preview}${more}${operation.autoNote}`, {
+        title: `${label}ID를 삭제할까요?`,
+        confirmText: '삭제',
+        tone: 'danger'
+    })) return;
+    try {
+        const data = await postJson('/bulk_delete_asset_ids', {
+            ...c,
+            entity_type: operation.entity,
+            ids,
+            raw_text: rawText
+        }, `${label}ID 삭제 중...`);
+        const lines = Array.isArray(data?.results)
+            ? data.results.slice(0, 50).map((r, idx) => `${idx + 1}. ${r.ok === false ? '실패' : '성공'} - ${r.target || r.id || ''}${r.detail ? ` : ${r.detail}` : ''}`)
+            : [];
+        if(resultBox) resultBox.value = [data?.message || `${label}ID 삭제 완료`, '', ...lines].join('\n').trim();
+        showToast(data?.message || `${label}ID 삭제 완료`, Number(data?.fail || 0) > 0 ? 'info' : 'success');
         if(currentAdgroupId) await loadAdgroupDetails();
     } catch(err) {
         if(resultBox) resultBox.value = `실패: ${err.message}`;
@@ -26635,6 +27503,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (typeof syncThresholdClampMode === 'function') syncThresholdClampMode();
     if (typeof syncContentsNetworkBidMode === 'function') syncContentsNetworkBidMode();
     if (typeof updatePerformanceCopyControls === 'function') updatePerformanceCopyControls();
+    if (typeof syncTextReportDatePreset === 'function') syncTextReportDatePreset();
 });
 
 
