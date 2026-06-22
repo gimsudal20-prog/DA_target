@@ -13915,6 +13915,8 @@
                 <div class="text-report-options">
                   <label><input type="checkbox" id="text_report_include_type" checked> 유형별 요약 포함</label>
                   <label><input type="checkbox" id="text_report_include_campaign"> 캠페인별 요약 포함</label>
+                  <label><input type="checkbox" id="text_report_include_general_conversion_keywords"> 일반 전환 키워드 포함</label>
+                  <label><input type="checkbox" id="text_report_include_purchase_conversion_keywords"> 구매완료 전환 키워드 포함</label>
                 </div>
                 <div class="text-report-actions">
                   <button type="button" class="btn btn-primary" onclick="generatePerformanceTextReport()">텍스트 보고서 생성</button>
@@ -25531,6 +25533,8 @@ function getPerformanceTextReportPayload() {
         report_metric_mode: document.getElementById('text_report_metric')?.value || 'conversion',
         include_type_breakdown: !!document.getElementById('text_report_include_type')?.checked,
         include_campaign_breakdown: !!document.getElementById('text_report_include_campaign')?.checked,
+        include_general_conversion_keywords: !!document.getElementById('text_report_include_general_conversion_keywords')?.checked,
+        include_purchase_conversion_keywords: !!document.getElementById('text_report_include_purchase_conversion_keywords')?.checked,
     };
 }
 

@@ -3671,7 +3671,7 @@ def _row_matches_purchase_event(row: Dict[str, Any], configured_codes: List[str]
     if configured_codes:
         code_set = {str(x or "").strip().lower() for x in configured_codes if str(x or "").strip()}
         return any(x in code_set or x.replace(" ", "") in code_set for x in normalized)
-    return any(("구매" in x or "purchase" in x or "order" in x or "pay" in x or "결제" in x) for x in normalized)
+    return any((x == "1" or "구매" in x or "purchase" in x or "order" in x or "pay" in x or "결제" in x) for x in normalized)
 
 def _collect_performance_targets(api_key: str, secret_key: str, cid: str, scope: str, level: str, type_filter: str, campaign_ids: List[str], adgroup_ids: List[str]):
     res_camp, campaign_rows = _fetch_campaigns(api_key, secret_key, cid)
@@ -3928,7 +3928,14 @@ def _format_performance_report_percent(value: Any, digits: int = 1) -> str:
 def _performance_report_line(label: str, value: str) -> str:
     return f"{label} : {value}"
 
-def _performance_report_metric_lines(metrics: Dict[str, Any] | None, *, report_uses_purchase: bool, keyword_text: str = "") -> List[str]:
+def _performance_report_metric_lines(
+    metrics: Dict[str, Any] | None,
+    *,
+    report_uses_purchase: bool,
+    keyword_text: str = "",
+    general_conversion_keyword_text: str = "",
+    purchase_conversion_keyword_text: str = "",
+) -> List[str]:
     metrics = metrics or {}
     lines = [
         _performance_report_line("노출수", _format_performance_report_number(metrics.get("impCnt"))),
@@ -3950,6 +3957,10 @@ def _performance_report_metric_lines(metrics: Dict[str, Any] | None, *, report_u
         ])
     if keyword_text:
         lines.append(_performance_report_line("주요 유입 키워드", keyword_text))
+    if general_conversion_keyword_text:
+        lines.append(_performance_report_line("주요 일반 전환 키워드", general_conversion_keyword_text))
+    if purchase_conversion_keyword_text:
+        lines.append(_performance_report_line("주요 구매완료 전환 키워드", purchase_conversion_keyword_text))
     return lines
 
 def _performance_report_type_label(type_filter: Any) -> str:
@@ -3977,9 +3988,13 @@ def _build_performance_row_report_section(
     *,
     report_uses_purchase: bool,
     keyword_text_by_id: Dict[str, str] | None = None,
+    general_conversion_keyword_text_by_id: Dict[str, str] | None = None,
+    purchase_conversion_keyword_text_by_id: Dict[str, str] | None = None,
 ) -> str:
     sections: List[str] = []
     keyword_text_by_id = keyword_text_by_id or {}
+    general_conversion_keyword_text_by_id = general_conversion_keyword_text_by_id or {}
+    purchase_conversion_keyword_text_by_id = purchase_conversion_keyword_text_by_id or {}
     for row in rows or []:
         name = str((row or {}).get("name") or (row or {}).get("campaign_name") or (row or {}).get("campaign_type_label") or (row or {}).get("id") or "").strip()
         if not name:
@@ -3990,6 +4005,8 @@ def _build_performance_row_report_section(
             (row or {}).get("metrics") or {},
             report_uses_purchase=report_uses_purchase,
             keyword_text=keyword_text_by_id.get(row_id, ""),
+            general_conversion_keyword_text=general_conversion_keyword_text_by_id.get(row_id, ""),
+            purchase_conversion_keyword_text=purchase_conversion_keyword_text_by_id.get(row_id, ""),
         ))
         sections.append("\n".join(section_lines))
     if not sections:
@@ -4064,8 +4081,10 @@ def _collect_performance_powerlink_keywords(
     scope = _normalize_performance_scope(payload.get("target_scope") or payload.get("scope"))
     campaign_ids = [str(x or "").strip() for x in (payload.get("campaign_ids") or []) if str(x or "").strip()]
     adgroup_ids = [str(x or "").strip() for x in (payload.get("adgroup_ids") or []) if str(x or "").strip()]
+    include_general_conversions = _boolish(payload.get("include_general_conversion_keywords"), False)
+    include_purchase_conversions = _boolish(payload.get("include_purchase_conversion_keywords"), False)
     cache_key = json.dumps(
-        [cid, scope, sorted(campaign_ids), sorted(adgroup_ids), since, until],
+        [cid, scope, sorted(campaign_ids), sorted(adgroup_ids), since, until, include_general_conversions, include_purchase_conversions],
         ensure_ascii=False,
         separators=(",", ":"),
     )
@@ -4133,12 +4152,17 @@ def _collect_performance_powerlink_keywords(
     keyword_ids = _unique_keep_order([row.get("id") for row in keyword_rows])
     stat_rows: List[Dict[str, Any]] = []
     if keyword_ids:
+        stat_fields = ["clkCnt"]
+        if include_general_conversions:
+            stat_fields.append("ccnt")
+        if include_purchase_conversions:
+            stat_fields.append("purchaseCcnt")
         stat_rows, stat_errors = _fetch_stats_rows(
             api_key,
             secret_key,
             cid,
             keyword_ids,
-            ["clkCnt"],
+            stat_fields,
             since,
             until,
             id_kind="keyword",
@@ -4146,25 +4170,76 @@ def _collect_performance_powerlink_keywords(
         )
         errors.extend(stat_errors)
 
+    purchase_stat_rows: List[Dict[str, Any]] = []
+    if keyword_ids and include_purchase_conversions:
+        purchase_stat_rows, purchase_stat_errors = _fetch_stats_rows(
+            api_key,
+            secret_key,
+            cid,
+            keyword_ids,
+            ["ccnt"],
+            since,
+            until,
+            breakdown="eventCode",
+            id_kind="keyword",
+            parallel_workers=4,
+        )
+        if not purchase_stat_rows:
+            errors.extend(purchase_stat_errors)
+
     clicks_by_id: Dict[str, float] = defaultdict(float)
+    general_conversions_by_id: Dict[str, float] = defaultdict(float)
+    purchase_conversions_by_id: Dict[str, float] = defaultdict(float)
     for stat_row in stat_rows:
         stat_id = _stat_row_id(stat_row)
         if stat_id:
             clicks_by_id[stat_id] += _performance_number(_performance_row_value(stat_row, "clkCnt"))
+            if include_general_conversions:
+                general_conversions_by_id[stat_id] += _performance_number(_performance_row_value(stat_row, "ccnt"))
+            if include_purchase_conversions:
+                purchase_conversions_by_id[stat_id] += _performance_number(_performance_row_value(stat_row, "purchaseCcnt"))
+
+    purchase_breakdown_by_id: Dict[str, float] = defaultdict(float)
+    purchase_breakdown_match_count = 0
+    for purchase_stat_row in purchase_stat_rows:
+        if not _row_matches_purchase_event(purchase_stat_row, []):
+            continue
+        stat_id = _stat_row_id(purchase_stat_row)
+        if stat_id:
+            purchase_breakdown_by_id[stat_id] += _performance_number(_performance_row_value(purchase_stat_row, "ccnt"))
+            purchase_breakdown_match_count += 1
+    if purchase_breakdown_match_count:
+        purchase_conversions_by_id = purchase_breakdown_by_id
 
     total_clicks: Dict[str, float] = defaultdict(float)
     campaign_clicks: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    total_general_conversions: Dict[str, float] = defaultdict(float)
+    campaign_general_conversions: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    total_purchase_conversions: Dict[str, float] = defaultdict(float)
+    campaign_purchase_conversions: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
     for keyword_row in keyword_rows:
-        clicks = clicks_by_id.get(str(keyword_row.get("id") or ""), 0.0)
-        if clicks <= 0:
-            continue
+        keyword_id = str(keyword_row.get("id") or "")
         keyword_text = str(keyword_row.get("keyword") or "").strip()
         campaign_id = str(keyword_row.get("campaign_id") or "").strip()
-        total_clicks[keyword_text] += clicks
-        if campaign_id:
-            campaign_clicks[campaign_id][keyword_text] += clicks
+        clicks = clicks_by_id.get(keyword_id, 0.0)
+        if clicks > 0:
+            total_clicks[keyword_text] += clicks
+            if campaign_id:
+                campaign_clicks[campaign_id][keyword_text] += clicks
+        general_conversions = general_conversions_by_id.get(keyword_id, 0.0)
+        if include_general_conversions and general_conversions > 0:
+            total_general_conversions[keyword_text] += general_conversions
+            if campaign_id:
+                campaign_general_conversions[campaign_id][keyword_text] += general_conversions
+        purchase_conversions = purchase_conversions_by_id.get(keyword_id, 0.0)
+        if include_purchase_conversions and purchase_conversions > 0:
+            total_purchase_conversions[keyword_text] += purchase_conversions
+            if campaign_id:
+                campaign_purchase_conversions[campaign_id][keyword_text] += purchase_conversions
 
     total_text = _format_performance_top_keywords(total_clicks)
+    general_conversion_text = _format_performance_top_keywords(total_general_conversions) if include_general_conversions else ""
+    purchase_conversion_text = _format_performance_top_keywords(total_purchase_conversions) if include_purchase_conversions else ""
     result = {
         "has_powerlink": bool(target_rows),
         "total_text": total_text,
@@ -4172,6 +4247,18 @@ def _collect_performance_powerlink_keywords(
         "campaign_text_by_id": {
             campaign_id: _format_performance_top_keywords(click_map)
             for campaign_id, click_map in campaign_clicks.items()
+        },
+        "general_conversion_text": general_conversion_text,
+        "general_conversion_type_text_by_id": {"WEB_SITE": general_conversion_text} if target_rows and include_general_conversions else {},
+        "general_conversion_campaign_text_by_id": {
+            campaign_id: _format_performance_top_keywords(conversion_map)
+            for campaign_id, conversion_map in campaign_general_conversions.items()
+        },
+        "purchase_conversion_text": purchase_conversion_text,
+        "purchase_conversion_type_text_by_id": {"WEB_SITE": purchase_conversion_text} if target_rows and include_purchase_conversions else {},
+        "purchase_conversion_campaign_text_by_id": {
+            campaign_id: _format_performance_top_keywords(conversion_map)
+            for campaign_id, conversion_map in campaign_purchase_conversions.items()
         },
         "warnings": warnings,
         "errors": errors[:30],
@@ -4187,6 +4274,8 @@ def _collect_performance_powerlink_keywords(
 def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     include_type = _boolish((payload or {}).get("include_type_breakdown"), True)
     include_campaign = _boolish((payload or {}).get("include_campaign_breakdown"), False)
+    include_general_conversion_keywords = _boolish((payload or {}).get("include_general_conversion_keywords"), False)
+    include_purchase_conversion_keywords = _boolish((payload or {}).get("include_purchase_conversion_keywords"), False)
     metric_mode = str((payload or {}).get("report_metric_mode") or "").strip().lower()
     report_uses_purchase = metric_mode in {"purchase", "purchase_only", "구매완료", "구매완료 데이터"}
 
@@ -4214,6 +4303,12 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
         "total_text": "",
         "type_text_by_id": {},
         "campaign_text_by_id": {},
+        "general_conversion_text": "",
+        "general_conversion_type_text_by_id": {},
+        "general_conversion_campaign_text_by_id": {},
+        "purchase_conversion_text": "",
+        "purchase_conversion_type_text_by_id": {},
+        "purchase_conversion_campaign_text_by_id": {},
         "warnings": [],
         "errors": [],
     }
@@ -4227,6 +4322,16 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
             str(base_result.get("until") or ""),
         )
     main_keyword_text = keyword_result.get("total_text") if keyword_result.get("has_powerlink") else ""
+    main_general_conversion_keyword_text = (
+        keyword_result.get("general_conversion_text")
+        if keyword_result.get("has_powerlink") and include_general_conversion_keywords
+        else ""
+    )
+    main_purchase_conversion_keyword_text = (
+        keyword_result.get("purchase_conversion_text")
+        if keyword_result.get("has_powerlink") and include_purchase_conversion_keywords
+        else ""
+    )
 
     report_parts: List[str] = []
     main_lines = [
@@ -4239,6 +4344,8 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
             base_result.get("summary") or {},
             report_uses_purchase=report_uses_purchase,
             keyword_text=str(main_keyword_text or ""),
+            general_conversion_keyword_text=str(main_general_conversion_keyword_text or ""),
+            purchase_conversion_keyword_text=str(main_purchase_conversion_keyword_text or ""),
         ),
     ]
     report_parts.append("\n".join(main_lines))
@@ -4249,6 +4356,8 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
             type_rows,
             report_uses_purchase=report_uses_purchase,
             keyword_text_by_id=keyword_result.get("type_text_by_id") or {},
+            general_conversion_keyword_text_by_id=keyword_result.get("general_conversion_type_text_by_id") or {},
+            purchase_conversion_keyword_text_by_id=keyword_result.get("purchase_conversion_type_text_by_id") or {},
         )
         if type_text:
             report_parts.append(type_text)
@@ -4270,6 +4379,8 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
             campaign_result.get("rows") or [],
             report_uses_purchase=report_uses_purchase,
             keyword_text_by_id=keyword_result.get("campaign_text_by_id") or {},
+            general_conversion_keyword_text_by_id=keyword_result.get("general_conversion_campaign_text_by_id") or {},
+            purchase_conversion_keyword_text_by_id=keyword_result.get("purchase_conversion_campaign_text_by_id") or {},
         )
         if campaign_text:
             report_parts.append(campaign_text)
