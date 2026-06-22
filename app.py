@@ -3216,20 +3216,30 @@ def _performance_number(value: Any) -> float:
 def _performance_int(value: Any) -> int:
     return int(round(_performance_number(value)))
 
-def _performance_date_range(preset: str, since: Any = "", until: Any = "") -> Tuple[str, str, str]:
+def _performance_date_range(preset: str, since: Any = "", until: Any = "", *, exclude_today: bool = False) -> Tuple[str, str, str]:
     today = _today_kst()
+    yesterday = today - timedelta(days=1)
     preset_norm = str(preset or "today").strip().lower()
     if preset_norm in {"custom", "direct", "range"}:
         since_s = str(since or "").strip()
         until_s = str(until or "").strip() or since_s
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", since_s or "") or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", until_s or ""):
             raise ValueError("직접 기간은 YYYY-MM-DD 형식으로 입력해주세요.")
-        return since_s, until_s, "직접 기간"
+        since_d = date.fromisoformat(since_s)
+        until_d = date.fromisoformat(until_s)
+        if exclude_today:
+            if since_d > yesterday:
+                raise ValueError("보고서 시작일은 오늘을 제외한 날짜로 선택해주세요.")
+            until_d = min(until_d, yesterday)
+        if since_d > until_d:
+            raise ValueError("시작일은 종료일보다 늦을 수 없습니다.")
+        return since_d.isoformat(), until_d.isoformat(), "직접 기간 (오늘 제외)" if exclude_today else "직접 기간"
     if preset_norm in {"yesterday", "어제"}:
-        d = today - timedelta(days=1)
-        return d.isoformat(), d.isoformat(), "어제"
+        return yesterday.isoformat(), yesterday.isoformat(), "어제"
     if preset_norm in {"last7days", "last_7_days", "7days", "최근7일"}:
-        return (today - timedelta(days=6)).isoformat(), today.isoformat(), "최근 7일"
+        return (yesterday - timedelta(days=6)).isoformat(), yesterday.isoformat(), "최근 7일 (오늘 제외)"
+    if exclude_today:
+        return yesterday.isoformat(), yesterday.isoformat(), "어제"
     return today.isoformat(), today.isoformat(), "오늘"
 
 def _normalize_performance_scope(value: Any) -> str:
@@ -3752,7 +3762,12 @@ def _get_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dic
     scope = _normalize_performance_scope(payload.get("target_scope") or payload.get("scope"))
     level = _normalize_performance_level(payload.get("result_level") or payload.get("level"))
     type_filter = _normalize_performance_type_filter(payload.get("campaign_type") or payload.get("type_filter"))
-    since, until, date_label = _performance_date_range(payload.get("date_preset"), payload.get("since"), payload.get("until"))
+    since, until, date_label = _performance_date_range(
+        payload.get("date_preset"),
+        payload.get("since"),
+        payload.get("until"),
+        exclude_today=_boolish(payload.get("exclude_today"), False),
+    )
     campaign_ids = [str(x or "").strip() for x in (payload.get("campaign_ids") or []) if str(x or "").strip()]
     adgroup_ids = [str(x or "").strip() for x in (payload.get("adgroup_ids") or []) if str(x or "").strip()]
     purchase_event_codes = _split_filter_words(payload.get("purchase_event_code") or payload.get("purchase_event_codes"))
@@ -3884,7 +3899,7 @@ def _format_performance_report_percent(value: Any, digits: int = 1) -> str:
 def _performance_report_line(label: str, value: str) -> str:
     return f"{label} : {value}"
 
-def _performance_report_metric_lines(metrics: Dict[str, Any] | None, *, report_uses_purchase: bool) -> List[str]:
+def _performance_report_metric_lines(metrics: Dict[str, Any] | None, *, report_uses_purchase: bool, keyword_text: str = "") -> List[str]:
     metrics = metrics or {}
     lines = [
         _performance_report_line("노출수", _format_performance_report_number(metrics.get("impCnt"))),
@@ -3904,6 +3919,8 @@ def _performance_report_metric_lines(metrics: Dict[str, Any] | None, *, report_u
             _performance_report_line("총전환매출", _format_performance_report_won(metrics.get("convAmt"))),
             _performance_report_line("ROAS", _format_performance_report_percent(metrics.get("ror"), 1)),
         ])
+    if keyword_text:
+        lines.append(_performance_report_line("주요 유입 키워드", keyword_text))
     return lines
 
 def _performance_report_type_label(type_filter: Any) -> str:
@@ -3925,14 +3942,26 @@ def _safe_performance_report_filename_part(value: Any) -> str:
     safe = "".join(ch if ch.isalnum() or ch in ("_", "-") else "_" for ch in text)
     return (safe[:80] or "report")
 
-def _build_performance_row_report_section(title: str, rows: List[Dict[str, Any]], *, report_uses_purchase: bool) -> str:
+def _build_performance_row_report_section(
+    title: str,
+    rows: List[Dict[str, Any]],
+    *,
+    report_uses_purchase: bool,
+    keyword_text_by_id: Dict[str, str] | None = None,
+) -> str:
     sections: List[str] = []
+    keyword_text_by_id = keyword_text_by_id or {}
     for row in rows or []:
         name = str((row or {}).get("name") or (row or {}).get("campaign_name") or (row or {}).get("campaign_type_label") or (row or {}).get("id") or "").strip()
         if not name:
             continue
+        row_id = str((row or {}).get("id") or (row or {}).get("campaign_id") or "").strip()
         section_lines = [f"[ {name} 성과 요약 ]"]
-        section_lines.extend(_performance_report_metric_lines((row or {}).get("metrics") or {}, report_uses_purchase=report_uses_purchase))
+        section_lines.extend(_performance_report_metric_lines(
+            (row or {}).get("metrics") or {},
+            report_uses_purchase=report_uses_purchase,
+            keyword_text=keyword_text_by_id.get(row_id, ""),
+        ))
         sections.append("\n".join(section_lines))
     if not sections:
         return ""
@@ -3968,6 +3997,146 @@ def _aggregate_performance_report_rows(rows: List[Dict[str, Any]], group_kind: s
     out.sort(key=lambda row: (-_performance_number((row.get("metrics") or {}).get("salesAmt")), str(row.get("name") or "").casefold()))
     return out
 
+def _performance_keyword_text(row: Dict[str, Any] | None) -> str:
+    row = row or {}
+    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+    return str(
+        row.get("keyword")
+        or row.get("keywordNm")
+        or row.get("keywordName")
+        or raw.get("keyword")
+        or raw.get("keywordNm")
+        or raw.get("keywordName")
+        or ""
+    ).strip()
+
+def _format_performance_top_keywords(clicks_by_keyword: Dict[str, Any], top_n: int = 5) -> str:
+    ranked = [
+        (str(keyword or "").strip(), _performance_number(clicks))
+        for keyword, clicks in (clicks_by_keyword or {}).items()
+        if str(keyword or "").strip() and _performance_number(clicks) > 0
+    ]
+    ranked.sort(key=lambda item: (-item[1], item[0].casefold()))
+    if not ranked:
+        return "없음"
+    return ", ".join(
+        f"{keyword}({_format_performance_report_count(clicks)}회)"
+        for keyword, clicks in ranked[:max(1, int(top_n or 5))]
+    )
+
+def _collect_performance_powerlink_keywords(
+    api_key: str,
+    secret_key: str,
+    cid: str,
+    payload: Dict[str, Any],
+    since: str,
+    until: str,
+) -> Dict[str, Any]:
+    scope = _normalize_performance_scope(payload.get("target_scope") or payload.get("scope"))
+    campaign_ids = [str(x or "").strip() for x in (payload.get("campaign_ids") or []) if str(x or "").strip()]
+    adgroup_ids = [str(x or "").strip() for x in (payload.get("adgroup_ids") or []) if str(x or "").strip()]
+    target_rows, warnings = _collect_performance_targets(
+        api_key,
+        secret_key,
+        cid,
+        scope,
+        "adgroup",
+        "WEB_SITE",
+        campaign_ids,
+        adgroup_ids,
+    )
+    keyword_rows: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    if target_rows:
+        max_workers = max(1, min(FAST_IO_WORKERS, len(target_rows)))
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            future_map = {
+                ex.submit(_fetch_keywords, api_key, secret_key, cid, str(row.get("adgroup_id") or row.get("id") or "")): row
+                for row in target_rows
+            }
+            for fut in as_completed(future_map):
+                target = future_map[fut]
+                adgroup_id = str(target.get("adgroup_id") or target.get("id") or "")
+                try:
+                    res, rows = fut.result()
+                except Exception as e:
+                    errors.append(f"[{target.get('adgroup_name') or adgroup_id}] 키워드 조회 실패: {e}")
+                    continue
+                if res.status_code != 200:
+                    errors.append(f"[{target.get('adgroup_name') or adgroup_id}] 키워드 조회 실패: {_short_log_text(res.text, 300)}")
+                    continue
+                if isinstance(rows, dict):
+                    rows = rows.get("data") or rows.get("items") or rows.get("rows") or []
+                if not isinstance(rows, list):
+                    errors.append(f"[{target.get('adgroup_name') or adgroup_id}] 키워드 조회 결과 형식을 확인할 수 없습니다.")
+                    continue
+                for keyword in rows or []:
+                    if not isinstance(keyword, dict):
+                        continue
+                    raw = keyword.get("raw") if isinstance((keyword or {}).get("raw"), dict) else {}
+                    keyword_id = str(
+                        (keyword or {}).get("nccKeywordId")
+                        or (keyword or {}).get("keywordId")
+                        or (keyword or {}).get("id")
+                        or raw.get("nccKeywordId")
+                        or raw.get("keywordId")
+                        or ""
+                    ).strip()
+                    keyword_text = _performance_keyword_text(keyword)
+                    if not keyword_id or not keyword_text:
+                        continue
+                    keyword_rows.append({
+                        "id": keyword_id,
+                        "keyword": keyword_text,
+                        "campaign_id": str(target.get("campaign_id") or ""),
+                    })
+
+    keyword_ids = _unique_keep_order([row.get("id") for row in keyword_rows])
+    stat_rows: List[Dict[str, Any]] = []
+    if keyword_ids:
+        stat_rows, stat_errors = _fetch_stats_rows(
+            api_key,
+            secret_key,
+            cid,
+            keyword_ids,
+            ["clkCnt"],
+            since,
+            until,
+            id_kind="keyword",
+        )
+        errors.extend(stat_errors)
+
+    clicks_by_id: Dict[str, float] = defaultdict(float)
+    for stat_row in stat_rows:
+        stat_id = _stat_row_id(stat_row)
+        if stat_id:
+            clicks_by_id[stat_id] += _performance_number(_performance_row_value(stat_row, "clkCnt"))
+
+    total_clicks: Dict[str, float] = defaultdict(float)
+    campaign_clicks: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    for keyword_row in keyword_rows:
+        clicks = clicks_by_id.get(str(keyword_row.get("id") or ""), 0.0)
+        if clicks <= 0:
+            continue
+        keyword_text = str(keyword_row.get("keyword") or "").strip()
+        campaign_id = str(keyword_row.get("campaign_id") or "").strip()
+        total_clicks[keyword_text] += clicks
+        if campaign_id:
+            campaign_clicks[campaign_id][keyword_text] += clicks
+
+    total_text = _format_performance_top_keywords(total_clicks)
+    return {
+        "has_powerlink": bool(target_rows),
+        "total_text": total_text,
+        "type_text_by_id": {"WEB_SITE": total_text} if target_rows else {},
+        "campaign_text_by_id": {
+            campaign_id: _format_performance_top_keywords(click_map)
+            for campaign_id, click_map in campaign_clicks.items()
+        },
+        "warnings": warnings,
+        "errors": errors[:30],
+    }
+
 def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     include_type = _boolish((payload or {}).get("include_type_breakdown"), True)
     include_campaign = _boolish((payload or {}).get("include_campaign_breakdown"), False)
@@ -3975,6 +4144,8 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
     report_uses_purchase = metric_mode in {"purchase", "purchase_only", "구매완료", "구매완료 데이터"}
 
     base_payload = dict(payload or {})
+    base_payload["exclude_today"] = True
+    base_payload["date_preset"] = base_payload.get("date_preset") or "yesterday"
     scope = _normalize_performance_scope(base_payload.get("target_scope") or base_payload.get("scope"))
     base_payload["result_level"] = "adgroup" if scope == "selected_adgroups" else "type"
     base_result = _get_performance_stats(api_key, secret_key, cid, base_payload)
@@ -3991,6 +4162,25 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
         date_range = f"{base_result.get('since')} ~ {base_result.get('until')}"
     account_name = str((payload or {}).get("account_name") or (payload or {}).get("accountName") or cid or "").strip()
 
+    keyword_result = {
+        "has_powerlink": False,
+        "total_text": "",
+        "type_text_by_id": {},
+        "campaign_text_by_id": {},
+        "warnings": [],
+        "errors": [],
+    }
+    if _normalize_performance_type_filter(base_result.get("campaign_type") or base_payload.get("campaign_type")) != "SHOPPING":
+        keyword_result = _collect_performance_powerlink_keywords(
+            api_key,
+            secret_key,
+            cid,
+            base_payload,
+            str(base_result.get("since") or ""),
+            str(base_result.get("until") or ""),
+        )
+    main_keyword_text = keyword_result.get("total_text") if keyword_result.get("has_powerlink") else ""
+
     report_parts: List[str] = []
     main_lines = [
         f"[ {type_label} 성과 요약 ]",
@@ -3998,7 +4188,11 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
         _performance_report_line("기간", date_range or str(base_result.get("date_label") or "")),
         _performance_report_line("범위", scope_label),
         _performance_report_line("데이터 기준", metric_label),
-        *_performance_report_metric_lines(base_result.get("summary") or {}, report_uses_purchase=report_uses_purchase),
+        *_performance_report_metric_lines(
+            base_result.get("summary") or {},
+            report_uses_purchase=report_uses_purchase,
+            keyword_text=str(main_keyword_text or ""),
+        ),
     ]
     report_parts.append("\n".join(main_lines))
 
@@ -4007,6 +4201,7 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
             f"[ 유형별 성과 요약 | {metric_label} ]",
             type_rows,
             report_uses_purchase=report_uses_purchase,
+            keyword_text_by_id=keyword_result.get("type_text_by_id") or {},
         )
         if type_text:
             report_parts.append(type_text)
@@ -4027,12 +4222,15 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
             f"[ 캠페인별 성과 요약 | {type_label} | {metric_label} ]",
             campaign_result.get("rows") or [],
             report_uses_purchase=report_uses_purchase,
+            keyword_text_by_id=keyword_result.get("campaign_text_by_id") or {},
         )
         if campaign_text:
             report_parts.append(campaign_text)
 
     warnings = list(base_result.get("warnings") or [])
     errors = list(base_result.get("errors") or [])
+    warnings.extend(keyword_result.get("warnings") or [])
+    errors.extend(keyword_result.get("errors") or [])
     if campaign_result:
         warnings.extend(campaign_result.get("warnings") or [])
         errors.extend(campaign_result.get("errors") or [])

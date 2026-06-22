@@ -13890,10 +13890,9 @@
                 <div class="form-group">
                   <label>기간</label>
                   <select id="text_report_date_preset" onchange="syncTextReportDatePreset()">
-                    <option value="today">오늘</option>
-                    <option value="yesterday">어제</option>
-                    <option value="last7days">최근 7일</option>
-                    <option value="custom">직접 기간</option>
+                    <option value="yesterday" selected>어제</option>
+                    <option value="last7days">최근 7일 (오늘 제외)</option>
+                    <option value="custom">직접 기간 (오늘 제외)</option>
                   </select>
                 </div>
                 <div class="text-report-custom-dates">
@@ -25525,9 +25524,10 @@ function getPerformanceTextReportPayload() {
         campaign_ids: campaignIds,
         adgroup_ids: adgroupIds,
         campaign_type: document.getElementById('text_report_type_filter')?.value || 'all',
-        date_preset: document.getElementById('text_report_date_preset')?.value || 'today',
+        date_preset: document.getElementById('text_report_date_preset')?.value || 'yesterday',
         since: document.getElementById('text_report_since')?.value || '',
         until: document.getElementById('text_report_until')?.value || '',
+        exclude_today: true,
         report_metric_mode: document.getElementById('text_report_metric')?.value || 'conversion',
         include_type_breakdown: !!document.getElementById('text_report_include_type')?.checked,
         include_campaign_breakdown: !!document.getElementById('text_report_include_campaign')?.checked,
@@ -25542,10 +25542,30 @@ function setPerformanceTextReportStatus(text) {
 function syncTextReportDatePreset() {
     const custom = document.getElementById('text_report_date_preset')?.value === 'custom';
     document.getElementById('tab_report')?.classList.toggle('is-custom-date', custom);
+    const yesterday = new Date();
+    yesterday.setHours(12, 0, 0, 0);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const localDateText = date => {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+    const maxDate = localDateText(yesterday);
+    const defaultSince = new Date(yesterday);
+    defaultSince.setDate(defaultSince.getDate() - 6);
     ['text_report_since', 'text_report_until'].forEach(id => {
         const el = document.getElementById(id);
-        if(el) el.disabled = !custom;
+        if(!el) return;
+        el.disabled = !custom;
+        el.max = maxDate;
     });
+    if(!custom) return;
+    const since = document.getElementById('text_report_since');
+    const until = document.getElementById('text_report_until');
+    if(until && (!until.value || until.value > maxDate)) until.value = maxDate;
+    if(since && (!since.value || since.value > maxDate)) since.value = localDateText(defaultSince);
+    if(since && until && since.value > until.value) since.value = until.value;
 }
 
 function renderPerformanceTextReport(data) {
