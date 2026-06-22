@@ -3109,6 +3109,9 @@ PERFORMANCE_METRIC_ALIASES = {
 }
 PERFORMANCE_STAT_ROW_LIST_KEYS = ("data", "rows", "items", "stats", "summaries", "results", "breakdowns", "breakdown")
 PERFORMANCE_STAT_ROW_DICT_KEYS = ("metrics", "metric", "summary", "stat", "fields", "values", "result", "breakdown", "event")
+PERFORMANCE_KEYWORD_REPORT_CACHE_TTL = 300
+PERFORMANCE_KEYWORD_REPORT_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK = threading.Lock()
 
 def _performance_deep_values(value: Any, keys: Iterable[str], max_depth: int = 6) -> List[Any]:
     key_set = {str(k) for k in keys if str(k or "").strip()}
@@ -3325,7 +3328,7 @@ def _stat_row_id(row: Dict[str, Any]) -> str:
             return value
     return ""
 
-def _fetch_stats_rows(api_key: str, secret_key: str, cid: str, ids: List[str], fields: List[str], since: str, until: str, breakdown: str = "", id_kind: str = "", time_increment: str = "allDays"):
+def _fetch_stats_rows(api_key: str, secret_key: str, cid: str, ids: List[str], fields: List[str], since: str, until: str, breakdown: str = "", id_kind: str = "", time_increment: str = "allDays", parallel_workers: int = 1):
     rows: List[Dict[str, Any]] = []
     errors: List[str] = []
     invalid_ids: List[str] = []
@@ -3352,28 +3355,54 @@ def _fetch_stats_rows(api_key: str, secret_key: str, cid: str, ids: List[str], f
             params["breakdown"] = breakdown
         return _do_req("GET", api_key, secret_key, cid, "/stats", params=params)
 
-    for start in range(0, len(id_list), 100):
-        batch = id_list[start:start + 100]
-        res = request_batch(batch)
+    def fetch_batch(batch: List[str]) -> Tuple[List[Dict[str, Any]], List[str]]:
+        batch_rows: List[Dict[str, Any]] = []
+        batch_errors: List[str] = []
+        res = None
+        for attempt in range(3):
+            res = request_batch(batch)
+            status_code = int(getattr(res, "status_code", 0) or 0)
+            if status_code == 200 or status_code not in {429, 500, 502, 503, 504}:
+                break
+            time.sleep(0.25 * (attempt + 1))
         if getattr(res, "status_code", 0) != 200:
+            if int(getattr(res, "status_code", 0) or 0) in {429, 500, 502, 503, 504}:
+                batch_errors.append(_short_log_text(getattr(res, "text", ""), 500) or f"/stats {getattr(res, 'status_code', '')}")
+                return batch_rows, batch_errors
             if len(batch) <= 1:
-                errors.append(_short_log_text(getattr(res, "text", ""), 500) or f"/stats {getattr(res, 'status_code', '')}")
-                continue
+                batch_errors.append(_short_log_text(getattr(res, "text", ""), 500) or f"/stats {getattr(res, 'status_code', '')}")
+                return batch_rows, batch_errors
             recovered = 0
             failed: List[str] = []
             for one_id in batch:
                 one_res = request_batch([one_id])
                 if getattr(one_res, "status_code", 0) == 200:
-                    rows.extend(_stats_rows_from_response(one_res))
+                    batch_rows.extend(_stats_rows_from_response(one_res))
                     recovered += 1
                 else:
                     detail = _short_log_text(getattr(one_res, "text", ""), 220) or f"/stats {getattr(one_res, 'status_code', '')}"
                     failed.append(f"{one_id}: {detail}")
             if failed:
-                errors.append(f"통계 배치 일부 실패: 정상 {recovered}개, 제외 {len(failed)}개")
-                errors.extend(failed[:5])
-            continue
-        rows.extend(_stats_rows_from_response(res))
+                batch_errors.append(f"통계 배치 일부 실패: 정상 {recovered}개, 제외 {len(failed)}개")
+                batch_errors.extend(failed[:5])
+            return batch_rows, batch_errors
+        batch_rows.extend(_stats_rows_from_response(res))
+        return batch_rows, batch_errors
+
+    batches = [id_list[start:start + 100] for start in range(0, len(id_list), 100)]
+    workers = max(1, min(int(parallel_workers or 1), len(batches) or 1))
+    if workers <= 1:
+        for batch in batches:
+            batch_rows, batch_errors = fetch_batch(batch)
+            rows.extend(batch_rows)
+            errors.extend(batch_errors)
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futures = [ex.submit(fetch_batch, batch) for batch in batches]
+            for fut in as_completed(futures):
+                batch_rows, batch_errors = fut.result()
+                rows.extend(batch_rows)
+                errors.extend(batch_errors)
     return rows, errors
 
 def _fetch_stats_rows_for_targets(api_key: str, secret_key: str, cid: str, targets: List[Dict[str, Any]], fields: List[str], since: str, until: str, breakdown: str = "", id_kind: str = "", time_increment: str = "allDays"):
@@ -3605,17 +3634,17 @@ def _build_empty_perf_metric() -> Dict[str, Any]:
 def _add_stat_to_metric(metric: Dict[str, Any], row: Dict[str, Any]):
     metric["impCnt"] += _performance_int(_performance_row_value(row, "impCnt"))
     metric["clkCnt"] += _performance_int(_performance_row_value(row, "clkCnt"))
-    metric["salesAmt"] += _performance_int(_performance_row_value(row, "salesAmt"))
+    metric["salesAmt"] += _performance_number(_performance_row_value(row, "salesAmt"))
     metric["ccnt"] += _performance_number(_performance_row_value(row, "ccnt"))
-    metric["convAmt"] += _performance_int(_performance_row_value(row, "convAmt"))
+    metric["convAmt"] += _performance_number(_performance_row_value(row, "convAmt"))
     metric["purchaseCcnt"] += _performance_number(_performance_row_value(row, "purchaseCcnt"))
-    metric["purchaseConvAmt"] += _performance_int(_performance_row_value(row, "purchaseConvAmt"))
+    metric["purchaseConvAmt"] += _performance_number(_performance_row_value(row, "purchaseConvAmt"))
 
 def _add_purchase_stat_to_metric(metric: Dict[str, Any], row: Dict[str, Any]):
     purchase_count = _performance_row_value(row, "purchaseCcnt")
     purchase_amount = _performance_row_value(row, "purchaseConvAmt")
     metric["purchaseCcnt"] += _performance_number(purchase_count if purchase_count not in (None, "") else _performance_row_value(row, "ccnt"))
-    metric["purchaseConvAmt"] += _performance_int(purchase_amount if purchase_amount not in (None, "") else _performance_row_value(row, "convAmt"))
+    metric["purchaseConvAmt"] += _performance_number(purchase_amount if purchase_amount not in (None, "") else _performance_row_value(row, "convAmt"))
 
 def _finalize_perf_metric(metric: Dict[str, Any]) -> Dict[str, Any]:
     imp = _performance_number(metric.get("impCnt"))
@@ -4010,7 +4039,7 @@ def _performance_keyword_text(row: Dict[str, Any] | None) -> str:
         or ""
     ).strip()
 
-def _format_performance_top_keywords(clicks_by_keyword: Dict[str, Any], top_n: int = 5) -> str:
+def _format_performance_top_keywords(clicks_by_keyword: Dict[str, Any], top_n: int = 3) -> str:
     ranked = [
         (str(keyword or "").strip(), _performance_number(clicks))
         for keyword, clicks in (clicks_by_keyword or {}).items()
@@ -4021,7 +4050,7 @@ def _format_performance_top_keywords(clicks_by_keyword: Dict[str, Any], top_n: i
         return "없음"
     return ", ".join(
         f"{keyword}({_format_performance_report_count(clicks)}회)"
-        for keyword, clicks in ranked[:max(1, int(top_n or 5))]
+        for keyword, clicks in ranked[:max(1, int(top_n or 3))]
     )
 
 def _collect_performance_powerlink_keywords(
@@ -4035,6 +4064,16 @@ def _collect_performance_powerlink_keywords(
     scope = _normalize_performance_scope(payload.get("target_scope") or payload.get("scope"))
     campaign_ids = [str(x or "").strip() for x in (payload.get("campaign_ids") or []) if str(x or "").strip()]
     adgroup_ids = [str(x or "").strip() for x in (payload.get("adgroup_ids") or []) if str(x or "").strip()]
+    cache_key = json.dumps(
+        [cid, scope, sorted(campaign_ids), sorted(adgroup_ids), since, until],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    now = time.monotonic()
+    with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
+        cached = PERFORMANCE_KEYWORD_REPORT_CACHE.get(cache_key)
+        if cached and now - cached[0] <= PERFORMANCE_KEYWORD_REPORT_CACHE_TTL:
+            return dict(cached[1])
     target_rows, warnings = _collect_performance_targets(
         api_key,
         secret_key,
@@ -4103,6 +4142,7 @@ def _collect_performance_powerlink_keywords(
             since,
             until,
             id_kind="keyword",
+            parallel_workers=4,
         )
         errors.extend(stat_errors)
 
@@ -4125,7 +4165,7 @@ def _collect_performance_powerlink_keywords(
             campaign_clicks[campaign_id][keyword_text] += clicks
 
     total_text = _format_performance_top_keywords(total_clicks)
-    return {
+    result = {
         "has_powerlink": bool(target_rows),
         "total_text": total_text,
         "type_text_by_id": {"WEB_SITE": total_text} if target_rows else {},
@@ -4136,6 +4176,13 @@ def _collect_performance_powerlink_keywords(
         "warnings": warnings,
         "errors": errors[:30],
     }
+    if not result["errors"]:
+        with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
+            if len(PERFORMANCE_KEYWORD_REPORT_CACHE) >= 100:
+                oldest_key = min(PERFORMANCE_KEYWORD_REPORT_CACHE, key=lambda key: PERFORMANCE_KEYWORD_REPORT_CACHE[key][0])
+                PERFORMANCE_KEYWORD_REPORT_CACHE.pop(oldest_key, None)
+            PERFORMANCE_KEYWORD_REPORT_CACHE[cache_key] = (now, dict(result))
+    return result
 
 def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     include_type = _boolish((payload or {}).get("include_type_breakdown"), True)
