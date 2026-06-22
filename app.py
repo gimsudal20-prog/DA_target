@@ -3112,6 +3112,10 @@ PERFORMANCE_STAT_ROW_DICT_KEYS = ("metrics", "metric", "summary", "stat", "field
 PERFORMANCE_KEYWORD_REPORT_CACHE_TTL = 300
 PERFORMANCE_KEYWORD_REPORT_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK = threading.Lock()
+PERFORMANCE_KEYWORD_INVENTORY_CACHE_TTL = 600
+PERFORMANCE_KEYWORD_INVENTORY_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+PERFORMANCE_SHOPPING_QUERY_CACHE_TTL = 600
+PERFORMANCE_SHOPPING_QUERY_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 
 def _performance_deep_values(value: Any, keys: Iterable[str], max_depth: int = 6) -> List[Any]:
     key_set = {str(k) for k in keys if str(k or "").strip()}
@@ -3673,7 +3677,7 @@ def _row_matches_purchase_event(row: Dict[str, Any], configured_codes: List[str]
         return any(x in code_set or x.replace(" ", "") in code_set for x in normalized)
     return any((x == "1" or "구매" in x or "purchase" in x or "order" in x or "pay" in x or "결제" in x) for x in normalized)
 
-def _collect_performance_targets(api_key: str, secret_key: str, cid: str, scope: str, level: str, type_filter: str, campaign_ids: List[str], adgroup_ids: List[str]):
+def _collect_performance_targets(api_key: str, secret_key: str, cid: str, scope: str, level: str, type_filter: str, campaign_ids: List[str], adgroup_ids: List[str], include_ad_counts: bool = True):
     res_camp, campaign_rows = _fetch_campaigns(api_key, secret_key, cid)
     if res_camp.status_code != 200:
         raise RuntimeError(f"캠페인 조회 실패: {res_camp.text}")
@@ -3757,7 +3761,7 @@ def _collect_performance_targets(api_key: str, secret_key: str, cid: str, scope:
         if str(row.get("campaign_type") or "").upper() == "SHOPPING"
         or _adgroup_uses_ad_level_bid(str(row.get("adgroup_type") or ""))
     ]
-    if shopping_target_rows:
+    if include_ad_counts and shopping_target_rows:
         max_ad_workers = max(1, min(FAST_IO_WORKERS, len(shopping_target_rows)))
         with ThreadPoolExecutor(max_workers=max_ad_workers) as ex:
             future_map = {
@@ -3800,7 +3804,10 @@ def _get_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dic
     campaign_ids = [str(x or "").strip() for x in (payload.get("campaign_ids") or []) if str(x or "").strip()]
     adgroup_ids = [str(x or "").strip() for x in (payload.get("adgroup_ids") or []) if str(x or "").strip()]
     purchase_event_codes = _split_filter_words(payload.get("purchase_event_code") or payload.get("purchase_event_codes"))
-    target_rows, warnings = _collect_performance_targets(api_key, secret_key, cid, scope, level, type_filter, campaign_ids, adgroup_ids)
+    target_rows, warnings = _collect_performance_targets(
+        api_key, secret_key, cid, scope, level, type_filter, campaign_ids, adgroup_ids,
+        include_ad_counts=not _boolish(payload.get("skip_ad_counts"), False),
+    )
     ids = [row["id"] for row in target_rows]
     if not ids:
         return {
@@ -3816,7 +3823,8 @@ def _get_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dic
             "until": until,
             "date_label": date_label,
         }
-    _enrich_performance_bid_snapshots(api_key, secret_key, cid, target_rows, level, warnings)
+    if not _boolish(payload.get("skip_bid_snapshots"), False):
+        _enrich_performance_bid_snapshots(api_key, secret_key, cid, target_rows, level, warnings)
     stats_id_kind = "adgroup" if level == "adgroup" else "campaign"
     use_purchase_event_breakdown = bool(purchase_event_codes)
     stats_fields = PERFORMANCE_STAT_FIELDS
@@ -3825,7 +3833,7 @@ def _get_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dic
     stats_rows, errors = _fetch_stats_rows_for_targets(api_key, secret_key, cid, target_rows, stats_fields, since, until, id_kind=stats_id_kind)
     daily_stats_rows: List[Dict[str, Any]] = []
     daily_errors: List[str] = []
-    if level in {"campaign", "adgroup"}:
+    if level in {"campaign", "adgroup"} and _boolish(payload.get("include_daily_metrics"), True):
         daily_stats_rows, daily_errors = _fetch_stats_rows_for_targets(api_key, secret_key, cid, target_rows, PERFORMANCE_STAT_FIELDS, since, until, id_kind=stats_id_kind, time_increment="daily")
         errors.extend(daily_errors[:10])
     daily_metrics_by_group = _build_performance_daily_map(target_rows, level, daily_stats_rows)
@@ -3935,6 +3943,8 @@ def _performance_report_metric_lines(
     keyword_text: str = "",
     general_conversion_keyword_text: str = "",
     purchase_conversion_keyword_text: str = "",
+    shopping_general_conversion_query_text: str = "",
+    shopping_purchase_conversion_query_text: str = "",
 ) -> List[str]:
     metrics = metrics or {}
     lines = [
@@ -3961,6 +3971,10 @@ def _performance_report_metric_lines(
         lines.append(_performance_report_line("주요 일반 전환 키워드", general_conversion_keyword_text))
     if purchase_conversion_keyword_text:
         lines.append(_performance_report_line("주요 구매완료 전환 키워드", purchase_conversion_keyword_text))
+    if shopping_general_conversion_query_text:
+        lines.append(_performance_report_line("주요 쇼핑검색 일반 전환 검색어", shopping_general_conversion_query_text))
+    if shopping_purchase_conversion_query_text:
+        lines.append(_performance_report_line("주요 쇼핑검색 구매완료 전환 검색어", shopping_purchase_conversion_query_text))
     return lines
 
 def _performance_report_type_label(type_filter: Any) -> str:
@@ -3990,11 +4004,15 @@ def _build_performance_row_report_section(
     keyword_text_by_id: Dict[str, str] | None = None,
     general_conversion_keyword_text_by_id: Dict[str, str] | None = None,
     purchase_conversion_keyword_text_by_id: Dict[str, str] | None = None,
+    shopping_general_conversion_query_text_by_id: Dict[str, str] | None = None,
+    shopping_purchase_conversion_query_text_by_id: Dict[str, str] | None = None,
 ) -> str:
     sections: List[str] = []
     keyword_text_by_id = keyword_text_by_id or {}
     general_conversion_keyword_text_by_id = general_conversion_keyword_text_by_id or {}
     purchase_conversion_keyword_text_by_id = purchase_conversion_keyword_text_by_id or {}
+    shopping_general_conversion_query_text_by_id = shopping_general_conversion_query_text_by_id or {}
+    shopping_purchase_conversion_query_text_by_id = shopping_purchase_conversion_query_text_by_id or {}
     for row in rows or []:
         name = str((row or {}).get("name") or (row or {}).get("campaign_name") or (row or {}).get("campaign_type_label") or (row or {}).get("id") or "").strip()
         if not name:
@@ -4007,6 +4025,8 @@ def _build_performance_row_report_section(
             keyword_text=keyword_text_by_id.get(row_id, ""),
             general_conversion_keyword_text=general_conversion_keyword_text_by_id.get(row_id, ""),
             purchase_conversion_keyword_text=purchase_conversion_keyword_text_by_id.get(row_id, ""),
+            shopping_general_conversion_query_text=shopping_general_conversion_query_text_by_id.get(row_id, ""),
+            shopping_purchase_conversion_query_text=shopping_purchase_conversion_query_text_by_id.get(row_id, ""),
         ))
         sections.append("\n".join(section_lines))
     if not sections:
@@ -4070,6 +4090,82 @@ def _format_performance_top_keywords(clicks_by_keyword: Dict[str, Any], top_n: i
         for keyword, clicks in ranked[:max(1, int(top_n or 3))]
     )
 
+def _load_performance_powerlink_inventory(
+    api_key: str, secret_key: str, cid: str, scope: str, campaign_ids: List[str], adgroup_ids: List[str],
+    since: str, until: str, include_general_conversions: bool, include_purchase_conversions: bool,
+):
+    cache_key = json.dumps(
+        [cid, scope, sorted(campaign_ids), sorted(adgroup_ids), since, until, include_general_conversions, include_purchase_conversions],
+        ensure_ascii=False, separators=(",", ":"),
+    )
+    now = time.monotonic()
+    with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
+        cached = PERFORMANCE_KEYWORD_INVENTORY_CACHE.get(cache_key)
+        if cached and now - cached[0] <= PERFORMANCE_KEYWORD_INVENTORY_CACHE_TTL:
+            data = cached[1]
+            return list(data.get("targets") or []), list(data.get("keywords") or []), list(data.get("warnings") or []), []
+
+    target_rows, warnings = _collect_performance_targets(
+        api_key, secret_key, cid, scope, "adgroup", "WEB_SITE", campaign_ids, adgroup_ids,
+    )
+    if target_rows:
+        activity_fields = ["clkCnt"]
+        if include_general_conversions:
+            activity_fields.append("ccnt")
+        if include_purchase_conversions:
+            activity_fields.append("purchaseCcnt")
+        activity_rows, activity_errors = _fetch_stats_rows(
+            api_key, secret_key, cid, [str(row.get("id") or "") for row in target_rows],
+            activity_fields, since, until, id_kind="adgroup", parallel_workers=2,
+        )
+        if activity_rows and not activity_errors:
+            active_ids: set[str] = set()
+            for activity_row in activity_rows:
+                if any(_performance_number(_performance_row_value(activity_row, field)) > 0 for field in activity_fields):
+                    active_ids.add(_stat_row_id(activity_row))
+            target_rows = [row for row in target_rows if str(row.get("id") or "") in active_ids]
+    keyword_rows: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    if target_rows:
+        with ThreadPoolExecutor(max_workers=max(1, min(12, len(target_rows)))) as executor:
+            future_map = {
+                executor.submit(_fetch_keywords, api_key, secret_key, cid, str(row.get("adgroup_id") or row.get("id") or "")): row
+                for row in target_rows
+            }
+            for future in as_completed(future_map):
+                target = future_map[future]
+                adgroup_id = str(target.get("adgroup_id") or target.get("id") or "")
+                try:
+                    response, rows = future.result()
+                except Exception as exc:
+                    errors.append(f"[{target.get('adgroup_name') or adgroup_id}] 키워드 조회 실패: {exc}")
+                    continue
+                if response.status_code != 200:
+                    errors.append(f"[{target.get('adgroup_name') or adgroup_id}] 키워드 조회 실패: {_short_log_text(response.text, 300)}")
+                    continue
+                if isinstance(rows, dict):
+                    rows = rows.get("data") or rows.get("items") or rows.get("rows") or []
+                if not isinstance(rows, list):
+                    errors.append(f"[{target.get('adgroup_name') or adgroup_id}] 키워드 조회 결과 형식을 확인할 수 없습니다.")
+                    continue
+                for keyword in rows:
+                    if not isinstance(keyword, dict):
+                        continue
+                    raw = keyword.get("raw") if isinstance(keyword.get("raw"), dict) else {}
+                    keyword_id = str(keyword.get("nccKeywordId") or keyword.get("keywordId") or keyword.get("id") or raw.get("nccKeywordId") or raw.get("keywordId") or "").strip()
+                    keyword_text = _performance_keyword_text(keyword)
+                    if keyword_id and keyword_text:
+                        keyword_rows.append({"id": keyword_id, "keyword": keyword_text, "campaign_id": str(target.get("campaign_id") or "")})
+    if not errors:
+        with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
+            if len(PERFORMANCE_KEYWORD_INVENTORY_CACHE) >= 100:
+                oldest_key = min(PERFORMANCE_KEYWORD_INVENTORY_CACHE, key=lambda key: PERFORMANCE_KEYWORD_INVENTORY_CACHE[key][0])
+                PERFORMANCE_KEYWORD_INVENTORY_CACHE.pop(oldest_key, None)
+            PERFORMANCE_KEYWORD_INVENTORY_CACHE[cache_key] = (now, {
+                "targets": list(target_rows), "keywords": list(keyword_rows), "warnings": list(warnings),
+            })
+    return target_rows, keyword_rows, warnings, errors
+
 def _collect_performance_powerlink_keywords(
     api_key: str,
     secret_key: str,
@@ -4093,71 +4189,21 @@ def _collect_performance_powerlink_keywords(
         cached = PERFORMANCE_KEYWORD_REPORT_CACHE.get(cache_key)
         if cached and now - cached[0] <= PERFORMANCE_KEYWORD_REPORT_CACHE_TTL:
             return dict(cached[1])
-    target_rows, warnings = _collect_performance_targets(
-        api_key,
-        secret_key,
-        cid,
-        scope,
-        "adgroup",
-        "WEB_SITE",
-        campaign_ids,
-        adgroup_ids,
+    target_rows, keyword_rows, warnings, errors = _load_performance_powerlink_inventory(
+        api_key, secret_key, cid, scope, campaign_ids, adgroup_ids,
+        since, until, include_general_conversions, include_purchase_conversions,
     )
-    keyword_rows: List[Dict[str, Any]] = []
-    errors: List[str] = []
-    if target_rows:
-        max_workers = max(1, min(FAST_IO_WORKERS, len(target_rows)))
-        with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            future_map = {
-                ex.submit(_fetch_keywords, api_key, secret_key, cid, str(row.get("adgroup_id") or row.get("id") or "")): row
-                for row in target_rows
-            }
-            for fut in as_completed(future_map):
-                target = future_map[fut]
-                adgroup_id = str(target.get("adgroup_id") or target.get("id") or "")
-                try:
-                    res, rows = fut.result()
-                except Exception as e:
-                    errors.append(f"[{target.get('adgroup_name') or adgroup_id}] 키워드 조회 실패: {e}")
-                    continue
-                if res.status_code != 200:
-                    errors.append(f"[{target.get('adgroup_name') or adgroup_id}] 키워드 조회 실패: {_short_log_text(res.text, 300)}")
-                    continue
-                if isinstance(rows, dict):
-                    rows = rows.get("data") or rows.get("items") or rows.get("rows") or []
-                if not isinstance(rows, list):
-                    errors.append(f"[{target.get('adgroup_name') or adgroup_id}] 키워드 조회 결과 형식을 확인할 수 없습니다.")
-                    continue
-                for keyword in rows or []:
-                    if not isinstance(keyword, dict):
-                        continue
-                    raw = keyword.get("raw") if isinstance((keyword or {}).get("raw"), dict) else {}
-                    keyword_id = str(
-                        (keyword or {}).get("nccKeywordId")
-                        or (keyword or {}).get("keywordId")
-                        or (keyword or {}).get("id")
-                        or raw.get("nccKeywordId")
-                        or raw.get("keywordId")
-                        or ""
-                    ).strip()
-                    keyword_text = _performance_keyword_text(keyword)
-                    if not keyword_id or not keyword_text:
-                        continue
-                    keyword_rows.append({
-                        "id": keyword_id,
-                        "keyword": keyword_text,
-                        "campaign_id": str(target.get("campaign_id") or ""),
-                    })
 
     keyword_ids = _unique_keep_order([row.get("id") for row in keyword_rows])
     stat_rows: List[Dict[str, Any]] = []
-    if keyword_ids:
-        stat_fields = ["clkCnt"]
-        if include_general_conversions:
-            stat_fields.append("ccnt")
-        if include_purchase_conversions:
-            stat_fields.append("purchaseCcnt")
-        stat_rows, stat_errors = _fetch_stats_rows(
+    stat_fields = ["clkCnt"]
+    if include_general_conversions:
+        stat_fields.append("ccnt")
+    if include_purchase_conversions:
+        stat_fields.append("purchaseCcnt")
+
+    def fetch_primary_stats():
+        return _fetch_stats_rows(
             api_key,
             secret_key,
             cid,
@@ -4166,26 +4212,12 @@ def _collect_performance_powerlink_keywords(
             since,
             until,
             id_kind="keyword",
-            parallel_workers=4,
+            parallel_workers=6,
         )
-        errors.extend(stat_errors)
 
-    purchase_stat_rows: List[Dict[str, Any]] = []
-    if keyword_ids and include_purchase_conversions:
-        purchase_stat_rows, purchase_stat_errors = _fetch_stats_rows(
-            api_key,
-            secret_key,
-            cid,
-            keyword_ids,
-            ["ccnt"],
-            since,
-            until,
-            breakdown="eventCode",
-            id_kind="keyword",
-            parallel_workers=4,
-        )
-        if not purchase_stat_rows:
-            errors.extend(purchase_stat_errors)
+    if keyword_ids:
+        stat_rows, stat_errors = fetch_primary_stats()
+        errors.extend(stat_errors)
 
     clicks_by_id: Dict[str, float] = defaultdict(float)
     general_conversions_by_id: Dict[str, float] = defaultdict(float)
@@ -4198,18 +4230,6 @@ def _collect_performance_powerlink_keywords(
                 general_conversions_by_id[stat_id] += _performance_number(_performance_row_value(stat_row, "ccnt"))
             if include_purchase_conversions:
                 purchase_conversions_by_id[stat_id] += _performance_number(_performance_row_value(stat_row, "purchaseCcnt"))
-
-    purchase_breakdown_by_id: Dict[str, float] = defaultdict(float)
-    purchase_breakdown_match_count = 0
-    for purchase_stat_row in purchase_stat_rows:
-        if not _row_matches_purchase_event(purchase_stat_row, []):
-            continue
-        stat_id = _stat_row_id(purchase_stat_row)
-        if stat_id:
-            purchase_breakdown_by_id[stat_id] += _performance_number(_performance_row_value(purchase_stat_row, "ccnt"))
-            purchase_breakdown_match_count += 1
-    if purchase_breakdown_match_count:
-        purchase_conversions_by_id = purchase_breakdown_by_id
 
     total_clicks: Dict[str, float] = defaultdict(float)
     campaign_clicks: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
@@ -4271,6 +4291,231 @@ def _collect_performance_powerlink_keywords(
             PERFORMANCE_KEYWORD_REPORT_CACHE[cache_key] = (now, dict(result))
     return result
 
+def _shopping_query_best_prefixed_index(sample_rows: List[Any], prefix: str, preferred_after: int = -1) -> int:
+    max_cols = max((len(row) for row in sample_rows), default=0)
+    best_index, best_score, best_hits = -1, -1, 0
+    for index in range(max_cols):
+        score = hits = 0
+        for row in sample_rows:
+            if len(row) > index and str(row.iloc[index]).strip().lower().startswith(prefix):
+                score += 5
+                hits += 1
+        if preferred_after >= 0 and index <= preferred_after:
+            score -= 2
+        if hits > best_hits or (hits == best_hits and score > best_score):
+            best_index, best_score, best_hits = index, score, hits
+    return best_index if best_hits else -1
+
+def _shopping_query_text_index(sample_rows: List[Any], adgroup_index: int) -> int:
+    candidate = adgroup_index + 1 if adgroup_index >= 0 else -1
+    max_cols = max((len(row) for row in sample_rows), default=0)
+    if not 0 <= candidate < max_cols:
+        return -1
+    for row in sample_rows:
+        if len(row) <= candidate:
+            continue
+        value = str(row.iloc[candidate]).strip()
+        if value == "-":
+            return candidate
+        if value and not value.lower().startswith(("cmp-", "grp-", "nkw-", "nad-", "bsn-")) and not re.fullmatch(r"-?\d+(?:\.\d+)?", value.replace(",", "")):
+            return candidate
+    return -1
+
+def _shopping_query_conversion_type(value: Any) -> Tuple[bool, bool, bool]:
+    normalized = str(value or "").strip().lower().replace("_", "").replace("-", "").replace(" ", "")
+    purchase = "구매완료" in normalized or normalized == "구매" or normalized in {"1", "purchase", "purchasing"}
+    cart = "장바구니" in normalized or normalized in {"3", "cart", "addtocart", "addtocarts"}
+    wishlist = "위시리스트" in normalized or "상품찜" in normalized or normalized in {"wishlist", "addtowishlist", "wishlistadd", "wish"}
+    return purchase, cart, wishlist
+
+def _parse_shopping_query_conversion_report(text: str) -> List[Dict[str, Any]]:
+    text = str(text or "").strip()
+    if not text:
+        return []
+    frame = pd.read_csv(io.StringIO(text), sep="\t" if "\t" in text else ",", header=None, dtype=str, keep_default_na=False, on_bad_lines="skip")
+    if frame.empty:
+        return []
+    sample_rows = [frame.iloc[index].fillna("") for index in range(min(20, len(frame)))]
+    campaign_index = _shopping_query_best_prefixed_index(sample_rows, "cmp-")
+    adgroup_index = _shopping_query_best_prefixed_index(sample_rows, "grp-", campaign_index)
+    query_index = _shopping_query_text_index(sample_rows, adgroup_index)
+    parsed: List[Dict[str, Any]] = []
+    for _, raw_row in frame.iterrows():
+        values = ["" if pd.isna(value) else str(value).strip() for value in raw_row.tolist()]
+        type_hits: List[Tuple[int, bool, bool, bool]] = []
+        numeric_hits: List[Tuple[int, bool, bool, bool]] = []
+        for index, value in enumerate(values):
+            purchase, cart, wishlist = _shopping_query_conversion_type(value)
+            if not (purchase or cart or wishlist):
+                continue
+            hit = (index, purchase, cart, wishlist)
+            if value in {"1", "2", "3"}:
+                if index >= max(0, len(values) - 6):
+                    numeric_hits.append(hit)
+            else:
+                type_hits.append(hit)
+        hits = type_hits or numeric_hits
+        if not hits:
+            continue
+        type_index, purchase, _, _ = hits[-1]
+        counts = [
+            _performance_number(values[index].replace(",", ""))
+            for index in range(type_index + 1, min(type_index + 4, len(values)))
+            if re.fullmatch(r"-?\d+(?:\.\d+)?", values[index].replace(",", ""))
+        ]
+        query_text = values[query_index].strip() if 0 <= query_index < len(values) else ""
+        if counts and query_text and query_text != "-":
+            parsed.append({
+                "campaign_id": values[campaign_index].strip() if 0 <= campaign_index < len(values) else "",
+                "adgroup_id": values[adgroup_index].strip() if 0 <= adgroup_index < len(values) else "",
+                "query_text": query_text,
+                "conversion_count": counts[0],
+                "is_purchase": purchase,
+            })
+    return parsed
+
+def _performance_fast_naver_request(method: str, api_key: str, secret_key: str, cid: str, uri: str, json_body: Dict[str, Any] | None = None):
+    return request_naver_api(method, api_key, secret_key, cid, uri, json_body=json_body, max_retries=1, session=HTTP_SESSION, base_url=OPENAPI_BASE_URL, timeout=(2, 4))
+
+def _download_shopping_query_report(api_key: str, secret_key: str, cid: str, job_id: str, download_url: str) -> Tuple[List[Dict[str, Any]], str]:
+    url = str(download_url or "").strip()
+    if not url:
+        return [], "쇼핑검색어 리포트 다운로드 주소가 없습니다."
+    if url.startswith("/"):
+        url = f"{OPENAPI_BASE_URL}{url}"
+    elif not url.startswith(("http://", "https://")):
+        url = f"{OPENAPI_BASE_URL}/{url.lstrip('/')}"
+    try:
+        response = HTTP_SESSION.get(url, timeout=(2, 4), allow_redirects=True)
+        if response.status_code != 200 and url.startswith(OPENAPI_BASE_URL):
+            parsed_url = urlparse(url)
+            response = HTTP_SESSION.get(url, headers=_open_headers(api_key, secret_key, cid, "GET", parsed_url.path or "/"), timeout=(2, 4), allow_redirects=True)
+        if response.status_code != 200:
+            return [], f"쇼핑검색어 리포트 다운로드 실패: HTTP {response.status_code}"
+        return _parse_shopping_query_conversion_report(response.content.decode("utf-8-sig", errors="replace")), ""
+    except Exception as exc:
+        return [], f"쇼핑검색어 리포트 다운로드 실패: {exc}"
+
+def _fetch_shopping_query_conversion_rows(api_key: str, secret_key: str, cid: str, since: str, until: str, timeout_seconds: float = 8.0) -> Tuple[List[Dict[str, Any]], List[str]]:
+    start_date, end_date = date.fromisoformat(since), date.fromisoformat(until)
+    dates = [start_date + timedelta(days=offset) for offset in range((end_date - start_date).days + 1)]
+    rows: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    deadline = time.monotonic() + max(2.0, float(timeout_seconds or 8.0))
+    for batch_start in range(0, len(dates), 3):
+        if time.monotonic() >= deadline:
+            errors.append("쇼핑검색어 리포트 조회가 제한 시간을 초과해 일부 기간만 반영됐습니다.")
+            break
+        batch_dates = dates[batch_start:batch_start + 3]
+        jobs: Dict[str, date] = {}
+        with ThreadPoolExecutor(max_workers=len(batch_dates) or 1) as executor:
+            futures = {
+                executor.submit(_performance_fast_naver_request, "POST", api_key, secret_key, cid, "/stat-reports", {"reportTp": "SHOPPINGKEYWORD_CONVERSION_DETAIL", "statDt": target.strftime("%Y%m%d")}): target
+                for target in batch_dates
+            }
+            for future in as_completed(futures):
+                target = futures[future]
+                response = future.result()
+                data = _response_json_value(response)
+                job_id = str((data or {}).get("reportJobId") or "").strip() if isinstance(data, dict) else ""
+                if response.status_code == 200 and job_id:
+                    jobs[job_id] = target
+                else:
+                    errors.append(f"{target.isoformat()} 쇼핑검색어 리포트 생성 실패: {_short_log_text(response.text, 240)}")
+        pending = dict(jobs)
+        while pending and time.monotonic() < deadline:
+            built: List[Tuple[str, str]] = []
+            completed: List[str] = []
+            with ThreadPoolExecutor(max_workers=len(pending)) as executor:
+                futures = {
+                    executor.submit(_performance_fast_naver_request, "GET", api_key, secret_key, cid, f"/stat-reports/{job_id}"): (job_id, target)
+                    for job_id, target in pending.items()
+                }
+                for future in as_completed(futures):
+                    job_id, target = futures[future]
+                    data = _response_json_value(future.result())
+                    status = str((data or {}).get("status") or "").upper() if isinstance(data, dict) else ""
+                    if status == "BUILT":
+                        built.append((job_id, str((data or {}).get("downloadUrl") or "")))
+                        completed.append(job_id)
+                    elif status in {"NONE", "ERROR"}:
+                        if status == "ERROR":
+                            errors.append(f"{target.isoformat()} 쇼핑검색어 리포트 생성 오류")
+                        completed.append(job_id)
+            if built:
+                with ThreadPoolExecutor(max_workers=len(built)) as executor:
+                    futures = [executor.submit(_download_shopping_query_report, api_key, secret_key, cid, job_id, url) for job_id, url in built]
+                    for future in as_completed(futures):
+                        downloaded, error = future.result()
+                        rows.extend(downloaded)
+                        if error:
+                            errors.append(error)
+            for job_id in completed:
+                pending.pop(job_id, None)
+            if completed:
+                with ThreadPoolExecutor(max_workers=len(completed)) as executor:
+                    list(executor.map(lambda job_id: _performance_fast_naver_request("DELETE", api_key, secret_key, cid, f"/stat-reports/{job_id}"), completed))
+            if pending:
+                time.sleep(0.2)
+        if pending:
+            with ThreadPoolExecutor(max_workers=len(pending)) as executor:
+                list(executor.map(lambda job_id: _performance_fast_naver_request("DELETE", api_key, secret_key, cid, f"/stat-reports/{job_id}"), list(pending)))
+            errors.append("쇼핑검색어 리포트 생성 대기 시간이 초과됐습니다.")
+            break
+    return rows, errors
+
+def _collect_performance_shopping_queries(api_key: str, secret_key: str, cid: str, payload: Dict[str, Any], since: str, until: str) -> Dict[str, Any]:
+    scope = _normalize_performance_scope(payload.get("target_scope") or payload.get("scope"))
+    campaign_ids = {str(value or "").strip() for value in (payload.get("campaign_ids") or []) if str(value or "").strip()}
+    adgroup_ids = {str(value or "").strip() for value in (payload.get("adgroup_ids") or []) if str(value or "").strip()}
+    cache_key = json.dumps([cid, scope, sorted(campaign_ids), sorted(adgroup_ids), since, until], ensure_ascii=False, separators=(",", ":"))
+    now = time.monotonic()
+    with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
+        cached = PERFORMANCE_SHOPPING_QUERY_CACHE.get(cache_key)
+        if cached and now - cached[0] <= PERFORMANCE_SHOPPING_QUERY_CACHE_TTL:
+            return dict(cached[1])
+    rows, warnings = _fetch_shopping_query_conversion_rows(api_key, secret_key, cid, since, until)
+    general: Dict[str, float] = defaultdict(float)
+    purchase: Dict[str, float] = defaultdict(float)
+    campaign_general: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    campaign_purchase: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    matched = 0
+    for row in rows:
+        campaign_id, adgroup_id = str(row.get("campaign_id") or "").strip(), str(row.get("adgroup_id") or "").strip()
+        if scope == "selected_campaigns" and campaign_id not in campaign_ids:
+            continue
+        if scope == "selected_adgroups" and adgroup_id not in adgroup_ids:
+            continue
+        query, count = str(row.get("query_text") or "").strip(), _performance_number(row.get("conversion_count"))
+        if not query or count <= 0:
+            continue
+        matched += 1
+        general[query] += count
+        if campaign_id:
+            campaign_general[campaign_id][query] += count
+        if _boolish(row.get("is_purchase"), False):
+            purchase[query] += count
+            if campaign_id:
+                campaign_purchase[campaign_id][query] += count
+    general_text, purchase_text = _format_performance_top_keywords(general), _format_performance_top_keywords(purchase)
+    result = {
+        "has_shopping": bool(matched),
+        "general_conversion_text": general_text,
+        "general_conversion_type_text_by_id": {"SHOPPING": general_text},
+        "general_conversion_campaign_text_by_id": {key: _format_performance_top_keywords(value) for key, value in campaign_general.items()},
+        "purchase_conversion_text": purchase_text,
+        "purchase_conversion_type_text_by_id": {"SHOPPING": purchase_text},
+        "purchase_conversion_campaign_text_by_id": {key: _format_performance_top_keywords(value) for key, value in campaign_purchase.items()},
+        "warnings": warnings[:20],
+        "errors": [],
+    }
+    if not warnings:
+        with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
+            if len(PERFORMANCE_SHOPPING_QUERY_CACHE) >= 100:
+                PERFORMANCE_SHOPPING_QUERY_CACHE.pop(min(PERFORMANCE_SHOPPING_QUERY_CACHE, key=lambda key: PERFORMANCE_SHOPPING_QUERY_CACHE[key][0]), None)
+            PERFORMANCE_SHOPPING_QUERY_CACHE[cache_key] = (now, dict(result))
+    return result
+
 def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     include_type = _boolish((payload or {}).get("include_type_breakdown"), True)
     include_campaign = _boolish((payload or {}).get("include_campaign_breakdown"), False)
@@ -4282,12 +4527,38 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
     base_payload = dict(payload or {})
     base_payload["exclude_today"] = True
     base_payload["date_preset"] = base_payload.get("date_preset") or "yesterday"
+    base_payload["skip_bid_snapshots"] = True
+    base_payload["skip_ad_counts"] = True
+    base_payload["include_daily_metrics"] = False
     scope = _normalize_performance_scope(base_payload.get("target_scope") or base_payload.get("scope"))
-    base_payload["result_level"] = "adgroup" if scope == "selected_adgroups" else "type"
-    base_result = _get_performance_stats(api_key, secret_key, cid, base_payload)
+    base_payload["result_level"] = "adgroup" if scope == "selected_adgroups" else ("campaign" if include_campaign else "type")
+    since, until, _ = _performance_date_range(base_payload.get("date_preset"), base_payload.get("since"), base_payload.get("until"), exclude_today=True)
+    type_filter = _normalize_performance_type_filter(base_payload.get("campaign_type") or base_payload.get("type_filter"))
+
+    keyword_result = {
+        "has_powerlink": False, "total_text": "", "type_text_by_id": {}, "campaign_text_by_id": {},
+        "general_conversion_text": "", "general_conversion_type_text_by_id": {}, "general_conversion_campaign_text_by_id": {},
+        "purchase_conversion_text": "", "purchase_conversion_type_text_by_id": {}, "purchase_conversion_campaign_text_by_id": {},
+        "warnings": [], "errors": [],
+    }
+    shopping_query_result = {
+        "has_shopping": False,
+        "general_conversion_text": "", "general_conversion_type_text_by_id": {}, "general_conversion_campaign_text_by_id": {},
+        "purchase_conversion_text": "", "purchase_conversion_type_text_by_id": {}, "purchase_conversion_campaign_text_by_id": {},
+        "warnings": [], "errors": [],
+    }
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        base_future = executor.submit(_get_performance_stats, api_key, secret_key, cid, base_payload)
+        powerlink_future = executor.submit(_collect_performance_powerlink_keywords, api_key, secret_key, cid, base_payload, since, until) if type_filter != "SHOPPING" else None
+        shopping_future = executor.submit(_collect_performance_shopping_queries, api_key, secret_key, cid, base_payload, since, until) if type_filter != "WEB_SITE" and (include_general_conversion_keywords or include_purchase_conversion_keywords) else None
+        base_result = base_future.result()
+        if powerlink_future:
+            keyword_result = powerlink_future.result()
+        if shopping_future:
+            shopping_query_result = shopping_future.result()
     type_rows = (
         _aggregate_performance_report_rows(base_result.get("rows") or [], "type")
-        if scope == "selected_adgroups"
+        if base_result.get("result_level") != "type"
         else list(base_result.get("rows") or [])
     )
     type_label = _performance_report_type_label(base_result.get("campaign_type") or base_payload.get("campaign_type"))
@@ -4297,30 +4568,7 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
     if base_result.get("until") and base_result.get("until") != base_result.get("since"):
         date_range = f"{base_result.get('since')} ~ {base_result.get('until')}"
     account_name = str((payload or {}).get("account_name") or (payload or {}).get("accountName") or cid or "").strip()
-
-    keyword_result = {
-        "has_powerlink": False,
-        "total_text": "",
-        "type_text_by_id": {},
-        "campaign_text_by_id": {},
-        "general_conversion_text": "",
-        "general_conversion_type_text_by_id": {},
-        "general_conversion_campaign_text_by_id": {},
-        "purchase_conversion_text": "",
-        "purchase_conversion_type_text_by_id": {},
-        "purchase_conversion_campaign_text_by_id": {},
-        "warnings": [],
-        "errors": [],
-    }
-    if _normalize_performance_type_filter(base_result.get("campaign_type") or base_payload.get("campaign_type")) != "SHOPPING":
-        keyword_result = _collect_performance_powerlink_keywords(
-            api_key,
-            secret_key,
-            cid,
-            base_payload,
-            str(base_result.get("since") or ""),
-            str(base_result.get("until") or ""),
-        )
+    base_has_shopping = any(_performance_campaign_bucket((row or {}).get("campaign_type") or (row or {}).get("id")) == "SHOPPING" for row in (base_result.get("rows") or []))
     main_keyword_text = keyword_result.get("total_text") if keyword_result.get("has_powerlink") else ""
     main_general_conversion_keyword_text = (
         keyword_result.get("general_conversion_text")
@@ -4332,6 +4580,8 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
         if keyword_result.get("has_powerlink") and include_purchase_conversion_keywords
         else ""
     )
+    main_shopping_general_conversion_query_text = shopping_query_result.get("general_conversion_text") if base_has_shopping and include_general_conversion_keywords else ""
+    main_shopping_purchase_conversion_query_text = shopping_query_result.get("purchase_conversion_text") if base_has_shopping and include_purchase_conversion_keywords else ""
 
     report_parts: List[str] = []
     main_lines = [
@@ -4346,6 +4596,8 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
             keyword_text=str(main_keyword_text or ""),
             general_conversion_keyword_text=str(main_general_conversion_keyword_text or ""),
             purchase_conversion_keyword_text=str(main_purchase_conversion_keyword_text or ""),
+            shopping_general_conversion_query_text=str(main_shopping_general_conversion_query_text or ""),
+            shopping_purchase_conversion_query_text=str(main_shopping_purchase_conversion_query_text or ""),
         ),
     ]
     report_parts.append("\n".join(main_lines))
@@ -4358,6 +4610,8 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
             keyword_text_by_id=keyword_result.get("type_text_by_id") or {},
             general_conversion_keyword_text_by_id=keyword_result.get("general_conversion_type_text_by_id") or {},
             purchase_conversion_keyword_text_by_id=keyword_result.get("purchase_conversion_type_text_by_id") or {},
+            shopping_general_conversion_query_text_by_id=shopping_query_result.get("general_conversion_type_text_by_id") or {},
+            shopping_purchase_conversion_query_text_by_id=shopping_query_result.get("purchase_conversion_type_text_by_id") or {},
         )
         if type_text:
             report_parts.append(type_text)
@@ -4371,9 +4625,7 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
                 "errors": [],
             }
         else:
-            campaign_payload = dict(payload or {})
-            campaign_payload["result_level"] = "campaign"
-            campaign_result = _get_performance_stats(api_key, secret_key, cid, campaign_payload)
+            campaign_result = base_result
         campaign_text = _build_performance_row_report_section(
             f"[ 캠페인별 성과 요약 | {type_label} | {metric_label} ]",
             campaign_result.get("rows") or [],
@@ -4381,6 +4633,8 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
             keyword_text_by_id=keyword_result.get("campaign_text_by_id") or {},
             general_conversion_keyword_text_by_id=keyword_result.get("general_conversion_campaign_text_by_id") or {},
             purchase_conversion_keyword_text_by_id=keyword_result.get("purchase_conversion_campaign_text_by_id") or {},
+            shopping_general_conversion_query_text_by_id=shopping_query_result.get("general_conversion_campaign_text_by_id") or {},
+            shopping_purchase_conversion_query_text_by_id=shopping_query_result.get("purchase_conversion_campaign_text_by_id") or {},
         )
         if campaign_text:
             report_parts.append(campaign_text)
@@ -4389,7 +4643,9 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
     errors = list(base_result.get("errors") or [])
     warnings.extend(keyword_result.get("warnings") or [])
     errors.extend(keyword_result.get("errors") or [])
-    if campaign_result:
+    warnings.extend(shopping_query_result.get("warnings") or [])
+    errors.extend(shopping_query_result.get("errors") or [])
+    if campaign_result and campaign_result is not base_result:
         warnings.extend(campaign_result.get("warnings") or [])
         errors.extend(campaign_result.get("errors") or [])
 
