@@ -5906,6 +5906,23 @@ def _performance_report_total_cost_vat(metrics: Dict[str, Any] | None) -> str:
     metrics = metrics or {}
     return _format_performance_report_won(_performance_number(metrics.get("salesAmt")) * 1.1)
 
+def _performance_report_cart_summary(metrics: Dict[str, Any] | None, source: str = "") -> Dict[str, Any]:
+    metrics = metrics or {}
+    cart_count = _performance_number(metrics.get("cartCcnt"))
+    if cart_count <= 0:
+        cart_count = _performance_non_negative_diff(metrics.get("ccnt"), metrics.get("purchaseCcnt"))
+    cart_amount = _performance_number(metrics.get("cartConvAmt"))
+    if cart_amount <= 0:
+        cart_amount = _performance_non_negative_diff(metrics.get("convAmt"), metrics.get("purchaseConvAmt"))
+    return {
+        "count": round(cart_count, 2),
+        "amount": round(cart_amount),
+        "count_text": f"{_format_performance_report_count(cart_count)}건",
+        "amount_text": _format_performance_report_won(cart_amount),
+        "source": source or "fallback",
+        "source_label": "전환 이벤트 기준" if source == "event" else "총전환-구매완료 보정",
+    }
+
 def _performance_report_core_metric_lines(
     metrics: Dict[str, Any] | None,
     *,
@@ -9497,6 +9514,10 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
     date_label_override = str((payload or {}).get("date_label") or "").strip()
     if date_label_override:
         base_result["date_label"] = date_label_override
+    cart_summary = _performance_report_cart_summary(
+        base_result.get("summary") or {},
+        "event" if _performance_number(base_result.get("cart_event_match_count")) > 0 else "fallback",
+    )
     type_rows = (
         _aggregate_performance_report_rows(base_result.get("rows") or [], "type")
         if base_result.get("result_level") != "type"
@@ -9557,6 +9578,7 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
             "until": base_result.get("until"),
             "date_label": base_result.get("date_label"),
             "requested_date_preset": (payload or {}).get("requested_date_preset") or (payload or {}).get("date_preset"),
+            "cart_summary": cart_summary,
             "metric_mode": "media_summary",
             "report_format": "media_summary",
         }
@@ -9674,6 +9696,7 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
         "until": base_result.get("until"),
         "date_label": base_result.get("date_label"),
         "requested_date_preset": (payload or {}).get("requested_date_preset") or (payload or {}).get("date_preset"),
+        "cart_summary": cart_summary,
         "metric_mode": "purchase" if report_uses_purchase else "conversion",
     }
 def _fetch_ads(api_key: str, secret_key: str, cid: str, adgroup_id: str):

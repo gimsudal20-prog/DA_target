@@ -12088,6 +12088,23 @@
       font-weight: 750 !important;
       line-height: 1.45 !important;
     }
+    body #tab_report .text-report-data-note {
+      display: grid !important;
+      gap: 5px !important;
+      padding: 10px !important;
+      border: 1px solid #bfdbfe !important;
+      border-radius: 8px !important;
+      background: #eff6ff !important;
+      color: #1e3a8a !important;
+      font-size: 11px !important;
+      line-height: 1.45 !important;
+    }
+    body #tab_report .text-report-data-note strong {
+      display: block !important;
+      color: #1d4ed8 !important;
+      font-size: 12px !important;
+      font-weight: 900 !important;
+    }
     body #tab_report .text-report-actions {
       display: grid !important;
       grid-template-columns: 1fr 1fr !important;
@@ -18942,6 +18959,11 @@
                       </div>
                     </div>
                     <div class="text-report-fixed-metrics">장바구니 전환 수, 장바구니 전환 매출액, 총비용(VAT 포함)은 기본 포함됩니다.</div>
+                    <div class="text-report-data-note">
+                      <strong>장바구니 데이터 기준</strong>
+                      <span>네이버 전환 이벤트의 장바구니 값을 우선 사용합니다.</span>
+                      <span>이벤트가 없으면 총 전환에서 구매완료 전환을 뺀 값으로 표시합니다.</span>
+                    </div>
                   </div>
                 </div>
                 <div class="text-report-control-section">
@@ -32297,6 +32319,12 @@ function renderPerformanceTextReport(data) {
     const errors = Array.isArray(data?.errors) ? data.errors.length : 0;
     const statusBits = [];
     if(data?.since) statusBits.push(data.until && data.until !== data.since ? `${data.since}~${data.until}` : data.since);
+    if(data?.cart_summary) {
+        const cartCount = data.cart_summary.count_text || `${formatMetricNumber(data.cart_summary.count || 0)}건`;
+        const cartAmount = data.cart_summary.amount_text || formatMetricWon(data.cart_summary.amount || 0);
+        const cartSource = data.cart_summary.source_label ? ` · ${data.cart_summary.source_label}` : '';
+        statusBits.push(`장바구니 ${cartCount} / ${cartAmount}${cartSource}`);
+    }
     if(warnings) statusBits.push(`참고 ${warnings}건`);
     if(errors) statusBits.push(`오류 ${errors}건`);
     setPerformanceTextReportStatus(statusBits.join(' · ') || '생성 완료');
