@@ -796,6 +796,7 @@ def _resolve_action_log_status(http_status: int, counts: Dict[str, Any]) -> str:
         return "error"
     fail = counts.get("fail")
     success = counts.get("success")
+    skipped = counts.get("skipped")
     try:
         fail_n = int(fail) if fail is not None else 0
     except Exception:
@@ -804,10 +805,16 @@ def _resolve_action_log_status(http_status: int, counts: Dict[str, Any]) -> str:
         success_n = int(success) if success is not None else 0
     except Exception:
         success_n = 0
-    if fail_n > 0 and success_n > 0:
+    try:
+        skipped_n = int(skipped) if skipped is not None else 0
+    except Exception:
+        skipped_n = 0
+    if fail_n > 0 and (success_n > 0 or skipped_n > 0):
         return "partial"
     if fail_n > 0 and success_n <= 0:
         return "error"
+    if skipped_n > 0:
+        return "partial"
     return "success"
 
 
@@ -15585,6 +15592,39 @@ def _format_copy_summary(summary: Dict[str, Any]) -> str:
     if notes:
         base += " | 참고: " + "; ".join(notes[:3])
     return base
+
+
+_COPY_SUMMARY_SECTIONS = ("keywords", "ads", "group_extensions", "ad_extensions", "negatives")
+
+
+def _copy_summary_int(summary: Dict[str, Any], section: str, key: str) -> int:
+    try:
+        return int(((summary or {}).get(section) or {}).get(key) or 0)
+    except Exception:
+        return 0
+
+
+def _copy_summary_totals(summary: Dict[str, Any]) -> Dict[str, int]:
+    if not isinstance(summary, dict):
+        return {"source": 0, "success": 0, "fail": 0, "skipped_off": 0}
+    totals = {
+        "source": sum(_copy_summary_int(summary, section, "source") for section in _COPY_SUMMARY_SECTIONS),
+        "success": sum(_copy_summary_int(summary, section, "success") for section in _COPY_SUMMARY_SECTIONS),
+        "fail": sum(_copy_summary_int(summary, section, "fail") for section in _COPY_SUMMARY_SECTIONS),
+        "skipped_off": sum(_copy_summary_int(summary, section, "skipped_off") for section in ("ads", "group_extensions", "ad_extensions")),
+    }
+    return totals
+
+
+def _copy_summary_skip_reason(summary: Dict[str, Any]) -> str:
+    totals = _copy_summary_totals(summary)
+    if totals["skipped_off"] > 0 and totals["source"] <= 0:
+        return "선택 조건 또는 OFF 제외로 복사할 항목 없음"
+    if totals["source"] > 0:
+        return "복사 완료 항목 없음"
+    return "복사할 항목 없음"
+
+
 def _normalize_copy_extension_types(values: Any) -> List[str]:
     if values is None:
         return ["ALL"]
@@ -19941,6 +19981,7 @@ def copy_entities_to_adgroups():
     fail = 0
     skipped_same = 0
     skipped_off_sources = 0
+    skipped_empty = 0
     all_errors: List[str] = list(source_warnings or []) + list(target_warnings or [])
     for src_id in source_ids:
         if _should_skip_off_source_adgroup(api_key, secret_key, cid, str(src_id), None, exclude_off_assets):
@@ -19951,6 +19992,7 @@ def copy_entities_to_adgroups():
         for target_id in target_adgroup_ids:
             if str(src_id) == str(target_id):
                 skipped_same += 1
+                all_errors.append(f"[원본 {src_id} → 대상 {target_id}] 건너뜀: 원본과 대상이 같은 광고그룹")
                 continue
             errs, summary = _copy_adgroup_children(
                 api_key, secret_key, cid,
@@ -19964,31 +20006,45 @@ def copy_entities_to_adgroups():
                 extension_types=extension_types,
             )
             summary_line = _format_copy_summary(summary)
+            summary_totals = _copy_summary_totals(summary)
             if errs:
                 fail += 1
                 all_errors.append(f"[원본 {src_id} → 대상 {target_id}] {summary_line}")
                 all_errors.extend([f"[원본 {src_id} → 대상 {target_id}] {e}" for e in errs])
-            else:
+            elif int(summary_totals.get("success") or 0) > 0:
                 success += 1
                 all_errors.append(f"[원본 {src_id} → 대상 {target_id}] {summary_line}")
-    msg = f"항목 복사 완료! (원본: {len(source_ids)}, 대상: {len(target_adgroup_ids)}, 성공: {success}, 실패: {fail}, 동일 그룹 건너뜀: {skipped_same}, OFF 원본 그룹 건너뜀: {skipped_off_sources})"
+            else:
+                skipped_empty += 1
+                all_errors.append(f"[원본 {src_id} → 대상 {target_id}] 건너뜀: {_copy_summary_skip_reason(summary)} | {summary_line}")
+    skipped_total = skipped_same + skipped_off_sources + skipped_empty
+    op_total = max(len(source_ids) * len(target_adgroup_ids), success + fail + skipped_total)
+    log_status = "success" if fail <= 0 and skipped_total <= 0 else ("partial" if success > 0 or skipped_total > 0 else "error")
+    msg = (
+        f"항목 복사 완료! (원본: {len(source_ids)}, 대상: {len(target_adgroup_ids)}, "
+        f"성공: {success}, 실패: {fail}, 건너뜀: {skipped_total} "
+        f"- 동일 그룹: {skipped_same}, OFF 원본 그룹: {skipped_off_sources}, 항목 없음: {skipped_empty})"
+    )
     if all_errors:
         msg += "\n" + "\n".join(all_errors[:60])
     _cache_invalidate(d.get("api_key"), d.get("secret_key"), d.get("customer_id"))
     return jsonify({
         "ok": True,
         "message": msg,
+        "status": log_status,
+        "log_status": log_status,
         "success": success,
         "fail": fail,
-        "skipped": skipped_same + skipped_off_sources,
+        "skipped": skipped_total,
         "skipped_same": skipped_same,
         "skipped_off_sources": skipped_off_sources,
+        "skipped_empty": skipped_empty,
         "extension_types": extension_types,
         "source_count": len(source_ids),
         "target_count": len(target_adgroup_ids),
         "source_campaign_count": len(source_campaign_ids),
         "target_campaign_count": len(target_campaign_ids),
-        "total": max(len(source_ids) * len(target_adgroup_ids), success + fail + skipped_same + skipped_off_sources),
+        "total": op_total,
         "details": all_errors[:100],
     })
 def copy_campaigns():

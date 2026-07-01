@@ -23461,7 +23461,39 @@ async function loadActionLogs(showNotice=false) {
     }
 }
 
+function getActionLogNumericCount(row, key) {
+    const value = row?.[key];
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+}
+
+function getActionLogDetailLevelCount(row, level) {
+    const explicit = Number(row?.detail_level_counts?.[level] || 0);
+    if(Number.isFinite(explicit) && explicit > 0) return explicit;
+    return getActionLogDetailItems(row).filter(item => item.level === level).length;
+}
+
+function getActionLogDisplayCounts(row) {
+    const counts = {
+        total: row?.total,
+        success: row?.success,
+        fail: row?.fail,
+        skipped: row?.skipped
+    };
+    const successCount = getActionLogNumericCount(row, 'success');
+    const failCount = getActionLogNumericCount(row, 'fail') || 0;
+    const skippedCount = getActionLogNumericCount(row, 'skipped') || 0;
+    const skippedDetails = getActionLogDetailLevelCount(row, 'skip');
+    const successDetails = getActionLogDetailLevelCount(row, 'success');
+    if(successCount > 0 && failCount <= 0 && skippedCount <= 0 && skippedDetails > 0 && successDetails <= 0) {
+        counts.success = 0;
+        counts.skipped = Math.max(skippedDetails, Number(counts.total) === successCount ? successCount : skippedDetails);
+    }
+    return counts;
+}
+
 function renderActionLogCounts(row) {
+    const displayCounts = getActionLogDisplayCounts(row);
     const chips = [];
     const addChip = (label, value, cls='') => {
         if(value === null || value === undefined || value === '') return;
@@ -23473,10 +23505,10 @@ function renderActionLogCounts(row) {
         }
         chips.push(`<span class="log-count-chip ${cls}">${label} ${escapeMaybe(text)}</span>`);
     };
-    addChip('대상', row.total, '');
-    addChip('성공', row.success, 'success');
-    addChip('실패', row.fail, 'fail');
-    addChip('건너뜀', row.skipped, 'skip');
+    addChip('대상', displayCounts.total, '');
+    addChip('성공', displayCounts.success, 'success');
+    addChip('실패', displayCounts.fail, 'fail');
+    addChip('건너뜀', displayCounts.skipped, 'skip');
     return chips.length ? `<div class="log-counts">${chips.join('')}</div>` : '';
 }
 
@@ -23559,24 +23591,44 @@ function getActionLogFailureCount(row) {
 
 function getActionLogSuccessCount(row) {
     const numericCandidates = [row?.success, row?.success_count, row?.created_count, row?.updated_count, row?.deleted_count];
+    let hasExplicitCount = false;
     for (const value of numericCandidates) {
         const n = Number(value);
-        if(Number.isFinite(n) && n > 0) return n;
+        if(Number.isFinite(n)) {
+            hasExplicitCount = true;
+            if(n > 0) return n;
+        }
     }
+    if(hasExplicitCount) return 0;
     const detailItems = getActionLogDetailItems(row);
     if(detailItems.some(item => item.level === 'success')) return 1;
     const joined = [row?.summary, row?.message].filter(Boolean).join(' ');
     return actionLogTextLooksLikeSuccess(joined) ? 1 : 0;
 }
 
+function getActionLogSkippedCount(row) {
+    const numericCandidates = [row?.skipped, row?.skipped_count, row?.skip_count, row?.unchanged, row?.skipped_non_shopping];
+    for (const value of numericCandidates) {
+        const n = Number(value);
+        if(Number.isFinite(n) && n > 0) return n;
+    }
+    const detailItems = getActionLogDetailItems(row);
+    const detailSkipped = detailItems.filter(item => item.level === 'skip').length;
+    if(detailSkipped > 0) return detailSkipped;
+    const joined = [row?.summary, row?.message, row?.details].filter(Boolean).join(' ');
+    return /(건너|skip|대상\s*없음|항목\s*없음|유지|생략)/i.test(joined) ? 1 : 0;
+}
+
 function resolveActionLogDisplayStatus(row) {
     const rawStatus = String(row?.status || '').toLowerCase();
     const failCount = getActionLogFailureCount(row);
     const successCount = getActionLogSuccessCount(row);
+    const skippedCount = getActionLogSkippedCount(row);
     if(rawStatus === 'error') return 'error';
     if(rawStatus === 'partial') return 'partial';
     if(failCount > 0 && successCount > 0) return 'partial';
     if(failCount > 0) return 'error';
+    if(skippedCount > 0) return 'partial';
     return 'success';
 }
 
@@ -23752,8 +23804,12 @@ function renderActionLogs(rows) {
     actionLogRenderedRows = Array.isArray(rows) ? rows : [];
     wrap.innerHTML = rows.map((row, rowIndex) => {
         const status = resolveActionLogDisplayStatus(row);
+        const failCount = getActionLogFailureCount(row);
+        const skippedCount = getActionLogSkippedCount(row);
         const badgeClass = status === 'error' ? 'red' : (status === 'partial' ? 'yellow' : 'green');
-        const badgeText = status === 'error' ? '실패' : (status === 'partial' ? '부분실패' : '성공');
+        const badgeText = status === 'error'
+            ? '실패'
+            : (status === 'partial' ? (failCount > 0 ? '부분실패' : (skippedCount > 0 ? '일부 건너뜀' : '부분완료')) : '성공');
         const summaryText = formatActionLogSummaryText(row.summary);
         const summary = summaryText ? `<div class="log-summary">${escapeMaybe(summaryText)}</div>` : '';
         const cid = row.customer_id ? `광고주 ID: ${escapeMaybe(row.customer_id)}` : '광고주 ID: -';
@@ -29714,25 +29770,45 @@ function getOperationFailureCount(data) {
 
 function getOperationSuccessCount(data) {
     const candidates = [data?.success, data?.success_count, data?.created_count, data?.updated_count, data?.deleted_count];
+    let hasExplicitCount = false;
+    for (const value of candidates) {
+        const n = Number(value);
+        if(Number.isFinite(n)) {
+            hasExplicitCount = true;
+            if(n > 0) return n;
+        }
+    }
+    if(hasExplicitCount) return 0;
+    if(Array.isArray(data?.results) && data.results.some(x => x && x.ok === true)) return 1;
+    return 0;
+}
+
+function getOperationSkippedCount(data) {
+    const candidates = [data?.skipped, data?.skipped_count, data?.skip_count, data?.unchanged, data?.skipped_empty, data?.skipped_same, data?.skipped_off_sources];
     for (const value of candidates) {
         const n = Number(value);
         if(Number.isFinite(n) && n > 0) return n;
     }
-    if(Array.isArray(data?.results) && data.results.some(x => x && x.ok === true)) return 1;
-    return 0;
+    if(Array.isArray(data?.results) && data.results.some(x => x && ['skip','skipped'].includes(String(x.level || '').toLowerCase()))) return 1;
+    const joined = [data?.message, data?.details].filter(Boolean).join(' ');
+    return /(건너|skip|대상\s*없음|항목\s*없음|유지|생략)/i.test(joined) ? 1 : 0;
 }
 
 function resolveOperationToastTone(data) {
     const status = String(data?.status || data?.log_status || '').toLowerCase();
     const failCount = getOperationFailureCount(data);
     const successCount = getOperationSuccessCount(data);
-    if(status === 'error' || status === 'partial' || failCount > 0) return 'error';
+    const skippedCount = getOperationSkippedCount(data);
+    if(status === 'error') return 'error';
+    if(failCount > 0) return successCount > 0 || skippedCount > 0 ? 'info' : 'error';
+    if(status === 'partial' || skippedCount > 0) return 'info';
     return 'success';
 }
 
 function formatOperationToastMessage(data, fallback='처리 완료') {
     const failCount = getOperationFailureCount(data);
     const successCount = getOperationSuccessCount(data);
+    const skippedCount = getOperationSkippedCount(data);
     const childFailCount = Number(data?.child_fail || data?.child_fail_count || 0);
     const base = String(data?.message || fallback);
     if(failCount > 0) {
@@ -29742,6 +29818,7 @@ function formatOperationToastMessage(data, fallback='처리 완료') {
         if(successCount > 0) return `${base} / ${issueText}`;
         return base.includes('실패') ? base : `${base} / ${issueText}`;
     }
+    if(skippedCount > 0 && !base.includes('건너뜀')) return `${base} / 건너뜀 ${num(skippedCount)}건`;
     return base;
 }
 
