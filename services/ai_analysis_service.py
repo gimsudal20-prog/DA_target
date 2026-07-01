@@ -57,7 +57,6 @@ class AIAnalysisService:
         self._cache_max_items = 40
         self._max_detail_targets = self._env_int("DA_AI_MAX_DETAIL_TARGETS", 1200)
         self._max_account_detail_targets = self._env_int("DA_AI_MAX_ACCOUNT_DETAIL_TARGETS", 1000)
-        self._max_full_detail_targets = self._env_int("DA_AI_MAX_FULL_DETAIL_TARGETS", 10000)
         self._max_table_rows = self._env_int("DA_AI_MAX_TABLE_ROWS", 500)
         self._default_table_rows = self._env_int("DA_AI_DEFAULT_TABLE_ROWS", 50)
 
@@ -493,6 +492,8 @@ class AIAnalysisService:
         return self._max_detail_targets
 
     def _trim_detail_targets(self, targets: List[Dict[str, Any]], scope: Any, label: str, limit_override: Optional[int] = None) -> Tuple[List[Dict[str, Any]], str]:
+        if limit_override == 0:
+            return targets or [], ""
         limit = max(1, int(limit_override or self._detail_target_limit(scope)))
         if len(targets or []) <= limit:
             return targets or [], ""
@@ -942,7 +943,7 @@ class AIAnalysisService:
         until: str,
     ) -> Tuple[List[Dict[str, Any]], int, int, List[str], List[str]]:
         scope_payload = self._base_scope_payload(payload, level="keyword")
-        target_limit = self._max_full_detail_targets if spec.get("limit_mode") == "all" else None
+        target_limit = 0 if spec.get("limit_mode") == "all" else None
         source_rows, metrics_by_id, stat_count, warnings, errors = self._keyword_metrics_snapshot(
             payload,
             scope_payload,
@@ -1047,14 +1048,13 @@ class AIAnalysisService:
         primary = str(spec.get("primary_metric") or "ccnt")
         amount = str(spec.get("amount_metric") or "convAmt")
         roas = str(spec.get("roas_metric") or "roas")
-        metric_order = [
-            "impCnt", "clkCnt", "ctr", "salesAmt", "cpc",
-            "ccnt", "convAmt", "purchaseCcnt", "purchaseConvAmt", "cartCcnt", "cartConvAmt",
-            "cvr", "roas", "purchaseRor", "cartRor",
-        ]
-        preferred = ["impCnt", "clkCnt", "salesAmt", primary, amount, "cpc", "cvr", roas]
+        preferred = ["impCnt", "clkCnt", "salesAmt", "cpc", primary, amount]
+        if primary == "ccnt":
+            preferred.extend(["cvr", roas])
+        else:
+            preferred.append(roas)
         keys: List[str] = []
-        for key in preferred + metric_order:
+        for key in preferred:
             if key and key not in keys:
                 keys.append(key)
         cols.extend({"key": key, "label": self._metric_label(key)} for key in keys)
@@ -1982,7 +1982,7 @@ class AIAnalysisService:
 
     def _cache_key(self, payload: Dict[str, Any], tool: str) -> str:
         raw = {
-            "version": "ai-query-engine-v1",
+            "version": "ai-query-engine-v2-full-scope",
             "tool": tool,
             "question": str(payload.get("question") or "").strip().lower(),
             "api": self._hash(payload.get("api_key")),

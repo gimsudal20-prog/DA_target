@@ -17096,9 +17096,10 @@
     body #tab_ai_analysis table.ai-analysis-table {
       border: 0;
       border-radius: 0;
-      min-width: 1080px;
+      width: max-content;
+      min-width: 100%;
       font-size: 12.5px;
-      table-layout: fixed;
+      table-layout: auto;
     }
     body #tab_ai_analysis table.ai-analysis-table th {
       position: sticky;
@@ -17141,8 +17142,8 @@
     body #tab_ai_analysis table.ai-analysis-table th[data-key="adgroup"],
     body #tab_ai_analysis table.ai-analysis-table td[data-key="campaign"],
     body #tab_ai_analysis table.ai-analysis-table td[data-key="adgroup"] {
-      width: 120px;
-      min-width: 120px;
+      width: 150px;
+      min-width: 150px;
       white-space: normal;
       overflow-wrap: anywhere;
     }
@@ -17161,25 +17162,41 @@
     body #tab_ai_analysis table.ai-analysis-table th[data-key="impCnt"],
     body #tab_ai_analysis table.ai-analysis-table th[data-key="clkCnt"],
     body #tab_ai_analysis table.ai-analysis-table th[data-key="ccnt"],
+    body #tab_ai_analysis table.ai-analysis-table th[data-key="purchaseCcnt"],
+    body #tab_ai_analysis table.ai-analysis-table th[data-key="cartCcnt"],
+    body #tab_ai_analysis table.ai-analysis-table th[data-key="sourceCount"],
     body #tab_ai_analysis table.ai-analysis-table th[data-key="salesAmt"],
+    body #tab_ai_analysis table.ai-analysis-table th[data-key="convAmt"],
+    body #tab_ai_analysis table.ai-analysis-table th[data-key="purchaseConvAmt"],
+    body #tab_ai_analysis table.ai-analysis-table th[data-key="cartConvAmt"],
     body #tab_ai_analysis table.ai-analysis-table th[data-key="cpc"],
     body #tab_ai_analysis table.ai-analysis-table th[data-key="prevCpc"],
     body #tab_ai_analysis table.ai-analysis-table th[data-key="cpcDelta"],
     body #tab_ai_analysis table.ai-analysis-table th[data-key="cpcDeltaPct"],
     body #tab_ai_analysis table.ai-analysis-table th[data-key="cvr"],
     body #tab_ai_analysis table.ai-analysis-table th[data-key="roas"],
+    body #tab_ai_analysis table.ai-analysis-table th[data-key="purchaseRor"],
+    body #tab_ai_analysis table.ai-analysis-table th[data-key="cartRor"],
     body #tab_ai_analysis table.ai-analysis-table td[data-key="impCnt"],
     body #tab_ai_analysis table.ai-analysis-table td[data-key="clkCnt"],
     body #tab_ai_analysis table.ai-analysis-table td[data-key="ccnt"],
+    body #tab_ai_analysis table.ai-analysis-table td[data-key="purchaseCcnt"],
+    body #tab_ai_analysis table.ai-analysis-table td[data-key="cartCcnt"],
+    body #tab_ai_analysis table.ai-analysis-table td[data-key="sourceCount"],
     body #tab_ai_analysis table.ai-analysis-table td[data-key="salesAmt"],
+    body #tab_ai_analysis table.ai-analysis-table td[data-key="convAmt"],
+    body #tab_ai_analysis table.ai-analysis-table td[data-key="purchaseConvAmt"],
+    body #tab_ai_analysis table.ai-analysis-table td[data-key="cartConvAmt"],
     body #tab_ai_analysis table.ai-analysis-table td[data-key="cpc"],
     body #tab_ai_analysis table.ai-analysis-table td[data-key="prevCpc"],
     body #tab_ai_analysis table.ai-analysis-table td[data-key="cpcDelta"],
     body #tab_ai_analysis table.ai-analysis-table td[data-key="cpcDeltaPct"],
     body #tab_ai_analysis table.ai-analysis-table td[data-key="cvr"],
-    body #tab_ai_analysis table.ai-analysis-table td[data-key="roas"] {
-      width: 76px;
-      min-width: 76px;
+    body #tab_ai_analysis table.ai-analysis-table td[data-key="roas"],
+    body #tab_ai_analysis table.ai-analysis-table td[data-key="purchaseRor"],
+    body #tab_ai_analysis table.ai-analysis-table td[data-key="cartRor"] {
+      width: 88px;
+      min-width: 88px;
       text-align: right;
       white-space: nowrap;
     }
@@ -33881,7 +33898,7 @@ async function runAiAnalysis() {
     }
     const controller = new AbortController();
     aiAnalysisAbortController = controller;
-    const timeoutMs = 120000;
+    const timeoutMs = 300000;
     const timeoutId = window.setTimeout(() => {
         try { controller.abort(); } catch(e) {}
     }, timeoutMs);
