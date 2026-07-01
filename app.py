@@ -5902,6 +5902,39 @@ def _performance_report_cart_lines(
         lines.append(_performance_report_line("장바구니 전환 매출액", _format_performance_report_won(cart_amount)))
     return lines
 
+def _performance_report_total_cost_vat(metrics: Dict[str, Any] | None) -> str:
+    metrics = metrics or {}
+    return _format_performance_report_won(_performance_number(metrics.get("salesAmt")) * 1.1)
+
+def _performance_report_core_metric_lines(
+    metrics: Dict[str, Any] | None,
+    *,
+    include_cart_count: bool = False,
+    include_cart_amount: bool = False,
+) -> List[str]:
+    metrics = metrics or {}
+    cart_lines = _performance_report_cart_lines(
+        metrics,
+        include_cart_count=include_cart_count,
+        include_cart_amount=include_cart_amount,
+    )
+    cart_count_lines = [line for line in cart_lines if line.startswith("장바구니 전환 수")]
+    cart_amount_lines = [line for line in cart_lines if line.startswith("장바구니 전환 매출액")]
+    return [
+        _performance_report_line("노출수", _format_performance_report_number(metrics.get("impCnt"))),
+        _performance_report_line("클릭수", _format_performance_report_number(metrics.get("clkCnt"))),
+        _performance_report_line("클릭률", _format_performance_report_percent(metrics.get("ctr"), 1)),
+        _performance_report_line("광고 소진비용", _format_performance_report_won(metrics.get("salesAmt"))),
+        _performance_report_line("전환수", f"{_format_performance_report_count(metrics.get('ccnt'))}건"),
+        _performance_report_line("구매완료 전환 수", f"{_format_performance_report_count(metrics.get('purchaseCcnt'))}건"),
+        *cart_count_lines,
+        _performance_report_line("총 전환 매출액", _format_performance_report_won(metrics.get("convAmt"))),
+        _performance_report_line("구매완료 전환 매출액", _format_performance_report_won(metrics.get("purchaseConvAmt"))),
+        _performance_report_line("구매완료 기준 광고수익률(ROAS)", _format_performance_report_percent(metrics.get("purchaseRor"), 2)),
+        *cart_amount_lines,
+        _performance_report_line("총비용(VAT 포함)", _performance_report_total_cost_vat(metrics)),
+    ]
+
 def _performance_report_metric_lines(
     metrics: Dict[str, Any] | None,
     *,
@@ -5916,29 +5949,11 @@ def _performance_report_metric_lines(
     shopping_purchase_conversion_query_text: str = "",
 ) -> List[str]:
     metrics = metrics or {}
-    lines = [
-        _performance_report_line("노출수", _format_performance_report_number(metrics.get("impCnt"))),
-        _performance_report_line("클릭수", _format_performance_report_number(metrics.get("clkCnt"))),
-        _performance_report_line("클릭률", _format_performance_report_percent(metrics.get("ctr"), 1)),
-        _performance_report_line("광고 소진비용", _format_performance_report_won(metrics.get("salesAmt"))),
-    ]
-    if report_uses_purchase:
-        lines.extend([
-            _performance_report_line("구매완료수", _format_performance_report_count(metrics.get("purchaseCcnt"))),
-            _performance_report_line("구매완료 매출", _format_performance_report_won(metrics.get("purchaseConvAmt"))),
-            _performance_report_line("구매 ROAS", _format_performance_report_percent(metrics.get("purchaseRor"), 1)),
-        ])
-    else:
-        lines.extend([
-            _performance_report_line("전환수", _format_performance_report_count(metrics.get("ccnt"))),
-            _performance_report_line("총전환매출", _format_performance_report_won(metrics.get("convAmt"))),
-            _performance_report_line("ROAS", _format_performance_report_percent(metrics.get("ror"), 1)),
-        ])
-    lines.extend(_performance_report_cart_lines(
+    lines = _performance_report_core_metric_lines(
         metrics,
         include_cart_count=include_cart_count,
         include_cart_amount=include_cart_amount,
-    ))
+    )
     if keyword_text:
         lines.append(_performance_report_line("주요 유입 키워드", keyword_text))
     if general_conversion_keyword_text:
@@ -6063,30 +6078,14 @@ def _build_performance_media_summary_report(
     sections: List[str] = []
     for row in sorted(rows or [], key=_performance_media_summary_sort_key):
         metrics = (row or {}).get("metrics") or {}
-        spend = _performance_number(metrics.get("salesAmt"))
-        cart_count = _performance_number(metrics.get("cartCcnt"))
-        if cart_count <= 0:
-            cart_count = _performance_non_negative_diff(metrics.get("ccnt"), metrics.get("purchaseCcnt"))
-        cart_amount = _performance_number(metrics.get("cartConvAmt"))
-        if cart_amount <= 0:
-            cart_amount = _performance_non_negative_diff(metrics.get("convAmt"), metrics.get("purchaseConvAmt"))
         lines = [
             _performance_media_summary_title(row),
-            _performance_report_line("노출수", _format_performance_report_number(metrics.get("impCnt"))),
-            _performance_report_line("클릭수", _format_performance_report_number(metrics.get("clkCnt"))),
-            _performance_report_line("클릭률", _format_performance_report_percent(metrics.get("ctr"), 1)),
-            _performance_report_line("평균 클릭 비용(CPC)", _format_performance_report_won(metrics.get("cpc"))),
-            _performance_report_line("광고 소진비용", _format_performance_report_won(spend)),
-            _performance_report_line("전환수", f"{_format_performance_report_count(metrics.get('ccnt'))}건"),
-            _performance_report_line("구매완료 전환 수", f"{_format_performance_report_count(metrics.get('purchaseCcnt'))}건"),
-            _performance_report_line("총 전환 매출액", _format_performance_report_won(metrics.get("convAmt"))),
-            _performance_report_line("구매완료 전환 매출액", _format_performance_report_won(metrics.get("purchaseConvAmt"))),
-            _performance_report_line("구매완료 기준 광고수익률(ROAS)", _format_performance_report_percent(metrics.get("purchaseRor"), 2)),
+            *_performance_report_core_metric_lines(
+                metrics,
+                include_cart_count=include_cart_count,
+                include_cart_amount=include_cart_amount,
+            ),
         ]
-        if include_cart_count:
-            lines.insert(8, _performance_report_line("장바구니 전환 수", f"{_format_performance_report_count(cart_count)}건"))
-        if include_cart_amount:
-            lines.append(_performance_report_line("장바구니 전환 매출액", _format_performance_report_won(cart_amount)))
         sections.append("\n".join(lines))
     return "\n\n\n".join(sections)
 

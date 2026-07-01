@@ -12028,11 +12028,37 @@
     body #tab_report .text-report-options {
       display: flex !important;
       flex-direction: column !important;
-      gap: 8px !important;
+      gap: 10px !important;
       padding: 0 !important;
       border: 0 !important;
       border-radius: 8px !important;
       background: transparent !important;
+    }
+    body #tab_report .text-report-option-group {
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 8px !important;
+      padding: 10px !important;
+      border: 1px solid #d8e2f0 !important;
+      border-radius: 8px !important;
+      background: #fff !important;
+    }
+    body #tab_report .text-report-option-title {
+      color: #0f172a !important;
+      font-size: 12px !important;
+      font-weight: 900 !important;
+      letter-spacing: 0 !important;
+    }
+    body #tab_report .text-report-option-help {
+      margin-top: -3px !important;
+      color: #667085 !important;
+      font-size: 11px !important;
+      line-height: 1.35 !important;
+    }
+    body #tab_report .text-report-keyword-toggles {
+      display: grid !important;
+      grid-template-columns: 1fr !important;
+      gap: 7px !important;
     }
     body #tab_report .text-report-options label {
       display: inline-flex !important;
@@ -12052,6 +12078,15 @@
       height: 14px !important;
       min-height: 14px !important;
       margin: 0 !important;
+    }
+    body #tab_report .text-report-fixed-metrics {
+      padding: 9px 10px !important;
+      border-radius: 8px !important;
+      background: #f8fafc !important;
+      color: #475569 !important;
+      font-size: 11px !important;
+      font-weight: 750 !important;
+      line-height: 1.45 !important;
     }
     body #tab_report .text-report-actions {
       display: grid !important;
@@ -18889,14 +18924,24 @@
                 </div>
                 <div class="text-report-control-section">
                   <div class="text-report-section-title">보고서 옵션</div>
-                  <div class="text-report-section-sub">SA/SSA 요약에 포함할 항목</div>
+                  <div class="text-report-section-sub">필수 지표는 기본 포함하고, 세부 범위만 선택합니다.</div>
                   <div class="text-report-options" id="text_report_media_options">
-                    <label><input type="checkbox" id="text_report_include_type" checked> 유형별 요약 포함</label>
-                    <label><input type="checkbox" id="text_report_include_campaign"> 캠페인별 요약 포함</label>
-                    <label><input type="checkbox" id="text_report_include_general_conversion_keywords" checked> 일반 전환 키워드/검색어 포함</label>
-                    <label><input type="checkbox" id="text_report_include_purchase_conversion_keywords" checked> 구매완료 전환 키워드/검색어 포함</label>
-                    <label><input type="checkbox" id="text_report_include_cart_count" checked> 장바구니 전환 수 포함</label>
-                    <label><input type="checkbox" id="text_report_include_cart_amount" checked> 장바구니 전환 매출액 포함</label>
+                    <div class="text-report-option-group">
+                      <div class="text-report-option-title">요약 범위</div>
+                      <select id="text_report_summary_depth">
+                        <option value="type" selected>계정 + 유형 요약</option>
+                        <option value="campaign">계정 + 유형 + 캠페인 요약</option>
+                        <option value="account">계정 요약만</option>
+                      </select>
+                    </div>
+                    <div class="text-report-option-group">
+                      <div class="text-report-option-title">전환 키워드/검색어</div>
+                      <div class="text-report-keyword-toggles">
+                        <label><input type="checkbox" id="text_report_include_general_conversion_keywords" checked> 일반 전환</label>
+                        <label><input type="checkbox" id="text_report_include_purchase_conversion_keywords" checked> 구매완료 전환</label>
+                      </div>
+                    </div>
+                    <div class="text-report-fixed-metrics">장바구니 전환 수, 장바구니 전환 매출액, 총비용(VAT 포함)은 기본 포함됩니다.</div>
                   </div>
                 </div>
                 <div class="text-report-control-section">
@@ -32178,6 +32223,7 @@ function getPerformanceTextReportPayload() {
         };
     };
     const datePayload = resolveTextReportDatePayload();
+    const summaryDepth = document.getElementById('text_report_summary_depth')?.value || 'type';
     const payload = {
         ...c,
         account_name: getSelectedAccountNameForReport(),
@@ -32189,12 +32235,12 @@ function getPerformanceTextReportPayload() {
         exclude_today: true,
         report_format: 'keyword_summary',
         report_metric_mode: document.getElementById('text_report_metric')?.value || 'conversion',
-        include_type_breakdown: !!document.getElementById('text_report_include_type')?.checked,
-        include_campaign_breakdown: !!document.getElementById('text_report_include_campaign')?.checked,
+        include_type_breakdown: summaryDepth !== 'account',
+        include_campaign_breakdown: summaryDepth === 'campaign',
         include_general_conversion_keywords: !!document.getElementById('text_report_include_general_conversion_keywords')?.checked,
         include_purchase_conversion_keywords: !!document.getElementById('text_report_include_purchase_conversion_keywords')?.checked,
-        include_cart_count: !!document.getElementById('text_report_include_cart_count')?.checked,
-        include_cart_amount: !!document.getElementById('text_report_include_cart_amount')?.checked,
+        include_cart_count: true,
+        include_cart_amount: true,
         report_enrichment_timeout_seconds: 12.0,
         timeout_seconds: 12.0,
     };
