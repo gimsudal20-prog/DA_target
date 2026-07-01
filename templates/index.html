@@ -5459,7 +5459,40 @@
     .copy-name-preview-warning { margin-top: 8px; padding: 8px 10px; background: #fffbeb; border: 1px solid #fde68a; color: #92400e; font-size: 12px; line-height: 1.45; }
     .copy-count-label { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .copy-count-note { color: #8b9099; font-size: 11px; font-weight: 500; line-height: 1.35; }
-     (max-width: 900px) { .copy-name-mode { grid-template-columns: 1fr; } }
+    .copy-entity-workflow { display: flex; flex-direction: column; gap: 14px; }
+    .copy-entity-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 14px; border: 1px solid #bfdbfe; border-radius: 8px; background: #eff6ff; }
+    .copy-entity-hero-title { color: #0f172a; font-size: 14px; font-weight: 900; }
+    .copy-entity-hero-sub { margin-top: 5px; color: #475569; font-size: 12px; line-height: 1.45; }
+    .copy-entity-badge { flex: 0 0 auto; padding: 5px 9px; border-radius: 999px; background: #fff; color: #1d4ed8; border: 1px solid #bfdbfe; font-size: 11px; font-weight: 900; }
+    .copy-entity-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .copy-entity-summary-box { padding: 12px; border: 1px solid #d8e2f0; border-radius: 8px; background: #fbfcfe; min-width: 0; }
+    .copy-entity-summary-label { color: #64748b; font-size: 11px; font-weight: 900; }
+    .copy-entity-summary-value { margin-top: 5px; color: #0f172a; font-size: 12px; font-weight: 850; line-height: 1.45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .copy-entity-summary-box.is-empty .copy-entity-summary-value { color: #94a3b8; font-weight: 750; }
+    .copy-entity-step { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+    .copy-entity-step-no { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; background: #111827; color: #fff; font-size: 12px; font-weight: 900; }
+    .copy-entity-step-title { color: #111827; font-size: 13px; font-weight: 900; }
+    .copy-entity-step-desc { margin-top: 4px; color: #64748b; font-size: 12px; line-height: 1.45; }
+    .copy-entity-check-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+    .copy-entity-check-row label,
+    .copy-entity-mode-card,
+    .copy-entity-item-grid label { display: flex; align-items: flex-start; gap: 8px; min-height: 36px; padding: 9px 10px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; color: #334155; font-size: 12px; font-weight: 800; line-height: 1.35; cursor: pointer; }
+    .copy-entity-check-row label:has(input:checked),
+    .copy-entity-mode-card:has(input:checked),
+    .copy-entity-item-grid label:has(input:checked) { border-color: #93c5fd; background: #eff6ff; color: #1d4ed8; }
+    .copy-entity-target-modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+    .copy-entity-mode-card strong { display: block; color: inherit; font-size: 12px; font-weight: 900; }
+    .copy-entity-mode-card span { display: block; margin-top: 3px; color: #64748b; font-size: 11px; font-weight: 650; }
+    .copy-entity-mode-card:has(input:checked) span { color: #1e40af; }
+    .copy-entity-target-filter { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; }
+    .copy-entity-target-filter .form-group { margin-bottom: 0; }
+    .copy-entity-target-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+    .copy-entity-target-toolbar .btn { padding: 6px 10px; font-size: 11px; }
+    .copy-entity-target-list { display: none; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px; max-height: 210px; overflow: auto; margin-top: 10px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+    .copy-entity-item-grid { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+    .copy-entity-extension-box { margin-top: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+    .copy-entity-action { width: 100%; min-height: 44px; margin-top: 2px; }
+    @media (max-width: 900px) { .copy-name-mode, .copy-entity-summary-grid, .copy-entity-target-modes, .copy-entity-target-filter { grid-template-columns: 1fr; } }
 
 
 
@@ -20398,62 +20431,102 @@
                         <button class="btn btn-primary" style="width:100%" onclick="renameSelectedAdgroups()">선택 광고그룹명 일괄 변경</button>
                     </div>
                     <div class="card" style="grid-column:1/-1;">
-                        <div class="card-title">광고그룹 내 항목 부분 복사</div>
-                        <div class="grid-2">
-                            <div class="form-group"><label>대상 (도착지) 캠페인</label><select id="copy_entity_target_campaign_select" onchange="loadCopyEntityTargetAdgroups()"></select></div>
-                            <div class="form-group"><label>대상 (도착지) 광고그룹</label><select id="copy_entity_target_adgroup_select"></select></div>
-                        </div>
-                        <div class="form-group">
-                            <label>원본 범위</label>
-                            <div style="display:flex; gap:12px; font-size:12px; flex-wrap:wrap;">
-                                <label><input type="checkbox" id="copy_entity_include_checked_campaigns" checked onchange="renderCopyEntityTargetChecklist()"> 체크한 캠페인 하위 광고그룹도 원본에 포함</label>
-                            </div>
-                            <div class="field-note">캠페인만 체크한 상태로 실행하면 해당 캠페인의 하위 광고그룹을 원본으로 자동 사용합니다.</div>
-                        </div>
-                        <div class="form-group">
-                            <label>다중 붙여넣기 대상</label>
-                            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; font-size:12px; margin-bottom:8px;">
-                                <label><input type="checkbox" id="copy_entity_target_campaign_all" onchange="toggleCopyEntityTargetCampaign(this.checked)"> 필터 캠페인 전체 광고그룹</label>
-                                <label><input type="checkbox" id="copy_entity_target_selected_campaigns" onchange="renderCopyEntityTargetChecklist()"> 좌측 선택 캠페인 전체 광고그룹</label>
-                                <button type="button" class="btn btn-sub" style="padding:5px 9px; font-size:11px;" onclick="selectAllCopyEntityTargets(true)">전체 선택</button>
-                                <button type="button" class="btn btn-sub" style="padding:5px 9px; font-size:11px;" onclick="selectAllCopyEntityTargets(false)">선택 해제</button>
-                                <span id="copy_entity_target_count" class="field-note" style="margin:0;">선택 0개</span>
-                            </div>
-                            <div id="copy_entity_target_adgroup_checks" style="display:none; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:6px; max-height:190px; overflow:auto; padding:8px; border:1px solid var(--line); border-radius:6px; background:#fff;"></div>
-                            <div class="field-note">대상 캠페인을 필터로 고르거나 좌측에서 캠페인을 체크해 여러 캠페인 하위 광고그룹에 한 번에 붙여넣습니다. 원본과 같은 광고그룹은 서버에서 자동 제외됩니다.</div>
-                        </div>
-                        <div class="form-group">
-                            <label>복사할 항목</label>
-                            <div style="display:flex; gap:12px; font-size:12px; flex-wrap:wrap;">
-                                <label><input type="checkbox" id="copy_include_keywords" checked> 키워드</label>
-                                <label><input type="checkbox" id="copy_include_ads" checked> 소재</label>
-                                <label><input type="checkbox" id="copy_include_extensions" checked onchange="syncCopyExtensionTypeOptions()"> 확장소재</label>
-                                <label><input type="checkbox" id="copy_include_negatives" checked> 제외키워드</label>
-                                <label><input type="checkbox" id="copy_exclude_off_assets" checked> OFF 원본 광고그룹/소재/확장소재 제외</label>
-                            </div>
-                            <div id="copy_extension_type_wrap" style="margin-top:10px; padding:10px 12px; border:1px solid var(--line); border-radius:6px; background:#fff;">
-                                <label style="display:block; margin-bottom:8px;">복사할 확장소재 유형</label>
-                                <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:8px 12px; font-size:12px;">
-                                    <label><input type="checkbox" class="copy-ext-type" value="ALL" checked onchange="syncCopyExtensionTypes(this)"> 모든 확장소재</label>
-                                    <label><input type="checkbox" class="copy-ext-type" value="HEADLINE" onchange="syncCopyExtensionTypes(this)"> 추가제목</label>
-                                    <label><input type="checkbox" class="copy-ext-type" value="DESCRIPTION" onchange="syncCopyExtensionTypes(this)"> 홍보문구</label>
-                                    <label><input type="checkbox" class="copy-ext-type" value="DESCRIPTION_EXTRA" onchange="syncCopyExtensionTypes(this)"> 추가설명</label>
-                                    <label><input type="checkbox" class="copy-ext-type" value="SUB_LINKS" onchange="syncCopyExtensionTypes(this)"> 서브링크</label>
-                                    <label><input type="checkbox" class="copy-ext-type" value="IMAGE_SUB_LINKS" onchange="syncCopyExtensionTypes(this)"> 이미지형 서브링크</label>
-                                    <label><input type="checkbox" class="copy-ext-type" value="POWER_LINK_IMAGE" onchange="syncCopyExtensionTypes(this)"> 파워링크 이미지</label>
-                                    <label><input type="checkbox" class="copy-ext-type" value="WEBSITE_INFO" onchange="syncCopyExtensionTypes(this)"> 웹사이트 정보</label>
-                                    <label><input type="checkbox" class="copy-ext-type" value="PHONE" onchange="syncCopyExtensionTypes(this)"> 전화번호</label>
-                                    <label><input type="checkbox" class="copy-ext-type" value="LOCATION" onchange="syncCopyExtensionTypes(this)"> 위치정보</label>
-                                    <label><input type="checkbox" class="copy-ext-type" value="PROMOTION" onchange="syncCopyExtensionTypes(this)"> 프로모션</label>
-                                    <label><input type="checkbox" class="copy-ext-type" value="PRICE_LINKS" onchange="syncCopyExtensionTypes(this)"> 가격링크</label>
-                                    <label><input type="checkbox" class="copy-ext-type" value="SHOPPING_PROMO_TEXT" onchange="syncCopyExtensionTypes(this)"> 쇼핑 추가홍보문구</label>
-                                    <label><input type="checkbox" class="copy-ext-type" value="SHOPPING_EXTRA" onchange="syncCopyExtensionTypes(this)"> 쇼핑상품부가정보</label>
+                        <div class="copy-entity-workflow">
+                            <div class="copy-entity-hero">
+                                <div>
+                                    <div class="copy-entity-hero-title">광고그룹 항목 일괄 붙여넣기</div>
+                                    <div class="copy-entity-hero-sub">좌측에서 복사할 광고그룹을 고르고, 붙여넣기할 캠페인을 체크한 뒤 한 번에 실행합니다.</div>
                                 </div>
-                                <div class="field-note">확장소재를 체크한 경우에만 적용됩니다. 예: 추가제목과 이미지형 서브링크만 체크하면 해당 유형만 복사합니다.</div>
+                                <div class="copy-entity-badge">키워드 · 소재 · 확장소재</div>
                             </div>
-                            <div class="field-note">기본 ON입니다. 체크 시 OFF 상태인 원본 광고그룹은 건너뛰고, OFF 소재와 확장소재는 생성 요청 전 서버에서 제외합니다.</div>
+
+                            <div class="copy-entity-summary-grid">
+                                <div class="copy-entity-summary-box is-empty" id="copy_entity_source_summary_box">
+                                    <div class="copy-entity-summary-label">복사 원본</div>
+                                    <div class="copy-entity-summary-value" id="copy_entity_source_summary">좌측에서 광고그룹을 선택하세요.</div>
+                                </div>
+                                <div class="copy-entity-summary-box is-empty" id="copy_entity_target_summary_box">
+                                    <div class="copy-entity-summary-label">붙여넣기 대상</div>
+                                    <div class="copy-entity-summary-value" id="copy_entity_target_summary">대상 캠페인 또는 광고그룹을 선택하세요.</div>
+                                </div>
+                            </div>
+
+                            <div class="copy-entity-step">
+                                <div class="copy-entity-step-no">1</div>
+                                <div>
+                                    <div class="copy-entity-step-title">복사할 원본</div>
+                                    <div class="copy-entity-step-desc">좌측 목록에서 광고그룹을 체크하면 그 그룹의 항목을 복사합니다. 광고그룹 체크가 없으면 현재 열려 있는 광고그룹을 원본으로 사용합니다.</div>
+                                    <div class="copy-entity-check-row">
+                                        <label><input type="checkbox" id="copy_entity_include_checked_campaigns" checked onchange="renderCopyEntityTargetChecklist()"> 체크한 캠페인 하위 광고그룹도 원본에 포함</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="copy-entity-step">
+                                <div class="copy-entity-step-no">2</div>
+                                <div>
+                                    <div class="copy-entity-step-title">붙여넣기 대상</div>
+                                    <div class="copy-entity-step-desc">여러 캠페인에 붙여넣으려면 좌측에서 캠페인을 체크하고 첫 번째 옵션을 켜세요.</div>
+                                    <div class="copy-entity-target-modes">
+                                        <label class="copy-entity-mode-card">
+                                            <input type="checkbox" id="copy_entity_target_selected_campaigns" onchange="renderCopyEntityTargetChecklist()">
+                                            <span><strong>좌측 선택 캠페인 전체에 붙여넣기</strong><span>체크한 캠페인의 하위 광고그룹 전체를 대상으로 사용</span></span>
+                                        </label>
+                                        <label class="copy-entity-mode-card">
+                                            <input type="checkbox" id="copy_entity_target_campaign_all" onchange="toggleCopyEntityTargetCampaign(this.checked)">
+                                            <span><strong>아래 캠페인의 전체 광고그룹 선택</strong><span>필터 캠페인을 하나 골라 하위 광고그룹을 한 번에 선택</span></span>
+                                        </label>
+                                    </div>
+                                    <div class="copy-entity-target-filter">
+                                        <div class="form-group"><label>필터 캠페인</label><select id="copy_entity_target_campaign_select" onchange="loadCopyEntityTargetAdgroups()"></select></div>
+                                        <div class="form-group"><label>단일 광고그룹</label><select id="copy_entity_target_adgroup_select" onchange="syncCopyEntitySelectionSummary()"></select></div>
+                                    </div>
+                                    <div class="copy-entity-target-toolbar">
+                                        <button type="button" class="btn btn-sub" onclick="selectAllCopyEntityTargets(true)">목록 전체 선택</button>
+                                        <button type="button" class="btn btn-sub" onclick="selectAllCopyEntityTargets(false)">선택 해제</button>
+                                        <span id="copy_entity_target_count" class="field-note" style="margin:0;">선택 0개</span>
+                                    </div>
+                                    <div id="copy_entity_target_adgroup_checks" class="copy-entity-target-list"></div>
+                                    <div class="field-note">복사 원본 광고그룹은 붙여넣기 대상에서 자동으로 비활성화됩니다.</div>
+                                </div>
+                            </div>
+
+                            <div class="copy-entity-step">
+                                <div class="copy-entity-step-no">3</div>
+                                <div>
+                                    <div class="copy-entity-step-title">복사할 항목</div>
+                                    <div class="copy-entity-step-desc">필요한 항목만 켜고 실행하세요. OFF 원본 제외는 기본으로 켜져 있습니다.</div>
+                                    <div class="copy-entity-item-grid">
+                                        <label><input type="checkbox" id="copy_include_keywords" checked> 키워드</label>
+                                        <label><input type="checkbox" id="copy_include_ads" checked> 소재</label>
+                                        <label><input type="checkbox" id="copy_include_extensions" checked onchange="syncCopyExtensionTypeOptions()"> 확장소재</label>
+                                        <label><input type="checkbox" id="copy_include_negatives" checked> 제외키워드</label>
+                                        <label><input type="checkbox" id="copy_exclude_off_assets" checked> OFF 원본 제외</label>
+                                    </div>
+                                    <div id="copy_extension_type_wrap" class="copy-entity-extension-box">
+                                        <label style="display:block; margin-bottom:8px;">복사할 확장소재 유형</label>
+                                        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:8px 12px; font-size:12px;">
+                                            <label><input type="checkbox" class="copy-ext-type" value="ALL" checked onchange="syncCopyExtensionTypes(this)"> 모든 확장소재</label>
+                                            <label><input type="checkbox" class="copy-ext-type" value="HEADLINE" onchange="syncCopyExtensionTypes(this)"> 추가제목</label>
+                                            <label><input type="checkbox" class="copy-ext-type" value="DESCRIPTION" onchange="syncCopyExtensionTypes(this)"> 홍보문구</label>
+                                            <label><input type="checkbox" class="copy-ext-type" value="DESCRIPTION_EXTRA" onchange="syncCopyExtensionTypes(this)"> 추가설명</label>
+                                            <label><input type="checkbox" class="copy-ext-type" value="SUB_LINKS" onchange="syncCopyExtensionTypes(this)"> 서브링크</label>
+                                            <label><input type="checkbox" class="copy-ext-type" value="IMAGE_SUB_LINKS" onchange="syncCopyExtensionTypes(this)"> 이미지형 서브링크</label>
+                                            <label><input type="checkbox" class="copy-ext-type" value="POWER_LINK_IMAGE" onchange="syncCopyExtensionTypes(this)"> 파워링크 이미지</label>
+                                            <label><input type="checkbox" class="copy-ext-type" value="WEBSITE_INFO" onchange="syncCopyExtensionTypes(this)"> 웹사이트 정보</label>
+                                            <label><input type="checkbox" class="copy-ext-type" value="PHONE" onchange="syncCopyExtensionTypes(this)"> 전화번호</label>
+                                            <label><input type="checkbox" class="copy-ext-type" value="LOCATION" onchange="syncCopyExtensionTypes(this)"> 위치정보</label>
+                                            <label><input type="checkbox" class="copy-ext-type" value="PROMOTION" onchange="syncCopyExtensionTypes(this)"> 프로모션</label>
+                                            <label><input type="checkbox" class="copy-ext-type" value="PRICE_LINKS" onchange="syncCopyExtensionTypes(this)"> 가격링크</label>
+                                            <label><input type="checkbox" class="copy-ext-type" value="SHOPPING_PROMO_TEXT" onchange="syncCopyExtensionTypes(this)"> 쇼핑 추가홍보문구</label>
+                                            <label><input type="checkbox" class="copy-ext-type" value="SHOPPING_EXTRA" onchange="syncCopyExtensionTypes(this)"> 쇼핑상품부가정보</label>
+                                        </div>
+                                        <div class="field-note">확장소재를 체크한 경우에만 적용됩니다.</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <button class="btn btn-purple copy-entity-action" onclick="execCopyEntities()">선택 항목을 붙여넣기 대상에 일괄 복사</button>
                         </div>
-                        <button class="btn btn-purple" style="width:100%" onclick="execCopyEntities()">선택 항목 대상 그룹으로 복사</button>
                     </div>
                 </div>
             </div>
@@ -29844,13 +29917,70 @@ function getCopyEntityTargetCampaignIds() {
 
 function syncCopyEntityTargetCount() {
     const countEl = document.getElementById('copy_entity_target_count');
-    if(!countEl) return;
     const selectedGroupCount = Array.from(selectedCopyEntityTargetAdgroupIds || []).filter(Boolean).length;
     const selectedCampaignCount = getCopyEntityTargetCampaignIds().length;
     const parts = [];
     if(selectedGroupCount) parts.push(`선택 그룹 ${num(selectedGroupCount)}개`);
     if(selectedCampaignCount) parts.push(`선택 캠페인 ${num(selectedCampaignCount)}개`);
-    countEl.textContent = parts.length ? parts.join(' · ') : '선택 0개';
+    if(countEl) countEl.textContent = parts.length ? parts.join(' · ') : '선택 0개';
+    syncCopyEntitySelectionSummary();
+}
+
+function copyEntityNameById(rows, id) {
+    const key = String(id || '').trim();
+    const row = (rows || []).find(x => String(x.id || x.campaign_id || '') === key);
+    return String(row?.name || row?.campaign_name || key || '').trim();
+}
+
+function formatCopyEntityNameList(ids, rows) {
+    const names = (ids || []).map(id => copyEntityNameById(rows, id)).filter(Boolean);
+    if(!names.length) return '';
+    const visible = names.slice(0, 3).join(', ');
+    return names.length > 3 ? `${visible} 외 ${num(names.length - 3)}개` : visible;
+}
+
+function setCopyEntitySummaryText(boxId, valueId, text, emptyText) {
+    const box = document.getElementById(boxId);
+    const value = document.getElementById(valueId);
+    const hasText = !!String(text || '').trim();
+    if(value) value.textContent = hasText ? text : emptyText;
+    if(box) box.classList.toggle('is-empty', !hasText);
+}
+
+function syncCopyEntitySelectionSummary() {
+    const sourceContext = getCopyEntitySourceContext();
+    const sourceBits = [];
+    const sourceAdgroupIds = Array.from(sourceContext.sourceIds || []);
+    const sourceCampaignIds = Array.from(sourceContext.sourceCampaignIds || []);
+    if(sourceAdgroupIds.length) sourceBits.push(`광고그룹 ${num(sourceAdgroupIds.length)}개 · ${formatCopyEntityNameList(sourceAdgroupIds, adgroups)}`);
+    if(sourceCampaignIds.length) sourceBits.push(`캠페인 ${num(sourceCampaignIds.length)}개 하위 전체 · ${formatCopyEntityNameList(sourceCampaignIds, campaigns)}`);
+    setCopyEntitySummaryText(
+        'copy_entity_source_summary_box',
+        'copy_entity_source_summary',
+        sourceBits.join(' / '),
+        '좌측에서 광고그룹을 선택하세요.'
+    );
+
+    const targetBits = [];
+    const targetCampaignIds = getCopyEntityTargetCampaignIds();
+    if(targetCampaignIds.length) targetBits.push(`캠페인 ${num(targetCampaignIds.length)}개 하위 전체 · ${formatCopyEntityNameList(targetCampaignIds, campaigns)}`);
+    const targetAdgroupIds = Array.from(selectedCopyEntityTargetAdgroupIds || []).filter(id => {
+        const row = (copyEntityTargetAdgroups || []).find(x => String(x.id || '') === String(id));
+        return row && !isCopyEntitySourceAdgroup(row);
+    });
+    if(targetAdgroupIds.length) {
+        targetBits.push(`광고그룹 ${num(targetAdgroupIds.length)}개 · ${formatCopyEntityNameList(targetAdgroupIds, copyEntityTargetAdgroups)}`);
+    } else if(!targetCampaignIds.length) {
+        const single = String(document.getElementById('copy_entity_target_adgroup_select')?.value || '').trim();
+        const singleRow = (copyEntityTargetAdgroups || []).find(x => String(x.id || '') === single);
+        if(single && singleRow && !isCopyEntitySourceAdgroup(singleRow)) targetBits.push(`단일 광고그룹 · ${copyEntityNameById(copyEntityTargetAdgroups, single)}`);
+    }
+    setCopyEntitySummaryText(
+        'copy_entity_target_summary_box',
+        'copy_entity_target_summary',
+        targetBits.join(' / '),
+        '대상 캠페인 또는 광고그룹을 선택하세요.'
+    );
 }
 
 function renderCopyEntityTargetChecklist() {
