@@ -29785,13 +29785,56 @@ async function loadCopyEntityTargetAdgroups(showLoading=true) {
         const payload = {...c, campaign_id: targetCampId, force:false};
         const adgs = await fetchJsonCached('/get_adgroups', payload, { loadingText: showLoading ? '목록 로딩...' : '', ttlMs:LIST_API_CACHE_TTL_MS });
         copyEntityTargetAdgroups = Array.isArray(adgs) ? adgs : [];
-        const sourceSet = new Set(getCheckedAdgroupIdsInViewOrder().map(String));
-        selectedCopyEntityTargetAdgroupIds = new Set(Array.from(selectedCopyEntityTargetAdgroupIds || []).filter(id => copyEntityTargetAdgroups.some(x => String(x.id || '') === String(id)) && !sourceSet.has(String(id))));
-        const selectableAdgs = copyEntityTargetAdgroups.filter(x => !sourceSet.has(String(x.id || '')));
-        const html = selectableAdgs.map(x=>`<option value="${escapeAttr(x.id)}">${escapeHtml(x.name)}</option>`).join('') || '<option value="">선택 가능한 대상 없음</option>';
-        if(el.innerHTML !== html) el.innerHTML = html;
+        const sourceContext = getCopyEntitySourceContext();
+        selectedCopyEntityTargetAdgroupIds = new Set(Array.from(selectedCopyEntityTargetAdgroupIds || []).filter(id => {
+            const row = copyEntityTargetAdgroups.find(x => String(x.id || '') === String(id));
+            return row && !isCopyEntitySourceAdgroup(row, sourceContext);
+        }));
+        syncCopyEntityTargetAdgroupSelect(sourceContext);
         renderCopyEntityTargetChecklist();
     } catch(err) { showToast(err.message, 'error'); }
+}
+
+function getCopyEntityAdgroupCampaignId(row) {
+    if(!row || typeof row !== 'object') return '';
+    return String(row.campaign_id || row.campaignId || row.nccCampaignId || row.raw?.nccCampaignId || document.getElementById('copy_entity_target_campaign_select')?.value || '').trim();
+}
+
+function getCopyEntitySourceContext() {
+    const checkedSourceIds = getCheckedAdgroupIdsInViewOrder();
+    const sourceIds = new Set(checkedSourceIds.map(String));
+    const targetCampaignMode = !!document.getElementById('copy_entity_target_selected_campaigns')?.checked;
+    const includeCheckedCampaigns = !!document.getElementById('copy_entity_include_checked_campaigns')?.checked;
+    const checkedSourceCampaignIds = getCheckedCampaignIdsInViewOrder();
+    const sourceCampaignIds = (!targetCampaignMode && (includeCheckedCampaigns || (!checkedSourceIds.length && checkedSourceCampaignIds.length)))
+        ? new Set(checkedSourceCampaignIds.map(String))
+        : new Set();
+    if(!sourceIds.size && !sourceCampaignIds.size && currentAdgroupId) {
+        sourceIds.add(String(currentAdgroupId));
+    }
+    return { sourceIds, sourceCampaignIds };
+}
+
+function isCopyEntitySourceAdgroup(rowOrId, sourceContext = null) {
+    const ctx = sourceContext || getCopyEntitySourceContext();
+    const row = rowOrId && typeof rowOrId === 'object' ? rowOrId : null;
+    const id = String(row ? (row.id || '') : rowOrId || '').trim();
+    if(id && ctx.sourceIds.has(id)) return true;
+    const campaignId = getCopyEntityAdgroupCampaignId(row);
+    return !!campaignId && ctx.sourceCampaignIds.has(campaignId);
+}
+
+function syncCopyEntityTargetAdgroupSelect(sourceContext = null) {
+    const el = document.getElementById('copy_entity_target_adgroup_select');
+    if(!el) return;
+    const ctx = sourceContext || getCopyEntitySourceContext();
+    const selectableAdgs = (copyEntityTargetAdgroups || []).filter(row => !isCopyEntitySourceAdgroup(row, ctx));
+    const previous = String(el.value || '');
+    const html = selectableAdgs.map(x=>`<option value="${escapeAttr(x.id)}">${escapeHtml(x.name)}</option>`).join('') || '<option value="">선택 가능한 대상 없음</option>';
+    if(el.innerHTML !== html) el.innerHTML = html;
+    if(previous && selectableAdgs.some(x => String(x.id || '') === previous)) {
+        el.value = previous;
+    }
 }
 
 function getCopyEntityTargetCampaignIds() {
@@ -29814,9 +29857,13 @@ function renderCopyEntityTargetChecklist() {
     const wrap = document.getElementById('copy_entity_target_adgroup_checks');
     const campaignAll = document.getElementById('copy_entity_target_campaign_all');
     const rows = Array.isArray(copyEntityTargetAdgroups) ? copyEntityTargetAdgroups : [];
-    const sourceSet = new Set(getCheckedAdgroupIdsInViewOrder().map(String));
-    const selectableRows = rows.filter(x => !sourceSet.has(String(x.id || '')));
-    selectedCopyEntityTargetAdgroupIds = new Set(Array.from(selectedCopyEntityTargetAdgroupIds || []).filter(id => selectableRows.some(x => String(x.id || '') === String(id))));
+    const sourceContext = getCopyEntitySourceContext();
+    const selectableRows = rows.filter(x => !isCopyEntitySourceAdgroup(x, sourceContext));
+    selectedCopyEntityTargetAdgroupIds = new Set(Array.from(selectedCopyEntityTargetAdgroupIds || []).filter(id => {
+        const row = rows.find(x => String(x.id || '') === String(id));
+        return row && !isCopyEntitySourceAdgroup(row, sourceContext);
+    }));
+    syncCopyEntityTargetAdgroupSelect(sourceContext);
     if(campaignAll) {
         campaignAll.disabled = selectableRows.length <= 0;
         campaignAll.checked = selectableRows.length > 0 && selectableRows.every(x => selectedCopyEntityTargetAdgroupIds.has(String(x.id || '')));
@@ -29833,7 +29880,7 @@ function renderCopyEntityTargetChecklist() {
     wrap.style.display = 'grid';
     wrap.innerHTML = rows.map(row => {
         const id = String(row.id || '');
-        const isSource = sourceSet.has(id);
+        const isSource = isCopyEntitySourceAdgroup(row, sourceContext);
         const checked = selectedCopyEntityTargetAdgroupIds.has(id) ? 'checked' : '';
         const disabled = isSource ? 'disabled' : '';
         const tone = isSource ? 'background:#f8fafc; color:#9ca3af;' : 'background:#fff;';
@@ -29852,8 +29899,9 @@ function renderCopyEntityTargetChecklist() {
 function toggleCopyEntityTargetAdgroup(id, checked) {
     const key = String(id || '').trim();
     if(!key) return;
-    const sourceSet = new Set(getCheckedAdgroupIdsInViewOrder().map(String));
-    if(sourceSet.has(key)) {
+    const sourceContext = getCopyEntitySourceContext();
+    const row = (copyEntityTargetAdgroups || []).find(x => String(x.id || '') === key);
+    if(isCopyEntitySourceAdgroup(row || key, sourceContext)) {
         selectedCopyEntityTargetAdgroupIds.delete(key);
         renderCopyEntityTargetChecklist();
         return;
@@ -29862,7 +29910,7 @@ function toggleCopyEntityTargetAdgroup(id, checked) {
     else selectedCopyEntityTargetAdgroupIds.delete(key);
     syncCopyEntityTargetCount();
     const campaignAll = document.getElementById('copy_entity_target_campaign_all');
-    const selectableRows = (copyEntityTargetAdgroups || []).filter(x => !sourceSet.has(String(x.id || '')));
+    const selectableRows = (copyEntityTargetAdgroups || []).filter(x => !isCopyEntitySourceAdgroup(x, sourceContext));
     if(campaignAll) {
         campaignAll.checked = selectableRows.length > 0 && selectableRows.every(x => selectedCopyEntityTargetAdgroupIds.has(String(x.id || '')));
         campaignAll.indeterminate = selectableRows.some(x => selectedCopyEntityTargetAdgroupIds.has(String(x.id || ''))) && !campaignAll.checked;
@@ -29872,10 +29920,10 @@ function toggleCopyEntityTargetAdgroup(id, checked) {
 function selectAllCopyEntityTargets(checked) {
     selectedCopyEntityTargetAdgroupIds.clear();
     if(checked) {
-        const sourceSet = new Set(getCheckedAdgroupIdsInViewOrder().map(String));
+        const sourceContext = getCopyEntitySourceContext();
         (copyEntityTargetAdgroups || []).forEach(row => {
             const id = String(row.id || '').trim();
-            if(id && !sourceSet.has(id)) selectedCopyEntityTargetAdgroupIds.add(id);
+            if(id && !isCopyEntitySourceAdgroup(row, sourceContext)) selectedCopyEntityTargetAdgroupIds.add(id);
         });
     }
     renderCopyEntityTargetChecklist();
@@ -29886,12 +29934,16 @@ function toggleCopyEntityTargetCampaign(checked) {
 }
 
 function getCopyEntityTargetAdgroupIds() {
-    const sourceSet = new Set(getCheckedAdgroupIdsInViewOrder().map(String));
-    const selected = Array.from(selectedCopyEntityTargetAdgroupIds || []).filter(id => id && !sourceSet.has(String(id)));
+    const sourceContext = getCopyEntitySourceContext();
+    const selected = Array.from(selectedCopyEntityTargetAdgroupIds || []).filter(id => {
+        const row = (copyEntityTargetAdgroups || []).find(x => String(x.id || '') === String(id));
+        return id && row && !isCopyEntitySourceAdgroup(row, sourceContext);
+    });
     if(selected.length) return selected;
     if(getCopyEntityTargetCampaignIds().length) return [];
     const single = String(document.getElementById('copy_entity_target_adgroup_select')?.value || '').trim();
-    return single && !sourceSet.has(single) ? [single] : [];
+    const singleRow = (copyEntityTargetAdgroups || []).find(x => String(x.id || '') === single);
+    return single && singleRow && !isCopyEntitySourceAdgroup(singleRow, sourceContext) ? [single] : [];
 }
 
 function setKeywordBidSearchMatchMode(mode) {
