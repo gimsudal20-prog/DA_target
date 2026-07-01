@@ -57,6 +57,9 @@ class AIAnalysisService:
         self._cache_max_items = 40
         self._max_detail_targets = self._env_int("DA_AI_MAX_DETAIL_TARGETS", 1200)
         self._max_account_detail_targets = self._env_int("DA_AI_MAX_ACCOUNT_DETAIL_TARGETS", 1000)
+        self._max_full_detail_targets = self._env_int("DA_AI_MAX_FULL_DETAIL_TARGETS", 10000)
+        self._max_table_rows = self._env_int("DA_AI_MAX_TABLE_ROWS", 500)
+        self._default_table_rows = self._env_int("DA_AI_DEFAULT_TABLE_ROWS", 50)
 
     @staticmethod
     def _env_int(name: str, default: int) -> int:
@@ -76,7 +79,8 @@ class AIAnalysisService:
         if not question:
             return {"ok": False, "error": "질문을 입력해주세요."}, 400
 
-        tool = self._select_tool(question)
+        query_spec = self._parse_query_spec(question)
+        tool = "query_engine" if query_spec else self._select_tool(question)
         cache_key = self._cache_key(payload, tool)
         cached = self._cache_get(cache_key)
         if cached is not None:
@@ -87,9 +91,16 @@ class AIAnalysisService:
 
         started = time.perf_counter()
         steps: List[Dict[str, Any]] = []
-        steps.append(self._step("질문 의도 파악", f"{self._tool_label(tool)} 분석으로 분류했습니다.", started))
+        intent_detail = (
+            f"{self._target_label(query_spec.get('target'))} / {self._metric_label(query_spec.get('primary_metric'))} / "
+            f"{self._sort_label(query_spec)} 기준으로 구조화했습니다."
+            if query_spec else f"{self._tool_label(tool)} 분석으로 분류했습니다."
+        )
+        steps.append(self._step("질문 의도 파악", intent_detail, started))
         try:
-            if tool in {"low_conversion_campaigns", "waste_campaigns", "action_summary"}:
+            if tool == "query_engine":
+                analysis = self._analyze_query_spec(payload, question, query_spec or {})
+            elif tool in {"low_conversion_campaigns", "waste_campaigns", "action_summary"}:
                 analysis = self._analyze_performance_rows(payload, question, "campaign", tool)
             elif tool == "low_conversion_adgroups":
                 analysis = self._analyze_performance_rows(payload, question, "adgroup", tool)
@@ -124,10 +135,13 @@ class AIAnalysisService:
         answer = deterministic_answer
 
         llm_started = time.perf_counter()
-        llm_answer, llm_note = self._try_llm_summary(question, tool, analysis, deterministic_answer)
-        if llm_answer:
-            answer = llm_answer
-            llm_used = True
+        if tool == "query_engine":
+            llm_note = "구조화 질의 결과를 계산 답변으로 표시했습니다."
+        else:
+            llm_answer, llm_note = self._try_llm_summary(question, tool, analysis, deterministic_answer)
+            if llm_answer:
+                answer = llm_answer
+                llm_used = True
         steps.append(self._step("답변 정리", llm_note, llm_started))
 
         response = {
@@ -135,6 +149,7 @@ class AIAnalysisService:
             "cached": False,
             "tool": tool,
             "tool_label": self._tool_label(tool),
+            "query_spec": analysis.get("query_spec") or query_spec or {},
             "answer": answer,
             "fallback_answer": deterministic_answer,
             "llm_used": llm_used,
@@ -151,6 +166,147 @@ class AIAnalysisService:
         }
         self._cache_set(cache_key, response)
         return response, 200
+
+    def _compact_question(self, question: str) -> str:
+        return re.sub(r"\s+", "", str(question or "")).lower()
+
+    def _parse_query_spec(self, question: str) -> Optional[Dict[str, Any]]:
+        q = self._compact_question(question)
+        if not q:
+            return None
+        if any(token in q for token in ("전주", "지난주", "직전", "비교", "대비", "오른", "상승", "증가", "늘어난", "늘었", "변화")):
+            return None
+
+        target = ""
+        if "광고그룹" in q or "그룹" in q:
+            target = "adgroup"
+        elif "캠페인" in q:
+            target = "campaign"
+        elif "키워드" in q or "검색어" in q:
+            target = "keyword"
+        if not target:
+            return None
+
+        count_key, amount_key, roas_key, metric_label = self._conversion_metric_keys(q)
+        no_conversion = any(token in q for token in ("전환없", "전환이없", "전환없는", "전환안", "전환이안", "무전환"))
+        low_conversion = any(token in q for token in ("전환낮", "전환수낮", "전환적", "전환수적"))
+        positive_conversion = any(token in q for token in (
+            "전환이력", "전환있는", "전환있", "전환발생", "전환나온", "전환잡힌", "전환된",
+            "구매완료", "구매전환", "장바구니",
+        )) and not no_conversion
+        wants_all = any(token in q for token in ("전체", "전부", "모두", "다보여", "다알려"))
+        wants_low = any(token in q for token in ("낮", "적은", "하위", "안좋", "나쁜", "비효율"))
+        wants_high = any(token in q for token in ("많", "높", "상위", "top", "최고", "큰"))
+
+        filters: List[Dict[str, Any]] = []
+        if no_conversion:
+            filters.append({"key": count_key, "op": "<=", "value": 0, "label": f"{metric_label} 없음"})
+            if "클릭" in q:
+                filters.append({"key": "clkCnt", "op": ">", "value": 0, "label": "클릭 있음"})
+            elif "비용" in q or "소진" in q:
+                filters.append({"key": "salesAmt", "op": ">", "value": 0, "label": "비용 있음"})
+        elif positive_conversion:
+            filters.append({"key": count_key, "op": ">", "value": 0, "label": f"{metric_label} 있음"})
+        elif low_conversion:
+            filters.append({"key": "clkCnt", "op": ">", "value": 0, "label": "클릭 있음"})
+
+        if any(token in q for token in ("비용있는", "비용쓴", "비용사용", "소진있는", "소진한", "돈쓴")):
+            filters.append({"key": "salesAmt", "op": ">", "value": 0, "label": "비용 있음"})
+        if any(token in q for token in ("클릭있는", "클릭한", "클릭발생")):
+            filters.append({"key": "clkCnt", "op": ">", "value": 0, "label": "클릭 있음"})
+        if any(token in q for token in ("노출있는", "노출된", "노출발생")):
+            filters.append({"key": "impCnt", "op": ">", "value": 0, "label": "노출 있음"})
+        if any(token in q for token in ("비효율", "효율낮", "낭비", "줄여", "중지", "꺼야")):
+            filters.append({"key": "is_problem", "op": "truthy", "value": True, "label": "점검 후보"})
+
+        sort_key = self._query_sort_key(q, count_key, amount_key, roas_key, no_conversion)
+        sort_dir = "asc" if (wants_low and not no_conversion and sort_key not in {"salesAmt", "cpc"}) else "desc"
+        explicit_limit = self._question_limit(question)
+        limit_mode = "all" if wants_all else "top"
+        if not filters and not sort_key and not wants_all and not wants_high and not wants_low:
+            return None
+        return {
+            "target": target,
+            "primary_metric": count_key,
+            "amount_metric": amount_key,
+            "roas_metric": roas_key,
+            "metric_label": metric_label,
+            "filters": filters,
+            "sort_key": sort_key or ("salesAmt" if no_conversion else count_key),
+            "sort_dir": sort_dir,
+            "limit_mode": limit_mode,
+            "limit": explicit_limit,
+        }
+
+    def _conversion_metric_keys(self, compact_question: str) -> Tuple[str, str, str, str]:
+        if "장바구니" in compact_question or "cart" in compact_question or "basket" in compact_question:
+            return "cartCcnt", "cartConvAmt", "cartRor", "장바구니 전환"
+        if "구매완료" in compact_question or "구매전환" in compact_question or "구매" in compact_question or "purchase" in compact_question:
+            return "purchaseCcnt", "purchaseConvAmt", "purchaseRor", "구매완료 전환"
+        return "ccnt", "convAmt", "roas", "전환"
+
+    def _query_sort_key(self, compact_question: str, count_key: str, amount_key: str, roas_key: str, no_conversion: bool) -> str:
+        if "cpc" in compact_question or "클릭당비용" in compact_question or "클릭비용" in compact_question or "클릭단가" in compact_question:
+            return "cpc"
+        if "roas" in compact_question or "수익률" in compact_question:
+            return roas_key
+        if "매출액" in compact_question or "매출" in compact_question or "전환값" in compact_question or "전환매출" in compact_question:
+            return amount_key
+        if "비용" in compact_question or "소진" in compact_question or "지출" in compact_question or "돈" in compact_question:
+            return "salesAmt"
+        if "클릭" in compact_question:
+            return "clkCnt"
+        if "노출" in compact_question:
+            return "impCnt"
+        if no_conversion:
+            return "salesAmt"
+        if any(token in compact_question for token in ("전환", "구매", "장바구니")):
+            return count_key
+        return "score"
+
+    def _question_limit(self, question: str) -> int:
+        q = str(question or "")
+        match = re.search(r"(?:상위|top)?\s*(\d{1,4})\s*개", q, flags=re.IGNORECASE)
+        if not match:
+            return 0
+        try:
+            return max(1, min(self._max_table_rows, int(match.group(1))))
+        except Exception:
+            return 0
+
+    def _target_label(self, target: Any) -> str:
+        return {
+            "keyword": "키워드",
+            "campaign": "캠페인",
+            "adgroup": "광고그룹",
+            "ad": "소재",
+        }.get(str(target or ""), "대상")
+
+    def _metric_label(self, key: Any) -> str:
+        return {
+            "impCnt": "노출",
+            "clkCnt": "클릭",
+            "ctr": "CTR",
+            "ccnt": "전환",
+            "totalCcnt": "총 전환",
+            "convAmt": "전환 매출액",
+            "totalConvAmt": "총 전환 매출액",
+            "purchaseCcnt": "구매완료 전환",
+            "purchaseConvAmt": "구매완료 매출액",
+            "cartCcnt": "장바구니 전환",
+            "cartConvAmt": "장바구니 매출액",
+            "salesAmt": "비용",
+            "cpc": "CPC",
+            "cvr": "CVR",
+            "roas": "ROAS",
+            "purchaseRor": "구매완료 ROAS",
+            "cartRor": "장바구니 ROAS",
+            "score": "점검 점수",
+        }.get(str(key or ""), str(key or "지표"))
+
+    def _sort_label(self, spec: Dict[str, Any]) -> str:
+        direction = "오름차순" if str(spec.get("sort_dir")) == "asc" else "내림차순"
+        return f"{self._metric_label(spec.get('sort_key'))} {direction}"
 
     def _select_tool(self, question: str) -> str:
         q = re.sub(r"\s+", "", question or "").lower()
@@ -194,6 +350,7 @@ class AIAnalysisService:
 
     def _tool_label(self, tool: str) -> str:
         return {
+            "query_engine": "맞춤 질의 분석",
             "low_conversion_campaigns": "전환 낮은 캠페인",
             "low_conversion_adgroups": "전환 낮은 광고그룹",
             "low_conversion_keywords": "전환 낮은 키워드",
@@ -335,8 +492,8 @@ class AIAnalysisService:
             return self._max_account_detail_targets
         return self._max_detail_targets
 
-    def _trim_detail_targets(self, targets: List[Dict[str, Any]], scope: Any, label: str) -> Tuple[List[Dict[str, Any]], str]:
-        limit = self._detail_target_limit(scope)
+    def _trim_detail_targets(self, targets: List[Dict[str, Any]], scope: Any, label: str, limit_override: Optional[int] = None) -> Tuple[List[Dict[str, Any]], str]:
+        limit = max(1, int(limit_override or self._detail_target_limit(scope)))
         if len(targets or []) <= limit:
             return targets or [], ""
         return (targets or [])[:limit], (
@@ -380,11 +537,26 @@ class AIAnalysisService:
         clicks = self.num(metrics.get("clkCnt"))
         cost = self.num(metrics.get("salesAmt"))
         conv_key = "purchaseCcnt" if "구매" in str(question or "") else "ccnt"
+        if "장바구니" in str(question or ""):
+            conv_key = "cartCcnt"
         conv = self.num(metrics.get(conv_key))
-        revenue_key = "purchaseConvAmt" if conv_key == "purchaseCcnt" else "convAmt"
+        revenue_key = "purchaseConvAmt" if conv_key == "purchaseCcnt" else ("cartConvAmt" if conv_key == "cartCcnt" else "convAmt")
         revenue = self.num(metrics.get(revenue_key))
+        total_conv = self.num(metrics.get("ccnt"))
+        total_revenue = self.num(metrics.get("convAmt"))
+        purchase_conv = self.num(metrics.get("purchaseCcnt"))
+        purchase_revenue = self.num(metrics.get("purchaseConvAmt"))
+        cart_conv = self.num(metrics.get("cartCcnt"))
+        if cart_conv <= 0 and total_conv > 0:
+            cart_conv = max(0.0, total_conv - purchase_conv)
+        cart_revenue = self.num(metrics.get("cartConvAmt"))
+        if cart_revenue <= 0 and total_revenue > 0:
+            cart_revenue = max(0.0, total_revenue - purchase_revenue)
         cvr = (conv / clicks * 100) if clicks > 0 else 0
         roas, roas_available = self._compute_roas(revenue, cost, conv)
+        total_roas, total_roas_available = self._compute_roas(total_revenue, cost, total_conv)
+        purchase_roas, purchase_roas_available = self._compute_roas(purchase_revenue, cost, purchase_conv)
+        cart_roas, cart_roas_available = self._compute_roas(cart_revenue, cost, cart_conv)
         ctr = self.num(metrics.get("ctr")) if self.num(metrics.get("ctr")) > 0 else ((clicks / imp * 100) if imp > 0 else 0)
         cpc = self.num(metrics.get("cpc")) if self.num(metrics.get("cpc")) > 0 else ((cost / clicks) if clicks > 0 else 0)
         target_name = str(row.get("name") or row.get("campaign_name") or row.get("adgroup_name") or row.get("id") or "-")
@@ -398,10 +570,22 @@ class AIAnalysisService:
             "ccnt": round(conv, 2),
             "salesAmt": round(cost, 2),
             "convAmt": round(revenue, 2),
+            "totalCcnt": round(total_conv, 2),
+            "totalConvAmt": round(total_revenue, 2),
+            "purchaseCcnt": round(purchase_conv, 2),
+            "purchaseConvAmt": round(purchase_revenue, 2),
+            "cartCcnt": round(cart_conv, 2),
+            "cartConvAmt": round(cart_revenue, 2),
             "cpc": round(cpc, 2),
             "cvr": round(cvr, 2),
             "roas": round(roas, 2) if roas_available else None,
             "roas_available": roas_available,
+            "totalRor": round(total_roas, 2) if total_roas_available else None,
+            "totalRor_available": total_roas_available,
+            "purchaseRor": round(purchase_roas, 2) if purchase_roas_available else None,
+            "purchaseRor_available": purchase_roas_available,
+            "cartRor": round(cart_roas, 2) if cart_roas_available else None,
+            "cartRor_available": cart_roas_available,
             "ctr": round(ctr, 2),
         }
         assessment = self._row_assessment(imp, clicks, conv, cost, cvr, roas, ctr, cpc, roas_available=roas_available)
@@ -639,13 +823,17 @@ class AIAnalysisService:
                 "ccnt": 0.0,
                 "salesAmt": 0.0,
                 "convAmt": 0.0,
+                "purchaseCcnt": 0.0,
+                "purchaseConvAmt": 0.0,
+                "cartCcnt": 0.0,
+                "cartConvAmt": 0.0,
                 "sourceCount": 0,
             })
             bucket["sourceCount"] += 1
             bucket["campaigns"].append(row.get("campaign"))
             bucket["adgroups"].append(row.get("adgroup"))
             bucket["types"].append(row.get("type"))
-            for metric in ("impCnt", "clkCnt", "ccnt", "salesAmt", "convAmt"):
+            for metric in ("impCnt", "clkCnt", "ccnt", "salesAmt", "convAmt", "purchaseCcnt", "purchaseConvAmt", "cartCcnt", "cartConvAmt"):
                 bucket[metric] += self.num(row.get(metric))
 
         aggregated: List[Dict[str, Any]] = []
@@ -655,9 +843,19 @@ class AIAnalysisService:
             conv = self.num(bucket.get("ccnt"))
             cost = self.num(bucket.get("salesAmt"))
             revenue = self.num(bucket.get("convAmt"))
+            purchase_conv = self.num(bucket.get("purchaseCcnt"))
+            purchase_revenue = self.num(bucket.get("purchaseConvAmt"))
+            cart_conv = self.num(bucket.get("cartCcnt"))
+            if cart_conv <= 0 and conv > 0:
+                cart_conv = max(0.0, conv - purchase_conv)
+            cart_revenue = self.num(bucket.get("cartConvAmt"))
+            if cart_revenue <= 0 and revenue > 0:
+                cart_revenue = max(0.0, revenue - purchase_revenue)
             cpc = cost / clicks if clicks > 0 else 0
             cvr = conv / clicks * 100 if clicks > 0 else 0
             roas, roas_available = self._compute_roas(revenue, cost, conv)
+            purchase_roas, purchase_roas_available = self._compute_roas(purchase_revenue, cost, purchase_conv)
+            cart_roas, cart_roas_available = self._compute_roas(cart_revenue, cost, cart_conv)
             assessment = self._row_assessment(imp, clicks, conv, cost, cvr, roas, 0, cpc, roas_available=roas_available)
             item = {
                 "name": bucket.get("name") or "-",
@@ -670,10 +868,18 @@ class AIAnalysisService:
                 "ccnt": round(conv, 2),
                 "salesAmt": round(cost, 2),
                 "convAmt": round(revenue, 2),
+                "purchaseCcnt": round(purchase_conv, 2),
+                "purchaseConvAmt": round(purchase_revenue, 2),
+                "cartCcnt": round(cart_conv, 2),
+                "cartConvAmt": round(cart_revenue, 2),
                 "cpc": round(cpc, 2),
                 "cvr": round(cvr, 2),
                 "roas": round(roas, 2) if roas_available else None,
                 "roas_available": roas_available,
+                "purchaseRor": round(purchase_roas, 2) if purchase_roas_available else None,
+                "purchaseRor_available": purchase_roas_available,
+                "cartRor": round(cart_roas, 2) if cart_roas_available else None,
+                "cartRor_available": cart_roas_available,
                 "sourceCount": int(bucket.get("sourceCount") or 0),
                 "judgement": assessment["label"],
                 "judgement_tone": assessment["tone"],
@@ -683,6 +889,180 @@ class AIAnalysisService:
             item["score"] = self._risk_score(item)
             aggregated.append(item)
         return aggregated
+
+    def _analyze_query_spec(self, payload: Dict[str, Any], question: str, spec: Dict[str, Any]) -> Dict[str, Any]:
+        started = time.perf_counter()
+        target = str(spec.get("target") or "keyword")
+        since, until, date_label = self._date_range_from_payload(payload)
+        if target == "keyword":
+            rows, raw_count, stat_count, warnings, errors = self._query_keyword_rows(payload, question, spec, since, until)
+        else:
+            rows, raw_count, stat_count, warnings, errors = self._query_performance_rows(payload, question, spec, since, until, target)
+
+        matched = [row for row in rows if self._row_matches_query(row, spec)]
+        sorted_rows = self._sort_query_rows(matched, spec)
+        display_limit = self._query_display_limit(spec)
+        display_rows = sorted_rows[:display_limit]
+        if len(sorted_rows) > display_limit:
+            warnings.append(
+                f"조건에 맞는 {self._target_label(target)}가 {len(sorted_rows):,}개라 표에는 먼저 {display_limit:,}개만 표시합니다. "
+                "CSV 다운로드로 현재 표시 목록을 내려받거나 범위를 좁혀 전체를 확인하세요."
+            )
+
+        filter_label = self._query_filter_label(spec)
+        return {
+            "rows": display_rows,
+            "columns": self._query_columns(target, spec),
+            "summary_cards": [
+                {"label": "분석 대상", "value": f"{raw_count:,}개", "note": self._target_label(target)},
+                {"label": "조건 일치", "value": f"{len(sorted_rows):,}개", "note": filter_label or "전체"},
+                {"label": "표시", "value": f"{len(display_rows):,}개", "note": "근거 표"},
+                {"label": "정렬", "value": self._metric_label(spec.get("sort_key")), "note": "오름차순" if spec.get("sort_dir") == "asc" else "내림차순"},
+                {"label": "통계 행", "value": f"{stat_count:,}개", "note": date_label},
+            ],
+            "warnings": warnings[:30],
+            "errors": errors[:10],
+            "date_label": date_label,
+            "scope_label": self._scope_label(payload.get("target_scope") or payload.get("scope")),
+            "query_spec": spec,
+            "total_matched": len(sorted_rows),
+            "displayed_count": len(display_rows),
+            "steps": [
+                self._step("공통 질의 해석", f"{filter_label or '전체'} 조건을 {self._sort_label(spec)}으로 정렬합니다.", started),
+                self._step("성과 데이터 계산", f"{self._target_label(target)} {raw_count:,}개와 통계 {stat_count:,}행을 계산했습니다.", started),
+            ],
+        }
+
+    def _query_keyword_rows(
+        self,
+        payload: Dict[str, Any],
+        question: str,
+        spec: Dict[str, Any],
+        since: str,
+        until: str,
+    ) -> Tuple[List[Dict[str, Any]], int, int, List[str], List[str]]:
+        scope_payload = self._base_scope_payload(payload, level="keyword")
+        target_limit = self._max_full_detail_targets if spec.get("limit_mode") == "all" else None
+        source_rows, metrics_by_id, stat_count, warnings, errors = self._keyword_metrics_snapshot(
+            payload,
+            scope_payload,
+            since,
+            until,
+            target_limit=target_limit,
+        )
+        rows: List[Dict[str, Any]] = []
+        for row in source_rows:
+            keyword_id = str(row.get("keywordId") or "").strip()
+            if not keyword_id:
+                continue
+            metrics = metrics_by_id.get(keyword_id) or self.build_empty_metric()
+            normalized = self._normalize_perf_row({
+                "id": keyword_id,
+                "name": row.get("keyword") or keyword_id,
+                "campaign_name": row.get("campaignName") or "",
+                "adgroup_name": row.get("adgroupName") or "",
+                "campaign_type": self._row_campaign_type_bucket(row) or row.get("campaignType") or "",
+                "metrics": metrics,
+            }, "keyword", "")
+            normalized["keyword"] = normalized["name"]
+            rows.append(normalized)
+        aggregated = self._aggregate_keyword_rows(rows)
+        return aggregated, len(source_rows), stat_count, warnings, errors
+
+    def _query_performance_rows(
+        self,
+        payload: Dict[str, Any],
+        question: str,
+        spec: Dict[str, Any],
+        since: str,
+        until: str,
+        target: str,
+    ) -> Tuple[List[Dict[str, Any]], int, int, List[str], List[str]]:
+        level = "adgroup" if target == "adgroup" else "campaign"
+        perf_payload = self._base_scope_payload(payload, level=level)
+        result = self.performance_stats(
+            str(payload.get("api_key") or "").strip(),
+            str(payload.get("secret_key") or "").strip(),
+            str(payload.get("customer_id") or "").strip(),
+            perf_payload,
+        )
+        rows = [self._normalize_perf_row(row, level, "") for row in (result.get("rows") or [])]
+        stat_count = int(result.get("stat_row_count") or result.get("stats_row_count") or len(result.get("rows") or []))
+        return rows, len(result.get("rows") or []), stat_count, list(result.get("warnings") or []), list(result.get("errors") or [])
+
+    def _row_matches_query(self, row: Dict[str, Any], spec: Dict[str, Any]) -> bool:
+        for flt in spec.get("filters") or []:
+            key = str(flt.get("key") or "")
+            op = str(flt.get("op") or "")
+            expected = flt.get("value")
+            if op == "truthy":
+                if not bool(row.get(key)):
+                    return False
+                continue
+            actual = self.num(row.get(key))
+            expected_num = self.num(expected)
+            if op == ">" and not (actual > expected_num):
+                return False
+            if op == ">=" and not (actual >= expected_num):
+                return False
+            if op == "<" and not (actual < expected_num):
+                return False
+            if op == "<=" and not (actual <= expected_num):
+                return False
+            if op == "=" and not (actual == expected_num):
+                return False
+        return True
+
+    def _sort_query_rows(self, rows: List[Dict[str, Any]], spec: Dict[str, Any]) -> List[Dict[str, Any]]:
+        key = str(spec.get("sort_key") or "score")
+        reverse = str(spec.get("sort_dir") or "desc") != "asc"
+        if key == "score":
+            return sorted(rows or [], key=lambda row: (-self.num(row.get("score")), -self.num(row.get("salesAmt")), -self.num(row.get("clkCnt")), str(row.get("name") or "")))
+        if reverse:
+            return sorted(rows or [], key=lambda row: (-self.num(row.get(key)), -self.num(row.get("salesAmt")), -self.num(row.get("clkCnt")), str(row.get("name") or "")))
+        return sorted(rows or [], key=lambda row: (self.num(row.get(key)), -self.num(row.get("salesAmt")), -self.num(row.get("clkCnt")), str(row.get("name") or "")))
+
+    def _query_display_limit(self, spec: Dict[str, Any]) -> int:
+        explicit = int(spec.get("limit") or 0)
+        if explicit > 0:
+            return max(1, min(self._max_table_rows, explicit))
+        if spec.get("limit_mode") == "all":
+            return self._max_table_rows
+        return max(1, min(self._max_table_rows, self._default_table_rows))
+
+    def _query_filter_label(self, spec: Dict[str, Any]) -> str:
+        labels = [str(item.get("label") or "").strip() for item in (spec.get("filters") or []) if str(item.get("label") or "").strip()]
+        return " + ".join(labels)
+
+    def _query_columns(self, target: str, spec: Dict[str, Any]) -> List[Dict[str, str]]:
+        first = self._target_label(target)
+        cols: List[Dict[str, str]] = [{"key": "name", "label": first}]
+        if target in {"keyword", "adgroup"}:
+            cols.append({"key": "campaign", "label": "캠페인"})
+        if target == "keyword":
+            cols.extend([
+                {"key": "adgroup", "label": "광고그룹"},
+                {"key": "sourceCount", "label": "등록수"},
+            ])
+        primary = str(spec.get("primary_metric") or "ccnt")
+        amount = str(spec.get("amount_metric") or "convAmt")
+        roas = str(spec.get("roas_metric") or "roas")
+        metric_order = [
+            "impCnt", "clkCnt", "ctr", "salesAmt", "cpc",
+            "ccnt", "convAmt", "purchaseCcnt", "purchaseConvAmt", "cartCcnt", "cartConvAmt",
+            "cvr", "roas", "purchaseRor", "cartRor",
+        ]
+        preferred = ["impCnt", "clkCnt", "salesAmt", primary, amount, "cpc", "cvr", roas]
+        keys: List[str] = []
+        for key in preferred + metric_order:
+            if key and key not in keys:
+                keys.append(key)
+        cols.extend({"key": key, "label": self._metric_label(key)} for key in keys)
+        cols.extend([
+            {"key": "judgement", "label": "판단"},
+            {"key": "reason", "label": "근거"},
+        ])
+        return cols
 
     def _analyze_keywords(self, payload: Dict[str, Any], question: str, tool: str = "low_conversion_keywords") -> Dict[str, Any]:
         started = time.perf_counter()
@@ -787,6 +1167,7 @@ class AIAnalysisService:
         since: str,
         until: str,
         source_rows_override: Optional[List[Dict[str, Any]]] = None,
+        target_limit: Optional[int] = None,
     ) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, Any]], int, List[str], List[str]]:
         if source_rows_override is None:
             lookup_scope = {"selected_campaigns": "campaign", "selected_adgroups": "adgroup"}.get(scope_payload["target_scope"], "account")
@@ -820,7 +1201,7 @@ class AIAnalysisService:
                 "campaign_type": self._row_campaign_type_bucket(row) or row.get("campaignType") or "",
                 "name": row.get("keyword") or keyword_id,
             })
-        targets, trim_warning = self._trim_detail_targets(targets, scope_payload.get("target_scope"), "키워드")
+        targets, trim_warning = self._trim_detail_targets(targets, scope_payload.get("target_scope"), "키워드", target_limit)
         if trim_warning:
             warnings.append(trim_warning)
             allowed_ids = {str((target or {}).get("id") or "").strip() for target in targets}
@@ -1256,9 +1637,56 @@ class AIAnalysisService:
             f"{reason or row.get('reason') or ''}"
         )
 
+    def _query_metric_text(self, row: Dict[str, Any], key: Any) -> str:
+        key = str(key or "")
+        value = row.get(key)
+        if key in {"salesAmt", "cpc", "convAmt", "totalConvAmt", "purchaseConvAmt", "cartConvAmt"}:
+            return self._won(value)
+        if key in {"ctr", "cvr", "roas", "purchaseRor", "cartRor", "totalRor"}:
+            if value is None:
+                return "-"
+            return self._pct(value)
+        return self._fmt(value)
+
+    def _query_line(self, idx: int, row: Dict[str, Any], spec: Dict[str, Any]) -> str:
+        metric_key = str(spec.get("primary_metric") or spec.get("sort_key") or "ccnt")
+        sort_key = str(spec.get("sort_key") or metric_key)
+        primary = f"{self._metric_label(metric_key)} {self._query_metric_text(row, metric_key)}"
+        sort_part = "" if sort_key == metric_key else f", {self._metric_label(sort_key)} {self._query_metric_text(row, sort_key)}"
+        return (
+            f"{idx}. {row.get('name') or '-'} - {primary}{sort_part}, "
+            f"클릭 {self._fmt(row.get('clkCnt'))}, 비용 {self._won(row.get('salesAmt'))}{self._row_location(row)}"
+        )
+
+    def _build_query_answer(self, analysis: Dict[str, Any], question: str) -> str:
+        rows = analysis.get("rows") or []
+        spec = analysis.get("query_spec") or {}
+        target_label = self._target_label(spec.get("target"))
+        total = int(analysis.get("total_matched") or len(rows))
+        shown = int(analysis.get("displayed_count") or len(rows))
+        filter_label = self._query_filter_label(spec) or "전체"
+        if not rows:
+            return (
+                f"{analysis.get('date_label') or '조회 기간'} 기준 {filter_label} 조건에 맞는 {target_label}가 없습니다.\n"
+                "기간을 넓히거나 조회 범위를 계정 전체/선택 캠페인으로 바꿔 다시 확인하세요."
+            )
+        lines = [
+            f"{analysis.get('date_label') or '조회 기간'} 기준 {filter_label} 조건의 {target_label}는 총 {total:,}개입니다. "
+            f"표에는 {shown:,}개를 {self._sort_label(spec)}으로 표시했습니다."
+        ]
+        for idx, row in enumerate(rows[:5], start=1):
+            lines.append(self._query_line(idx, row, spec))
+        if total > shown:
+            lines.append(f"목록이 많아 표에는 먼저 {shown:,}개만 표시했습니다. 범위를 좁히면 더 정확하게 전체를 볼 수 있습니다.")
+        else:
+            lines.append("표의 모든 행이 현재 조건에 맞는 결과입니다.")
+        return "\n".join(lines)
+
     def _build_answer(self, tool: str, analysis: Dict[str, Any], question: str) -> str:
         rows = analysis.get("rows") or []
         label = self._tool_label(tool)
+        if tool == "query_engine":
+            return self._build_query_answer(analysis, question)
         if not rows:
             return f"{label} 기준으로 뚜렷한 문제 후보는 아직 보이지 않습니다.\n기간을 최근 30일로 넓히거나 캠페인/광고그룹 범위를 넓히면 더 안정적으로 판단할 수 있습니다."
         top = rows[:3]
@@ -1363,6 +1791,9 @@ class AIAnalysisService:
             "tool": self._tool_label(tool),
             "date_label": analysis.get("date_label"),
             "scope_label": analysis.get("scope_label"),
+            "query_spec": analysis.get("query_spec") or {},
+            "total_matched": analysis.get("total_matched"),
+            "displayed_count": analysis.get("displayed_count"),
             "summary_cards": analysis.get("summary_cards"),
             "rows": (analysis.get("rows") or [])[:8],
             "fallback_answer": fallback,
@@ -1532,6 +1963,9 @@ class AIAnalysisService:
     def _suggested_questions(self, tool: str) -> List[str]:
         return [
             "전환이 없는 이유가 뭐야?",
+            "전환 이력 있는 키워드 전체 알려줘",
+            "구매완료 전환 있는 키워드 전체 알려줘",
+            "장바구니 전환 있는 키워드 전체 알려줘",
             "최근 비용 가장 많이 쓰인 키워드가 뭐야?",
             "최근 CPC가 오른 키워드 알려줘",
             "전 주 대비 노출수나 클릭수가 상승한 키워드 알려줘",
@@ -1548,7 +1982,7 @@ class AIAnalysisService:
 
     def _cache_key(self, payload: Dict[str, Any], tool: str) -> str:
         raw = {
-            "version": "ai-judgement-v9-keyword-intents",
+            "version": "ai-query-engine-v1",
             "tool": tool,
             "question": str(payload.get("question") or "").strip().lower(),
             "api": self._hash(payload.get("api_key")),

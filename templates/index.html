@@ -19567,6 +19567,8 @@
               </div>
               <div class="ai-analysis-quick-row">
                 <button type="button" class="ai-analysis-chip" onclick="askAiQuick('전환이 없는 이유가 뭐야?')">전환 없음 원인</button>
+                <button type="button" class="ai-analysis-chip" onclick="askAiQuick('전환 이력 있는 키워드 전체 알려줘')">전환 키워드 전체</button>
+                <button type="button" class="ai-analysis-chip" onclick="askAiQuick('구매완료 전환 있는 키워드 전체 알려줘')">구매완료 키워드</button>
                 <button type="button" class="ai-analysis-chip" onclick="askAiQuick('최근 비용 가장 많이 쓰인 키워드가 뭐야?')">비용 상위 키워드</button>
                 <button type="button" class="ai-analysis-chip" onclick="askAiQuick('최근 CPC가 오른 키워드 알려줘')">CPC 상승 키워드</button>
                 <button type="button" class="ai-analysis-chip" onclick="askAiQuick('전 주 대비 노출수나 클릭수가 상승한 키워드 알려줘')">노출/클릭 증가</button>
@@ -19580,6 +19582,7 @@
                 <button type="button" class="btn btn-primary" onclick="runAiAnalysis()">질문하기</button>
               </div>
               <div class="btn-row">
+                <button type="button" class="btn btn-sub" onclick="downloadAiAnalysisCsv()">CSV 다운로드</button>
                 <button type="button" class="btn btn-sub" onclick="clearAiAnalysis()">비우기</button>
               </div>
             </div>
@@ -33755,9 +33758,9 @@ function stopAiAnalysisProgress(options = {}) {
 }
 
 function formatAiAnalysisValue(key, value) {
-    if(['salesAmt', 'cpc', 'prevCpc', 'cpcDelta'].includes(key)) return formatMetricWon(value || 0);
-    if(['cvr', 'roas', 'ctr', 'cpcDeltaPct', 'impDeltaPct', 'clkDeltaPct'].includes(key)) return `${formatMetricNumber(value || 0)}%`;
-    if(['impCnt', 'prevImpCnt', 'impDelta', 'clkCnt', 'prevClkCnt', 'clkDelta', 'ccnt', 'sourceCount'].includes(key)) return formatMetricNumber(value || 0);
+    if(['salesAmt', 'cpc', 'prevCpc', 'cpcDelta', 'convAmt', 'totalConvAmt', 'purchaseConvAmt', 'cartConvAmt'].includes(key)) return formatMetricWon(value || 0);
+    if(['cvr', 'roas', 'totalRor', 'purchaseRor', 'cartRor', 'ctr', 'cpcDeltaPct', 'impDeltaPct', 'clkDeltaPct'].includes(key)) return value == null || value === '' ? '-' : `${formatMetricNumber(value || 0)}%`;
+    if(['impCnt', 'prevImpCnt', 'impDelta', 'clkCnt', 'prevClkCnt', 'clkDelta', 'ccnt', 'totalCcnt', 'purchaseCcnt', 'cartCcnt', 'sourceCount'].includes(key)) return formatMetricNumber(value || 0);
     return value == null || value === '' ? '-' : String(value);
 }
 
@@ -33778,6 +33781,12 @@ function renderAiAnalysisCell(col = {}, row = {}) {
     const key = col.key;
     const value = row?.[key];
     if(key === 'roas' && row?.roas_available === false) {
+        return '-';
+    }
+    if(key === 'purchaseRor' && row?.purchaseRor_available === false) {
+        return '-';
+    }
+    if(key === 'cartRor' && row?.cartRor_available === false) {
         return '-';
     }
     if(key === 'judgement') {
@@ -33920,6 +33929,27 @@ function askAiQuick(question) {
     const input = document.getElementById('ai_analysis_question');
     if(input) input.value = question;
     runAiAnalysis();
+}
+
+function downloadAiAnalysisCsv() {
+    const data = aiAnalysisLastData || {};
+    const columns = Array.isArray(data.columns) ? data.columns : [];
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    if(!columns.length || !rows.length) {
+        showToast('다운로드할 AI분석 표가 없습니다.', 'error');
+        return;
+    }
+    const header = columns.map(col => col.label || col.key || '');
+    const body = rows.map(row => columns.map(col => {
+        const key = col.key || '';
+        if(key === 'roas' && row?.roas_available === false) return '';
+        if(key === 'purchaseRor' && row?.purchaseRor_available === false) return '';
+        if(key === 'cartRor' && row?.cartRor_available === false) return '';
+        return formatAiAnalysisValue(key, row?.[key]);
+    }));
+    const account = String(getSelectedAccountNameForReport?.() || 'account').replace(/[\\/:*?"<>|]+/g, '_');
+    const dateLabel = String(data.date_label || 'ai_analysis').replace(/\s+/g, '_').replace(/[\\/:*?"<>|]+/g, '_');
+    _downloadCsvFile(`${account}_${dateLabel}_ai_analysis.csv`, header, body);
 }
 
 function clearAiAnalysis() {
