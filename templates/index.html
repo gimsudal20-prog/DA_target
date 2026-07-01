@@ -13411,6 +13411,40 @@
       font-size: 11px !important;
       font-weight: 600 !important;
     }
+    body .report-data-table .performance-sort-btn {
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: flex-end !important;
+      gap: 5px !important;
+      width: 100% !important;
+      min-height: 24px !important;
+      padding: 0 !important;
+      border: 0 !important;
+      background: transparent !important;
+      color: inherit !important;
+      font: inherit !important;
+      font-weight: 800 !important;
+      line-height: 1.2 !important;
+      cursor: pointer !important;
+      box-shadow: none !important;
+      white-space: nowrap !important;
+    }
+    body .report-data-table th:first-child .performance-sort-btn {
+      justify-content: flex-start !important;
+    }
+    body .report-data-table .performance-sort-btn:hover {
+      color: #0b5fce !important;
+      background: transparent !important;
+    }
+    body .report-data-table .performance-sort-indicator {
+      min-width: 10px !important;
+      color: #94a3b8 !important;
+      font-size: 10px !important;
+      line-height: 1 !important;
+    }
+    body .report-data-table .performance-sort-btn.is-active .performance-sort-indicator {
+      color: #0b5fce !important;
+    }
     body .report-data-judgement {
       display: inline-flex !important;
       align-items: center !important;
@@ -21402,6 +21436,7 @@ const ACCOUNT_STATUS_KEY = 'naver_account_status_v1';
 let accountStatusMap = {};
 let performanceStatsLastData = null;
 let performanceTextReportLastData = null;
+let purchaseCurrentReportLastData = null;
 let shoppingQueryInsightLastData = null;
 let shoppingQueryNonConversionLastData = null;
 let ageDataLastData = null;
@@ -21419,6 +21454,7 @@ let shoppingQueryBackgroundRefreshToken = '';
 let dimensionDataBackgroundTimers = {};
 let dimensionDataBackgroundTokens = {};
 let performanceStatsSortState = { key: null, direction: 'desc', kind: 'number' };
+let reportDataTableSortStates = {};
 let performanceBidEditorState = { key: null };
 let performanceAdgroupCopyModeEnabled = false;
 let selectedPerformanceCopyAdgroupIds = new Set();
@@ -31789,7 +31825,7 @@ function setPerformanceSort(key, kind = 'number') {
         performanceStatsSortState = {
             key,
             kind: normalizedKind,
-            direction: normalizedKind === 'text' ? 'asc' : 'desc'
+            direction: 'asc'
         };
     }
     if(performanceStatsLastData) renderPerformanceStatsResult(performanceStatsLastData);
@@ -32038,12 +32074,20 @@ function setPerformanceQuickPeriod(preset, rowKey = '') {
     fetchPerformanceStats({ silent: false }).catch(() => {});
 }
 
-function renderPerformanceDailyTable(row) {
+function renderPerformanceDailyTable(row, level = null) {
     const days = Array.isArray(row?.daily_metrics) ? row.daily_metrics : [];
     if(!days.length) {
         return '<div class="log-empty">이 기간의 일자별 성과를 확인하지 못했습니다.</div>';
     }
-    const rows = days.map(day => {
+    const dataLevel = normalizePerformanceResultLevel(level || performanceStatsLastData?.result_level || 'type');
+    const tableKey = `performance_daily_${getPerformanceRowKey(row, dataLevel) || 'row'}`;
+    const sortedDays = sortReportDataRows(
+        days,
+        tableKey,
+        (day, key) => key === 'date' ? day?.date || '' : reportDataNumber((day?.metrics || {})?.[key]),
+        day => day?.date || ''
+    );
+    const rows = sortedDays.map(day => {
         const metrics = day.metrics || {};
         return `
             <tr>
@@ -32063,14 +32107,14 @@ function renderPerformanceDailyTable(row) {
             <table>
                 <thead>
                     <tr>
-                        <th>일자</th>
-                        <th>노출수</th>
-                        <th>클릭수</th>
-                        <th>전환수</th>
-                        <th>구매완료수</th>
-                        <th>구매완료 ROAS</th>
-                        <th>총비용</th>
-                        <th>CPC</th>
+                        ${renderReportDataSortHeader(tableKey, 'date', '일자', 'text')}
+                        ${renderReportDataSortHeader(tableKey, 'impCnt', '노출수')}
+                        ${renderReportDataSortHeader(tableKey, 'clkCnt', '클릭수')}
+                        ${renderReportDataSortHeader(tableKey, 'ccnt', '전환수')}
+                        ${renderReportDataSortHeader(tableKey, 'purchaseCcnt', '구매완료수')}
+                        ${renderReportDataSortHeader(tableKey, 'purchaseRor', '구매완료 ROAS')}
+                        ${renderReportDataSortHeader(tableKey, 'salesAmt', '총비용')}
+                        ${renderReportDataSortHeader(tableKey, 'cpc', 'CPC')}
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
@@ -32176,7 +32220,7 @@ function renderPerformanceBidEditorRow(row, level, colCount) {
                                 ${renderPerformancePeriodButtons(rowKey)}
                             </div>
                         </div>
-                        ${renderPerformanceDailyTable(row)}
+                        ${renderPerformanceDailyTable(row, level)}
                     </div>
                 </div>
             </td>
@@ -32373,7 +32417,8 @@ function purchaseMetricCell(row, key, kind = 'number') {
     return escapeMaybe(formatMetricNumber(value));
 }
 
-function renderPurchaseCurrentReport(data) {
+function renderPurchaseCurrentReport(data = purchaseCurrentReportLastData) {
+    purchaseCurrentReportLastData = data || null;
     const wrap = document.getElementById('purchase_report_result');
     if(!wrap) return;
     const summary = Array.isArray(data?.summary) ? data.summary : [];
@@ -32412,7 +32457,14 @@ function renderPurchaseCurrentReport(data) {
         wrap.innerHTML = `${header}${warnHtml}${errorHtml}${summaryCards}<div class="log-empty">구매완료 데이터가 없습니다.</div>`;
         return;
     }
-    const tableRows = summary.map(row => `
+    const tableKey = 'purchase_current_report';
+    const sortedSummary = sortReportDataRows(
+        summary,
+        tableKey,
+        (row, key) => key === 'campaign_type' ? row?.campaign_type || '' : reportDataNumber(row?.[key]),
+        row => row?.campaign_type || ''
+    );
+    const tableRows = sortedSummary.map(row => `
         <tr>
             <td><strong>${escapeMaybe(row.campaign_type || '-')}</strong><div class="field-note">${escapeMaybe(formatMetricNumber(row.campaign_count || 0))}개 캠페인</div></td>
             <td>${purchaseMetricCell(row, 'purchaseCcnt')}</td>
@@ -32428,12 +32480,12 @@ function renderPurchaseCurrentReport(data) {
             <table>
                 <thead>
                     <tr>
-                        <th>광고유형</th>
-                        <th>구매완료수</th>
-                        <th>구매완료금액</th>
-                        <th>구매 ROAS</th>
-                        <th>광고비</th>
-                        <th>클릭수</th>
+                        ${renderReportDataSortHeader(tableKey, 'campaign_type', '광고유형', 'text')}
+                        ${renderReportDataSortHeader(tableKey, 'purchaseCcnt', '구매완료수')}
+                        ${renderReportDataSortHeader(tableKey, 'purchaseConvAmt', '구매완료금액')}
+                        ${renderReportDataSortHeader(tableKey, 'purchaseRor', '구매 ROAS')}
+                        ${renderReportDataSortHeader(tableKey, 'salesAmt', '광고비')}
+                        ${renderReportDataSortHeader(tableKey, 'clkCnt', '클릭수')}
                     </tr>
                 </thead>
                 <tbody>${tableRows}</tbody>
@@ -33973,6 +34025,94 @@ function normalizeReportDataMetricSet(metrics = {}) {
     return normalized;
 }
 
+function getReportDataTableSortState(tableKey) {
+    return reportDataTableSortStates?.[tableKey] || { key: null, direction: 'asc', kind: 'number' };
+}
+
+function renderReportDataSortHeader(tableKey, key, label, kind = 'number') {
+    const state = getReportDataTableSortState(tableKey);
+    const normalizedKind = kind === 'text' ? 'text' : 'number';
+    const active = state.key === key;
+    const direction = state.direction === 'desc' ? 'desc' : 'asc';
+    const indicator = active ? (direction === 'asc' ? '▲' : '▼') : '↕';
+    const ariaSort = active ? (direction === 'asc' ? 'ascending' : 'descending') : 'none';
+    return `
+        <th aria-sort="${ariaSort}">
+            <button type="button" class="performance-sort-btn${active ? ' is-active' : ''}" onclick="setReportDataTableSort('${escapeAttr(tableKey)}', '${escapeAttr(key)}', '${normalizedKind}')">
+                <span>${escapeMaybe(label)}</span>
+                <span class="performance-sort-indicator" aria-hidden="true">${indicator}</span>
+            </button>
+        </th>
+    `;
+}
+
+function getReportDataRowMetricSet(row = {}) {
+    return normalizeReportDataMetricSet(row?.metrics || row?.total || row?.series?.total || {});
+}
+
+function sortReportDataRows(rows, tableKey, valueGetter, fallbackLabelGetter = null) {
+    const state = getReportDataTableSortState(tableKey);
+    if(!state.key) return Array.isArray(rows) ? rows : [];
+    const direction = state.direction === 'desc' ? -1 : 1;
+    const kind = state.kind === 'text' ? 'text' : 'number';
+    const labelGetter = fallbackLabelGetter || (row => String(row?.label || ''));
+    return [...(rows || [])].sort((a, b) => {
+        const av = valueGetter(a, state.key);
+        const bv = valueGetter(b, state.key);
+        if(kind === 'text') {
+            const result = String(av ?? '').localeCompare(String(bv ?? ''), 'ko', { numeric: true });
+            return result * direction || String(labelGetter(a)).localeCompare(String(labelGetter(b)), 'ko', { numeric: true });
+        }
+        const an = Number(av);
+        const bn = Number(bv);
+        if(!Number.isFinite(an) && !Number.isFinite(bn)) return String(labelGetter(a)).localeCompare(String(labelGetter(b)), 'ko', { numeric: true });
+        if(!Number.isFinite(an)) return 1;
+        if(!Number.isFinite(bn)) return -1;
+        if(an === bn) return String(labelGetter(a)).localeCompare(String(labelGetter(b)), 'ko', { numeric: true });
+        return (an - bn) * direction;
+    });
+}
+
+function rerenderReportDataTableSortTarget(tableKey) {
+    const key = String(tableKey || '');
+    if(key.startsWith('performance_daily_')) {
+        if(performanceStatsLastData) renderPerformanceStatsResult(performanceStatsLastData);
+        return;
+    }
+    if(key === 'purchase_current_report') {
+        renderPurchaseCurrentReport();
+        return;
+    }
+    if(key.startsWith('time_data')) {
+        renderTimeDataReport();
+        return;
+    }
+    if(key.startsWith('age_data')) {
+        renderAgeDataReport();
+        return;
+    }
+    for (const prefix of ['area_data', 'media_data', 'region_data']) {
+        if(key.startsWith(prefix)) {
+            renderDimensionDataReport(prefix);
+            return;
+        }
+    }
+}
+
+function setReportDataTableSort(tableKey, key, kind = 'number') {
+    const current = getReportDataTableSortState(tableKey);
+    const normalizedKind = kind === 'text' ? 'text' : 'number';
+    reportDataTableSortStates = {
+        ...(reportDataTableSortStates || {}),
+        [tableKey]: {
+            key,
+            kind: normalizedKind,
+            direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc'
+        }
+    };
+    rerenderReportDataTableSortTarget(tableKey);
+}
+
 function reportDataSelectedMetricTotal(rows, series, metricKey) {
     if(!isReportDataShareMetric(metricKey)) return 0;
     return (rows || []).reduce((sum, row) => {
@@ -34143,7 +34283,14 @@ function renderReportDataGenderSidePanel(genderRows, metricKey) {
 
 function renderReportDataGenderMetricTable(genderRows) {
     if(!Array.isArray(genderRows) || !genderRows.length) return '';
-    const body = genderRows.map(row => `<tr>
+    const tableKey = 'age_data_gender_metrics';
+    const sortedRows = sortReportDataRows(
+        genderRows,
+        tableKey,
+        (row, key) => key === 'label' ? row?.label : reportDataNumber(getReportDataRowMetricSet(row)?.[key]),
+        row => row?.label || ''
+    );
+    const body = sortedRows.map(row => `<tr>
         <td>${escapeMaybe(row.label || '-')}</td>
         ${TIME_DATA_TABLE_METRICS.map(metric => `<td>${escapeMaybe(formatPerformanceDemographicMetric(row?.metrics?.[metric.key] || 0, metric.key))}</td>`).join('')}
     </tr>`).join('');
@@ -34153,8 +34300,8 @@ function renderReportDataGenderMetricTable(genderRows) {
           <table class="report-data-table">
             <thead>
               <tr>
-                <th>성별</th>
-                ${TIME_DATA_TABLE_METRICS.map(item => `<th>${escapeMaybe(item.label)}</th>`).join('')}
+                ${renderReportDataSortHeader(tableKey, 'label', '성별', 'text')}
+                ${TIME_DATA_TABLE_METRICS.map(item => renderReportDataSortHeader(tableKey, item.key, item.label)).join('')}
               </tr>
             </thead>
             <tbody>${body || `<tr><td colspan="${TIME_DATA_TABLE_METRICS.length + 1}">표시할 성별 데이터가 없습니다.</td></tr>`}</tbody>
@@ -35666,11 +35813,28 @@ function drawReportDataChart(canvasId, rows, series, metricKey, emptyText = '표
     drawReportDataBars(ctx, rows, series, metricKey, cssWidth, cssHeight, pad, maxValue, resolvedType, areas);
 }
 
-function renderReportDataMetricTable(rows, series, metricKey, labelHeader = '구분') {
+function renderReportDataMetricTable(rows, series, metricKey, labelHeader = '구분', tableKey = 'report_data_metric_table') {
     const metric = getPerformanceDemographicMetricInfo(metricKey);
-    const headers = [labelHeader, ...series.map(item => item.label), `합계(${metric.label})`];
-    const body = (rows || []).map(row => {
-        const values = series.map(item => Number(row?.series?.[item.key]?.[metricKey] || 0));
+    const normalizedSeries = Array.isArray(series) ? series : [];
+    const headers = [labelHeader, ...normalizedSeries.map(item => item.label), `합계(${metric.label})`];
+    const sortedRows = sortReportDataRows(
+        rows || [],
+        tableKey,
+        (row, key) => {
+            if(key === 'label') return row?.label || '';
+            if(key === 'total') {
+                const values = normalizedSeries.map(item => Number(row?.series?.[item.key]?.[metricKey] || 0));
+                return Number(row?.total?.[metricKey] || values.reduce((sum, value) => sum + value, 0));
+            }
+            if(String(key || '').startsWith('series:')) {
+                return Number(row?.series?.[String(key).slice(7)]?.[metricKey] || 0);
+            }
+            return 0;
+        },
+        row => row?.label || ''
+    );
+    const body = sortedRows.map(row => {
+        const values = normalizedSeries.map(item => Number(row?.series?.[item.key]?.[metricKey] || 0));
         const total = Number(row?.total?.[metricKey] || values.reduce((sum, value) => sum + value, 0));
         return `<tr>
             <td>${escapeMaybe(row.label || '-')}</td>
@@ -35678,10 +35842,15 @@ function renderReportDataMetricTable(rows, series, metricKey, labelHeader = '구
             <td>${escapeMaybe(formatPerformanceDemographicMetric(total, metricKey))}</td>
         </tr>`;
     }).join('');
+    const headerHtml = [
+        renderReportDataSortHeader(tableKey, 'label', labelHeader, 'text'),
+        ...normalizedSeries.map(item => renderReportDataSortHeader(tableKey, `series:${item.key}`, item.label)),
+        renderReportDataSortHeader(tableKey, 'total', `합계(${metric.label})`)
+    ].join('');
     return `
         <div class="report-data-table-wrap">
           <table class="report-data-table">
-            <thead><tr>${headers.map(header => `<th>${escapeMaybe(header)}</th>`).join('')}</tr></thead>
+            <thead><tr>${headerHtml}</tr></thead>
             <tbody>${body || `<tr><td colspan="${headers.length}">표시할 데이터가 없습니다.</td></tr>`}</tbody>
           </table>
         </div>
@@ -35701,7 +35870,19 @@ function getTimeDataJudgement(row, profile, series, metricKey) {
 function renderTimeDataMetricTable(rows, metricKey = 'impCnt') {
     const series = [{ key: 'total', label: '합계', color: '#2563eb' }];
     const profile = getReportDataTimeProfile(rows, series, metricKey);
-    const body = (rows || []).map(row => {
+    const tableKey = 'time_data_metrics';
+    const sortedRows = sortReportDataRows(
+        rows || [],
+        tableKey,
+        (row, key) => {
+            if(key === 'label') return row?.label || '';
+            const metrics = getReportDataRowMetricSet(row);
+            if(key === 'judgement') return getTimeDataJudgement(row, profile, series, metricKey).label;
+            return reportDataNumber(metrics?.[key]);
+        },
+        row => row?.label || ''
+    );
+    const body = sortedRows.map(row => {
         const metrics = normalizeReportDataMetricSet(row?.total || row?.metrics || row?.series?.total || {});
         const judgement = getTimeDataJudgement(row, profile, series, metricKey);
         return `<tr>
@@ -35716,9 +35897,9 @@ function renderTimeDataMetricTable(rows, metricKey = 'impCnt') {
           <table class="report-data-table">
             <thead>
               <tr>
-                <th>시간대</th>
-                ${TIME_DATA_TABLE_METRICS.map(item => `<th>${escapeMaybe(item.label)}</th>`).join('')}
-                <th>판단</th>
+                ${renderReportDataSortHeader(tableKey, 'label', '시간대', 'text')}
+                ${TIME_DATA_TABLE_METRICS.map(item => renderReportDataSortHeader(tableKey, item.key, item.label)).join('')}
+                ${renderReportDataSortHeader(tableKey, 'judgement', '판단', 'text')}
               </tr>
             </thead>
             <tbody>${body || `<tr><td colspan="${colSpan}">표시할 데이터가 없습니다.</td></tr>`}</tbody>
@@ -35730,7 +35911,14 @@ function renderTimeDataMetricTable(rows, metricKey = 'impCnt') {
 function renderAgeDataFullMetricTable(rows, series) {
     const hasSplit = Array.isArray(series) && series.some(item => item.key !== 'total');
     const headers = ['연령대', hasSplit ? '구분' : '합계', ...TIME_DATA_TABLE_METRICS.map(item => item.label)];
-    const body = (rows || []).map(row => {
+    const tableKey = 'age_data_metrics';
+    const sortedRows = sortReportDataRows(
+        rows || [],
+        tableKey,
+        (row, key) => key === 'label' ? row?.label || '' : reportDataNumber((row?.total || {})?.[key]),
+        row => row?.label || ''
+    );
+    const body = sortedRows.map(row => {
         const rowParts = [];
         if(hasSplit) {
             (series || []).forEach(item => {
@@ -35755,7 +35943,11 @@ function renderAgeDataFullMetricTable(rows, series) {
     return `
         <div class="report-data-table-wrap">
           <table class="report-data-table">
-            <thead><tr>${headers.map(header => `<th>${escapeMaybe(header)}</th>`).join('')}</tr></thead>
+            <thead><tr>
+                ${renderReportDataSortHeader(tableKey, 'label', '연령대', 'text')}
+                <th>${escapeMaybe(hasSplit ? '구분' : '합계')}</th>
+                ${TIME_DATA_TABLE_METRICS.map(item => renderReportDataSortHeader(tableKey, item.key, item.label)).join('')}
+            </tr></thead>
             <tbody>${body || `<tr><td colspan="${headers.length}">표시할 데이터가 없습니다.</td></tr>`}</tbody>
           </table>
         </div>
@@ -36004,7 +36196,19 @@ function getDimensionDataJudgement(prefix, row, rows, metricKey) {
 
 function renderDimensionDataMetricTable(prefix, rows, metricKey = 'impCnt') {
     const config = DIMENSION_DATA_CONFIGS[prefix] || DIMENSION_DATA_CONFIGS.area_data;
-    const body = (rows || []).map(row => {
+    const tableKey = `${prefix}_metrics`;
+    const sortedRows = sortReportDataRows(
+        rows || [],
+        tableKey,
+        (row, key) => {
+            if(key === 'label') return row?.label || '';
+            const metrics = getReportDataRowMetricSet(row);
+            if(key === 'judgement') return getDimensionDataJudgement(prefix, row, rows, metricKey).label;
+            return reportDataNumber(metrics?.[key]);
+        },
+        row => row?.label || ''
+    );
+    const body = sortedRows.map(row => {
         const metrics = normalizeReportDataMetricSet(row?.total || row?.metrics || row?.series?.total || {});
         const judgement = getDimensionDataJudgement(prefix, row, rows, metricKey);
         const mutedNameClass = (
@@ -36023,9 +36227,9 @@ function renderDimensionDataMetricTable(prefix, rows, metricKey = 'impCnt') {
           <table class="report-data-table">
             <thead>
               <tr>
-                <th>${escapeMaybe(config.labelHeader)}</th>
-                ${TIME_DATA_TABLE_METRICS.map(item => `<th>${escapeMaybe(item.label)}</th>`).join('')}
-                <th>판단</th>
+                ${renderReportDataSortHeader(tableKey, 'label', config.labelHeader, 'text')}
+                ${TIME_DATA_TABLE_METRICS.map(item => renderReportDataSortHeader(tableKey, item.key, item.label)).join('')}
+                ${renderReportDataSortHeader(tableKey, 'judgement', '판단', 'text')}
               </tr>
             </thead>
             <tbody>${body || `<tr><td colspan="${colSpan}">표시할 데이터가 없습니다.</td></tr>`}</tbody>
