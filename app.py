@@ -9514,10 +9514,14 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
     date_label_override = str((payload or {}).get("date_label") or "").strip()
     if date_label_override:
         base_result["date_label"] = date_label_override
-    cart_summary = _performance_report_cart_summary(
-        base_result.get("summary") or {},
-        "event" if _performance_number(base_result.get("cart_event_match_count")) > 0 else "fallback",
-    )
+    cart_summary = None
+    if include_cart_count or include_cart_amount:
+        cart_summary = _performance_report_cart_summary(
+            base_result.get("summary") or {},
+            "event" if _performance_number(base_result.get("cart_event_match_count")) > 0 else "fallback",
+        )
+        cart_summary["include_count"] = bool(include_cart_count)
+        cart_summary["include_amount"] = bool(include_cart_amount)
     type_rows = (
         _aggregate_performance_report_rows(base_result.get("rows") or [], "type")
         if base_result.get("result_level") != "type"

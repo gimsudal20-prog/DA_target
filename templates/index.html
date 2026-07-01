@@ -18958,10 +18958,17 @@
                         <label><input type="checkbox" id="text_report_include_purchase_conversion_keywords" checked> 구매완료 전환</label>
                       </div>
                     </div>
-                    <div class="text-report-fixed-metrics">장바구니 전환 수, 장바구니 전환 매출액, 총비용(VAT 포함)은 기본 포함됩니다.</div>
+                    <div class="text-report-option-group">
+                      <div class="text-report-option-title">전환 지표</div>
+                      <div class="text-report-keyword-toggles">
+                        <label><input type="checkbox" id="text_report_include_cart_count" checked> 장바구니 전환 수</label>
+                        <label><input type="checkbox" id="text_report_include_cart_amount" checked> 장바구니 전환 매출액</label>
+                      </div>
+                    </div>
+                    <div class="text-report-fixed-metrics">총비용(VAT 포함)은 기본 포함됩니다.</div>
                     <div class="text-report-data-note">
                       <strong>장바구니 데이터 기준</strong>
-                      <span>네이버 전환 이벤트의 장바구니 값을 우선 사용합니다.</span>
+                      <span>선택한 장바구니 지표는 네이버 전환 이벤트 값을 우선 사용합니다.</span>
                       <span>이벤트가 없으면 총 전환에서 구매완료 전환을 뺀 값으로 표시합니다.</span>
                     </div>
                   </div>
@@ -32261,8 +32268,8 @@ function getPerformanceTextReportPayload() {
         include_campaign_breakdown: summaryDepth === 'campaign',
         include_general_conversion_keywords: !!document.getElementById('text_report_include_general_conversion_keywords')?.checked,
         include_purchase_conversion_keywords: !!document.getElementById('text_report_include_purchase_conversion_keywords')?.checked,
-        include_cart_count: true,
-        include_cart_amount: true,
+        include_cart_count: !!document.getElementById('text_report_include_cart_count')?.checked,
+        include_cart_amount: !!document.getElementById('text_report_include_cart_amount')?.checked,
         report_enrichment_timeout_seconds: 12.0,
         timeout_seconds: 12.0,
     };
@@ -32320,10 +32327,11 @@ function renderPerformanceTextReport(data) {
     const statusBits = [];
     if(data?.since) statusBits.push(data.until && data.until !== data.since ? `${data.since}~${data.until}` : data.since);
     if(data?.cart_summary) {
-        const cartCount = data.cart_summary.count_text || `${formatMetricNumber(data.cart_summary.count || 0)}건`;
-        const cartAmount = data.cart_summary.amount_text || formatMetricWon(data.cart_summary.amount || 0);
+        const cartParts = [];
+        if(data.cart_summary.include_count !== false) cartParts.push(data.cart_summary.count_text || `${formatMetricNumber(data.cart_summary.count || 0)}건`);
+        if(data.cart_summary.include_amount !== false) cartParts.push(data.cart_summary.amount_text || formatMetricWon(data.cart_summary.amount || 0));
         const cartSource = data.cart_summary.source_label ? ` · ${data.cart_summary.source_label}` : '';
-        statusBits.push(`장바구니 ${cartCount} / ${cartAmount}${cartSource}`);
+        if(cartParts.length) statusBits.push(`장바구니 ${cartParts.join(' / ')}${cartSource}`);
     }
     if(warnings) statusBits.push(`참고 ${warnings}건`);
     if(errors) statusBits.push(`오류 ${errors}건`);
