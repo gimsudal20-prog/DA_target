@@ -20458,17 +20458,6 @@
                             <div class="copy-entity-step">
                                 <div class="copy-entity-step-no">1</div>
                                 <div>
-                                    <div class="copy-entity-step-title">복사할 원본</div>
-                                    <div class="copy-entity-step-desc">좌측 목록에서 광고그룹을 체크하면 그 그룹의 항목을 복사합니다. 광고그룹 체크가 없으면 현재 열려 있는 광고그룹을 원본으로 사용합니다.</div>
-                                    <div class="copy-entity-check-row">
-                                        <label><input type="checkbox" id="copy_entity_include_checked_campaigns" checked onchange="syncCopyEntityOptionAvailability(); renderCopyEntityTargetChecklist()"> 체크한 캠페인 하위 광고그룹도 원본에 포함</label>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="copy-entity-step">
-                                <div class="copy-entity-step-no">2</div>
-                                <div>
                                     <div class="copy-entity-step-title">붙여넣기 대상</div>
                                     <div class="copy-entity-step-desc">여러 캠페인에 붙여넣으려면 좌측에서 캠페인을 체크하고 첫 번째 옵션을 켜세요.</div>
                                     <div class="copy-entity-target-modes">
@@ -20496,7 +20485,7 @@
                             </div>
 
                             <div class="copy-entity-step">
-                                <div class="copy-entity-step-no">3</div>
+                                <div class="copy-entity-step-no">2</div>
                                 <div>
                                     <div class="copy-entity-step-title">복사할 항목</div>
                                     <div class="copy-entity-step-desc">필요한 항목만 켜고 실행하세요. OFF 원본 제외는 기본으로 켜져 있습니다.</div>
@@ -29958,9 +29947,8 @@ function getCopyEntitySourceContext() {
     const checkedSourceIds = getCheckedAdgroupIdsInViewOrder();
     const sourceIds = new Set(checkedSourceIds.map(String));
     const targetCampaignMode = !!document.getElementById('copy_entity_target_selected_campaigns')?.checked;
-    const includeCheckedCampaigns = !!document.getElementById('copy_entity_include_checked_campaigns')?.checked;
     const checkedSourceCampaignIds = getCheckedCampaignIdsInViewOrder();
-    const sourceCampaignIds = (!targetCampaignMode && (includeCheckedCampaigns || (!checkedSourceIds.length && checkedSourceCampaignIds.length)))
+    const sourceCampaignIds = (!targetCampaignMode && !checkedSourceIds.length && checkedSourceCampaignIds.length)
         ? new Set(checkedSourceCampaignIds.map(String))
         : new Set();
     if(!sourceIds.size && !sourceCampaignIds.size && currentAdgroupId) {
@@ -29997,7 +29985,6 @@ function getCopyEntityTargetCampaignIds() {
 }
 
 function syncCopyEntityOptionAvailability() {
-    const includeSourceCampaigns = document.getElementById('copy_entity_include_checked_campaigns');
     const targetSelectedCampaigns = document.getElementById('copy_entity_target_selected_campaigns');
     const targetCampaignAll = document.getElementById('copy_entity_target_campaign_all');
     const targetFilter = document.querySelector('.copy-entity-target-filter');
@@ -30009,17 +29996,12 @@ function syncCopyEntityOptionAvailability() {
 
     if(targetSelectedOn) {
         selectedCopyEntityTargetAdgroupIds.clear();
-        if(includeSourceCampaigns) includeSourceCampaigns.checked = false;
         if(targetCampaignAll) {
             targetCampaignAll.checked = false;
             targetCampaignAll.indeterminate = false;
         }
     }
 
-    if(includeSourceCampaigns) {
-        includeSourceCampaigns.disabled = targetSelectedOn;
-        includeSourceCampaigns.title = targetSelectedOn ? '좌측 선택 캠페인을 붙여넣기 대상으로 사용 중입니다.' : '';
-    }
     if(targetSelectedCampaigns) {
         targetSelectedCampaigns.disabled = targetCampaignAllOn;
         targetSelectedCampaigns.title = targetCampaignAllOn ? '필터 캠페인 전체 광고그룹 선택이 켜져 있습니다.' : '';
@@ -36733,10 +36715,9 @@ async function execCopyEntities() {
     const c = ensureReady(); if(!c) return;
     syncCopyEntityOptionAvailability();
     let sourceIds = getCheckedAdgroupIdsInViewOrder();
-    const includeCheckedCampaigns = !!document.getElementById('copy_entity_include_checked_campaigns')?.checked;
     const checkedSourceCampaignIds = getCheckedCampaignIdsInViewOrder();
     const targetCampaignMode = !!document.getElementById('copy_entity_target_selected_campaigns')?.checked;
-    const sourceCampaignIds = (!targetCampaignMode && (includeCheckedCampaigns || (!sourceIds.length && checkedSourceCampaignIds.length))) ? checkedSourceCampaignIds : [];
+    const sourceCampaignIds = (!targetCampaignMode && !sourceIds.length && checkedSourceCampaignIds.length) ? checkedSourceCampaignIds : [];
     if(!sourceIds.length && !sourceCampaignIds.length && currentAdgroupId) sourceIds = [String(currentAdgroupId)];
     const targetAdgroupIds = getCopyEntityTargetAdgroupIds();
     const targetCampaignIds = getCopyEntityTargetCampaignIds();
