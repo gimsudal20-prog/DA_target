@@ -32139,6 +32139,8 @@ function getPerformanceTextReportPayload() {
         showToast('좌측에서 광고그룹을 체크해주세요.', 'error');
         return null;
     }
+    const datePreset = document.getElementById('text_report_date_preset')?.value || 'yesterday';
+    const customDate = datePreset === 'custom';
     const payload = {
         ...c,
         account_name: getSelectedAccountNameForReport(),
@@ -32146,9 +32148,9 @@ function getPerformanceTextReportPayload() {
         campaign_ids: campaignIds,
         adgroup_ids: adgroupIds,
         campaign_type: document.getElementById('text_report_type_filter')?.value || 'all',
-        date_preset: document.getElementById('text_report_date_preset')?.value || 'yesterday',
-        since: document.getElementById('text_report_since')?.value || '',
-        until: document.getElementById('text_report_until')?.value || '',
+        date_preset: datePreset,
+        since: customDate ? (document.getElementById('text_report_since')?.value || '') : '',
+        until: customDate ? (document.getElementById('text_report_until')?.value || '') : '',
         exclude_today: true,
         report_format: 'keyword_summary',
         report_metric_mode: document.getElementById('text_report_metric')?.value || 'conversion',
@@ -32158,8 +32160,8 @@ function getPerformanceTextReportPayload() {
         include_purchase_conversion_keywords: !!document.getElementById('text_report_include_purchase_conversion_keywords')?.checked,
         include_cart_count: !!document.getElementById('text_report_include_cart_count')?.checked,
         include_cart_amount: !!document.getElementById('text_report_include_cart_amount')?.checked,
-        report_enrichment_timeout_seconds: 4.5,
-        timeout_seconds: 4.5,
+        report_enrichment_timeout_seconds: 12.0,
+        timeout_seconds: 12.0,
     };
     return payload;
 }

@@ -3197,7 +3197,7 @@ PERFORMANCE_SHOPPING_QUERY_PARSE_VERSION = "shopping-query-parse-v13-ad-summary-
 PERFORMANCE_SHOPPING_QUERY_REPORT_MIN_TIMEOUT_SECONDS = 2.0
 PERFORMANCE_SHOPPING_QUERY_REPORT_MAX_TIMEOUT_SECONDS = 180.0
 PERFORMANCE_SHOPPING_QUERY_FAST_TIMEOUT_SECONDS = 2.4
-PERFORMANCE_TEXT_REPORT_ENRICHMENT_TIMEOUT_SECONDS = 4.5
+PERFORMANCE_TEXT_REPORT_ENRICHMENT_TIMEOUT_SECONDS = 12.0
 PERFORMANCE_SHOPPING_QUERY_BACKGROUND_TIMEOUT_SECONDS = 600.0
 PERFORMANCE_SHOPPING_QUERY_REPORT_WARMING_TTL_SECONDS = PERFORMANCE_SHOPPING_QUERY_BACKGROUND_TIMEOUT_SECONDS + 90.0
 PERFORMANCE_SHOPPING_QUERY_REPORT_WORKERS = 3
@@ -5886,6 +5886,8 @@ def _performance_report_metric_lines(
     metrics: Dict[str, Any] | None,
     *,
     report_uses_purchase: bool,
+    include_cart_count: bool = False,
+    include_cart_amount: bool = False,
     keyword_text: str = "",
     general_conversion_keyword_text: str = "",
     purchase_conversion_keyword_text: str = "",
@@ -5912,6 +5914,16 @@ def _performance_report_metric_lines(
             _performance_report_line("총전환매출", _format_performance_report_won(metrics.get("convAmt"))),
             _performance_report_line("ROAS", _format_performance_report_percent(metrics.get("ror"), 1)),
         ])
+    if include_cart_count:
+        cart_count = _performance_number(metrics.get("cartCcnt"))
+        if cart_count <= 0:
+            cart_count = _performance_non_negative_diff(metrics.get("ccnt"), metrics.get("purchaseCcnt"))
+        lines.append(_performance_report_line("장바구니 전환 수", f"{_format_performance_report_count(cart_count)}건"))
+    if include_cart_amount:
+        cart_amount = _performance_number(metrics.get("cartConvAmt"))
+        if cart_amount <= 0:
+            cart_amount = _performance_non_negative_diff(metrics.get("convAmt"), metrics.get("purchaseConvAmt"))
+        lines.append(_performance_report_line("장바구니 전환 매출액", _format_performance_report_won(cart_amount)))
     if keyword_text:
         lines.append(_performance_report_line("주요 유입 키워드", keyword_text))
     if general_conversion_keyword_text:
@@ -5950,6 +5962,8 @@ def _build_performance_row_report_section(
     rows: List[Dict[str, Any]],
     *,
     report_uses_purchase: bool,
+    include_cart_count: bool = False,
+    include_cart_amount: bool = False,
     keyword_text_by_id: Dict[str, str] | None = None,
     general_conversion_keyword_text_by_id: Dict[str, str] | None = None,
     purchase_conversion_keyword_text_by_id: Dict[str, str] | None = None,
@@ -5973,6 +5987,8 @@ def _build_performance_row_report_section(
         section_lines.extend(_performance_report_metric_lines(
             (row or {}).get("metrics") or {},
             report_uses_purchase=report_uses_purchase,
+            include_cart_count=include_cart_count,
+            include_cart_amount=include_cart_amount,
             keyword_text=keyword_text_by_id.get(row_id, ""),
             general_conversion_keyword_text=general_conversion_keyword_text_by_id.get(row_id, ""),
             purchase_conversion_keyword_text=purchase_conversion_keyword_text_by_id.get(row_id, ""),
@@ -6058,7 +6074,7 @@ def _aggregate_performance_report_rows(rows: List[Dict[str, Any]], group_kind: s
         if group_kind == "campaign":
             group["campaign_name"] = name
         metrics = (row or {}).get("metrics") or {}
-        for metric_key in ("impCnt", "clkCnt", "salesAmt", "ccnt", "convAmt", "purchaseCcnt", "purchaseConvAmt"):
+        for metric_key in ("impCnt", "clkCnt", "salesAmt", "ccnt", "convAmt", "purchaseCcnt", "purchaseConvAmt", "cartCcnt", "cartConvAmt"):
             group["metrics"][metric_key] += _performance_number(metrics.get(metric_key))
     out: List[Dict[str, Any]] = []
     for group in grouped.values():
@@ -9366,6 +9382,8 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
     include_campaign = _boolish((payload or {}).get("include_campaign_breakdown"), False)
     include_general_conversion_keywords = _boolish((payload or {}).get("include_general_conversion_keywords"), False)
     include_purchase_conversion_keywords = _boolish((payload or {}).get("include_purchase_conversion_keywords"), False)
+    include_cart_count = _boolish((payload or {}).get("include_cart_count"), True)
+    include_cart_amount = _boolish((payload or {}).get("include_cart_amount"), True)
     metric_mode = str((payload or {}).get("report_metric_mode") or "").strip().lower()
     report_uses_purchase = metric_mode in {"purchase", "purchase_only", "구매완료", "구매완료 데이터"}
     report_format = str((payload or {}).get("report_format") or "media_summary").strip().lower()
@@ -9377,6 +9395,8 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
     base_payload["skip_bid_snapshots"] = True
     base_payload["skip_ad_counts"] = True
     base_payload["include_daily_metrics"] = False
+    if include_cart_count or include_cart_amount:
+        base_payload["include_cart_event_breakdown"] = True
     requested_enrichment_timeout = _performance_number(
         base_payload.get("report_enrichment_timeout_seconds") or base_payload.get("timeout_seconds")
     )
@@ -9410,13 +9430,14 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
     if fast_enrichment_timeout <= 0:
         fast_enrichment_timeout = PERFORMANCE_SHOPPING_QUERY_FAST_TIMEOUT_SECONDS
     enrichment_deadline = time.monotonic() + max(PERFORMANCE_SHOPPING_QUERY_REPORT_MIN_TIMEOUT_SECONDS, fast_enrichment_timeout)
+    needs_keyword_enrichment = (not media_summary_format) or include_general_conversion_keywords or include_purchase_conversion_keywords
     executor = ThreadPoolExecutor(max_workers=3)
     powerlink_future = None
     shopping_future = None
     try:
         base_future = executor.submit(_get_performance_stats, api_key, secret_key, cid, base_payload)
-        powerlink_future = executor.submit(_collect_performance_powerlink_keywords, api_key, secret_key, cid, base_payload, since, until) if type_filter != "SHOPPING" and not media_summary_format else None
-        shopping_future = executor.submit(_collect_performance_shopping_queries, api_key, secret_key, cid, base_payload, since, until) if type_filter != "WEB_SITE" and not media_summary_format else None
+        powerlink_future = executor.submit(_collect_performance_powerlink_keywords, api_key, secret_key, cid, base_payload, since, until) if type_filter != "SHOPPING" and needs_keyword_enrichment else None
+        shopping_future = executor.submit(_collect_performance_shopping_queries, api_key, secret_key, cid, base_payload, since, until) if type_filter != "WEB_SITE" and needs_keyword_enrichment else None
         base_result = base_future.result()
         if powerlink_future:
             try:
@@ -9452,9 +9473,29 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
     if media_summary_format:
         media_text = _build_performance_media_summary_report(
             type_rows,
-            include_cart_count=_boolish((payload or {}).get("include_cart_count"), True),
-            include_cart_amount=_boolish((payload or {}).get("include_cart_amount"), True),
+            include_cart_count=include_cart_count,
+            include_cart_amount=include_cart_amount,
         )
+        media_extra_lines: List[str] = []
+        if include_general_conversion_keywords:
+            if type_filter != "SHOPPING":
+                media_extra_lines.append(_performance_report_line("주요 일반 전환 키워드", str(keyword_result.get("general_conversion_text") or "없음")))
+            if type_filter != "WEB_SITE":
+                media_extra_lines.append(_performance_report_line("주요 쇼핑검색 일반 전환 검색어", str(shopping_query_result.get("general_conversion_text") or "없음")))
+        if include_purchase_conversion_keywords:
+            if type_filter != "SHOPPING":
+                media_extra_lines.append(_performance_report_line("주요 구매완료 전환 키워드", str(keyword_result.get("purchase_conversion_text") or "없음")))
+            if type_filter != "WEB_SITE":
+                media_extra_lines.append(_performance_report_line("주요 쇼핑검색 구매완료 전환 검색어", str(shopping_query_result.get("purchase_conversion_text") or "없음")))
+        if media_extra_lines:
+            media_keyword_text = "\n".join(["■ 전환 키워드/검색어", *media_extra_lines])
+            media_text = "\n\n\n".join(part for part in (media_text, media_keyword_text) if part)
+        media_warnings = list(base_result.get("warnings") or [])
+        media_errors = list(base_result.get("errors") or [])
+        media_warnings.extend(keyword_result.get("warnings") or [])
+        media_errors.extend(keyword_result.get("errors") or [])
+        media_warnings.extend(shopping_query_result.get("warnings") or [])
+        media_errors.extend(shopping_query_result.get("errors") or [])
         filename = (
             f"SA_SSA_성과보고서_{_safe_performance_report_filename_part(account_name or cid)}_"
             f"{str(base_result.get('since') or '').replace('-', '')}_{str(base_result.get('until') or '').replace('-', '')}.txt"
@@ -9463,8 +9504,8 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
             "message": "SA/SSA 매체별 요약 보고서 생성 완료",
             "report_text": media_text or "표시할 SA/SSA 성과 데이터가 없습니다.",
             "filename": filename,
-            "warnings": list(base_result.get("warnings") or [])[:30],
-            "errors": list(base_result.get("errors") or [])[:30],
+            "warnings": media_warnings[:30],
+            "errors": media_errors[:30],
             "scope": base_result.get("scope"),
             "campaign_type": base_result.get("campaign_type"),
             "since": base_result.get("since"),
@@ -9499,6 +9540,8 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
         *_performance_report_metric_lines(
             base_result.get("summary") or {},
             report_uses_purchase=report_uses_purchase,
+            include_cart_count=include_cart_count,
+            include_cart_amount=include_cart_amount,
             keyword_text=str(main_keyword_text or ("없음" if type_filter != "SHOPPING" else "")),
             general_conversion_keyword_text=str(main_general_conversion_keyword_text or ("없음" if include_general_conversion_keywords and type_filter != "SHOPPING" else "")),
             purchase_conversion_keyword_text=str(main_purchase_conversion_keyword_text or ("없음" if include_purchase_conversion_keywords and type_filter != "SHOPPING" else "")),
@@ -9514,6 +9557,8 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
             f"[ 유형별 성과 요약 | {metric_label} ]",
             type_rows,
             report_uses_purchase=report_uses_purchase,
+            include_cart_count=include_cart_count,
+            include_cart_amount=include_cart_amount,
             keyword_text_by_id=keyword_result.get("type_text_by_id") or {},
             general_conversion_keyword_text_by_id=keyword_result.get("general_conversion_type_text_by_id") or {},
             purchase_conversion_keyword_text_by_id=keyword_result.get("purchase_conversion_type_text_by_id") or {},
@@ -9538,6 +9583,8 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
             f"[ 캠페인별 성과 요약 | {type_label} | {metric_label} ]",
             campaign_result.get("rows") or [],
             report_uses_purchase=report_uses_purchase,
+            include_cart_count=include_cart_count,
+            include_cart_amount=include_cart_amount,
             keyword_text_by_id=keyword_result.get("campaign_text_by_id") or {},
             general_conversion_keyword_text_by_id=keyword_result.get("general_conversion_campaign_text_by_id") or {},
             purchase_conversion_keyword_text_by_id=keyword_result.get("purchase_conversion_campaign_text_by_id") or {},
