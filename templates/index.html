@@ -35285,6 +35285,69 @@ function reportDataMapHeatColor(value, maxValue) {
     return reportDataBlendColor('#2563eb', '#0f172a', (ratio - 0.72) / 0.28);
 }
 
+function reportDataDrawRegionGaugeRow(ctx, options = {}) {
+    const x = Number(options.x || 0);
+    const y = Number(options.y || 0);
+    const w = Number(options.w || 0);
+    const h = Number(options.h || 44);
+    const value = reportDataNumber(options.value);
+    const pct = Math.max(0, Number(options.pct || 0));
+    const fillRatio = Math.max(0, Math.min(1, pct / 100));
+    const color = options.color || '#2563eb';
+    const metricLabel = String(options.metricLabel || '지표');
+    const valueText = formatPerformanceDemographicMetric(value, options.metricKey || 'impCnt');
+    const pctText = `${pct.toLocaleString(undefined, { maximumFractionDigits: 1 })}%`;
+    const title = `${options.rank ? `${options.rank}. ` : ''}${String(options.label || '-')}`;
+    const gaugeText = `${pctText} · ${metricLabel} ${valueText}`;
+    const bg = options.tone === 'top' ? '#eff6ff' : '#f8fafc';
+    const border = options.tone === 'top' ? 'rgba(147, 197, 253, 0.80)' : 'rgba(226, 232, 240, 0.95)';
+    const gaugeX = x + 10;
+    const gaugeY = y + h - 17;
+    const gaugeW = Math.max(40, w - 20);
+    const gaugeH = 13;
+    const fillW = Math.max(value > 0 ? 3 : 0, gaugeW * fillRatio);
+
+    ctx.save();
+    ctx.fillStyle = bg;
+    reportDataRoundedRectPath(ctx, x, y, w, h, 10);
+    ctx.fill();
+    ctx.strokeStyle = border;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#0f172a';
+    ctx.font = '900 11.5px Pretendard, Arial, sans-serif';
+    ctx.fillText(reportDataCanvasTextEllipsis(ctx, title, Math.max(60, w - 112)), x + 10, y + 13);
+    ctx.textAlign = 'right';
+    ctx.font = '900 11.5px Pretendard, Arial, sans-serif';
+    ctx.fillText(valueText, x + w - 10, y + 13);
+
+    ctx.fillStyle = '#e8eef6';
+    reportDataRoundedRectPath(ctx, gaugeX, gaugeY, gaugeW, gaugeH, 999);
+    ctx.fill();
+    if(fillW > 0) {
+        ctx.fillStyle = color;
+        reportDataRoundedRectPath(ctx, gaugeX, gaugeY, Math.min(gaugeW, fillW), gaugeH, 999);
+        ctx.fill();
+    }
+
+    ctx.font = '900 10px Pretendard, Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#334155';
+    ctx.fillText(reportDataCanvasTextEllipsis(ctx, gaugeText, gaugeW - 12), gaugeX + gaugeW / 2, gaugeY + gaugeH / 2 + 0.2);
+    if(fillW > 18) {
+        ctx.save();
+        reportDataRoundedRectPath(ctx, gaugeX, gaugeY, Math.min(gaugeW, fillW), gaugeH, 999);
+        ctx.clip();
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(reportDataCanvasTextEllipsis(ctx, gaugeText, gaugeW - 12), gaugeX + gaugeW / 2, gaugeY + gaugeH / 2 + 0.2);
+        ctx.restore();
+    }
+    ctx.restore();
+}
+
 function ensureReportDataRegionGeojsonLoaded() {
     if(REPORT_DATA_REGION_GEOJSON || REPORT_DATA_REGION_GEOJSON_PROMISE || REPORT_DATA_REGION_GEOJSON_ERROR) return REPORT_DATA_REGION_GEOJSON_PROMISE;
     REPORT_DATA_REGION_GEOJSON_PROMISE = fetch(REPORT_DATA_REGION_GEOJSON_URL, { cache: 'force-cache' })
@@ -35621,48 +35684,38 @@ function drawReportDataRegionMap(ctx, rows, series, metricKey, cssWidth, cssHeig
 
     const listX = sideX + 18;
     const listRight = sideX + sideW - 18;
-    const valueX = listRight - 2;
-    const pctPillW = 64;
-    const pctPillH = 16;
-    const barRight = Math.max(listX + 96, valueX - pctPillW - 18);
+    const rowW = listRight - listX;
     let cursorY = sideY + 64;
     ctx.textBaseline = 'middle';
     topItems.forEach((item, idx) => {
         const pct = allTotal > 0 ? item.value / allTotal * 100 : 0;
-        const pctText = `${pct.toLocaleString(undefined, { maximumFractionDigits: 1 })}%`;
-        const barW = Math.max(4, (barRight - listX) * (item.value / maxValue));
         const rowTop = cursorY;
-        const rowH = 42;
-        const rowMid = rowTop + rowH / 2;
-        ctx.fillStyle = idx === 0 ? '#eff6ff' : '#f8fafc';
-        reportDataRoundedRectPath(ctx, listX - 8, rowTop, listRight - listX + 16, rowH, 10);
-        ctx.fill();
-        ctx.fillStyle = reportDataMapHeatColor(item.value, maxValue);
-        reportDataRoundedRectPath(ctx, listX, rowMid + 10, barW, 5, 999);
-        ctx.fill();
-        ctx.fillStyle = '#0f172a';
-        ctx.font = '850 12px Pretendard, Arial, sans-serif';
-        ctx.textAlign = 'left';
-        ctx.fillText(`${idx + 1}. ${item.label}`, listX, rowMid - 8);
-        ctx.textAlign = 'right';
-        ctx.fillText(formatPerformanceDemographicMetric(item.value, metricKey), valueX, rowMid - 8);
-        ctx.font = '900 11.5px Pretendard, Arial, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillStyle = idx === 0 ? 'rgba(5, 150, 105, 0.13)' : 'rgba(16, 185, 129, 0.12)';
-        reportDataRoundedRectPath(ctx, valueX - pctPillW, rowMid + 3, pctPillW, pctPillH, 999);
-        ctx.fill();
-        ctx.fillStyle = idx === 0 ? '#047857' : '#059669';
-        ctx.fillText(pctText, valueX - pctPillW / 2, rowMid + 11);
-        pushReportDataRectArea(areas, listX - 8, rowTop, listRight - listX + 16, rowH, item.row, { key: 'total', label: '지도', color: reportDataMapHeatColor(item.value, maxValue) }, metricKey, item.value, reportDataMapHeatColor(item.value, maxValue));
-        cursorY += rowH + 7;
+        const rowH = 44;
+        const fill = reportDataMapHeatColor(item.value, maxValue);
+        reportDataDrawRegionGaugeRow(ctx, {
+            x: listX - 8,
+            y: rowTop,
+            w: rowW + 16,
+            h: rowH,
+            rank: idx + 1,
+            label: item.label,
+            value: item.value,
+            pct,
+            metricKey,
+            metricLabel: metric.label,
+            color: fill,
+            tone: idx === 0 ? 'top' : '',
+        });
+        pushReportDataRectArea(areas, listX - 8, rowTop, rowW + 16, rowH, item.row, { key: 'total', label: '지도', color: fill }, metricKey, item.value, fill);
+        cursorY += rowH + 5;
     });
 
-    cursorY += 8;
+    cursorY += 6;
     ctx.fillStyle = '#475569';
     ctx.font = '900 12px Pretendard, Arial, sans-serif';
     ctx.textAlign = 'left';
     ctx.fillText('별도 집계', listX, cursorY);
-    cursorY += 24;
+    cursorY += 20;
     if(!specialGroups.length) {
         ctx.fillStyle = '#94a3b8';
         ctx.font = '750 11px Pretendard, Arial, sans-serif';
@@ -35672,35 +35725,23 @@ function drawReportDataRegionMap(ctx, rows, series, metricKey, cssWidth, cssHeig
         const metrics = combineReportDataMetrics(group.rows.map(row => row?.total || row?.metrics || row?.series?.total || {}));
         const value = reportDataNumber(metrics?.[metricKey]);
         const pct = allTotal > 0 ? value / allTotal * 100 : 0;
-        const pctText = `${pct.toLocaleString(undefined, { maximumFractionDigits: 1 })}%`;
         const fakeRow = { label: group.label, total: metrics, series: { total: metrics } };
         const rowTop = cursorY;
-        const rowH = 36;
-        const rowMid = rowTop + rowH / 2;
-        ctx.fillStyle = '#f8fafc';
-        reportDataRoundedRectPath(ctx, listX - 8, rowTop, listRight - listX + 16, rowH, 10);
-        ctx.fill();
-        ctx.fillStyle = group.color;
-        ctx.beginPath();
-        ctx.arc(listX + 4, rowMid, 4.5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#0f172a';
-        ctx.font = '850 12px Pretendard, Arial, sans-serif';
-        ctx.textAlign = 'left';
-        ctx.fillText(group.label, listX + 15, rowMid);
-        ctx.fillStyle = '#0f172a';
-        ctx.font = '900 12px Pretendard, Arial, sans-serif';
-        ctx.textAlign = 'right';
-        ctx.fillText(formatPerformanceDemographicMetric(value, metricKey), valueX, rowMid - 7);
-        ctx.font = '900 11px Pretendard, Arial, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillStyle = 'rgba(100, 116, 139, 0.11)';
-        reportDataRoundedRectPath(ctx, valueX - pctPillW, rowMid + 3, pctPillW, pctPillH, 999);
-        ctx.fill();
-        ctx.fillStyle = '#334155';
-        ctx.fillText(pctText, valueX - pctPillW / 2, rowMid + 11);
-        pushReportDataRectArea(areas, listX - 8, rowTop, listRight - listX + 16, rowH, fakeRow, { key: 'total', label: '별도 집계', color: group.color }, metricKey, value, group.color);
-        cursorY += rowH + 8;
+        const rowH = 40;
+        reportDataDrawRegionGaugeRow(ctx, {
+            x: listX - 8,
+            y: rowTop,
+            w: rowW + 16,
+            h: rowH,
+            label: group.label,
+            value,
+            pct,
+            metricKey,
+            metricLabel: metric.label,
+            color: group.color,
+        });
+        pushReportDataRectArea(areas, listX - 8, rowTop, rowW + 16, rowH, fakeRow, { key: 'total', label: '별도 집계', color: group.color }, metricKey, value, group.color);
+        cursorY += rowH + 6;
     });
     return areas;
 }
