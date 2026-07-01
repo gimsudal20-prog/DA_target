@@ -35311,17 +35311,15 @@ function reportDataDrawRegionGaugeRow(ctx, options = {}) {
     const pct = Math.max(0, Number(options.pct || 0));
     const fillRatio = Math.max(0, Math.min(1, pct / 100));
     const color = options.color || '#2563eb';
-    const metricLabel = String(options.metricLabel || '지표');
     const valueText = formatPerformanceDemographicMetric(value, options.metricKey || 'impCnt');
     const pctText = `${pct.toLocaleString(undefined, { maximumFractionDigits: 1 })}%`;
     const title = `${options.rank ? `${options.rank}. ` : ''}${String(options.label || '-')}`;
-    const gaugeText = `${pctText} · ${metricLabel} ${valueText}`;
     const bg = options.tone === 'top' ? '#eff6ff' : '#f8fafc';
     const border = options.tone === 'top' ? 'rgba(147, 197, 253, 0.80)' : 'rgba(226, 232, 240, 0.95)';
     const gaugeX = x + 10;
-    const gaugeY = y + h - 17;
+    const gaugeY = y + h - 23;
     const gaugeW = Math.max(40, w - 20);
-    const gaugeH = 13;
+    const gaugeH = 18;
     const fillW = Math.max(value > 0 ? 3 : 0, gaugeW * fillRatio);
 
     ctx.save();
@@ -35350,16 +35348,16 @@ function reportDataDrawRegionGaugeRow(ctx, options = {}) {
         ctx.fill();
     }
 
-    ctx.font = '900 10px Pretendard, Arial, sans-serif';
-    ctx.textAlign = 'center';
+    ctx.font = '900 10.5px Pretendard, Arial, sans-serif';
+    ctx.textAlign = 'left';
     ctx.fillStyle = '#334155';
-    ctx.fillText(reportDataCanvasTextEllipsis(ctx, gaugeText, gaugeW - 12), gaugeX + gaugeW / 2, gaugeY + gaugeH / 2 + 0.2);
+    ctx.fillText(pctText, gaugeX + 10, gaugeY + gaugeH / 2 + 0.2);
     if(fillW > 18) {
         ctx.save();
         reportDataRoundedRectPath(ctx, gaugeX, gaugeY, Math.min(gaugeW, fillW), gaugeH, 999);
         ctx.clip();
         ctx.fillStyle = '#ffffff';
-        ctx.fillText(reportDataCanvasTextEllipsis(ctx, gaugeText, gaugeW - 12), gaugeX + gaugeW / 2, gaugeY + gaugeH / 2 + 0.2);
+        ctx.fillText(pctText, gaugeX + 10, gaugeY + gaugeH / 2 + 0.2);
         ctx.restore();
     }
     ctx.restore();
@@ -35707,7 +35705,7 @@ function drawReportDataRegionMap(ctx, rows, series, metricKey, cssWidth, cssHeig
     topItems.forEach((item, idx) => {
         const pct = allTotal > 0 ? item.value / allTotal * 100 : 0;
         const rowTop = cursorY;
-        const rowH = 44;
+        const rowH = 50;
         const fill = reportDataMapHeatColor(item.value, maxValue);
         reportDataDrawRegionGaugeRow(ctx, {
             x: listX - 8,
@@ -35719,12 +35717,11 @@ function drawReportDataRegionMap(ctx, rows, series, metricKey, cssWidth, cssHeig
             value: item.value,
             pct,
             metricKey,
-            metricLabel: metric.label,
             color: fill,
             tone: idx === 0 ? 'top' : '',
         });
         pushReportDataRectArea(areas, listX - 8, rowTop, rowW + 16, rowH, item.row, { key: 'total', label: '지도', color: fill }, metricKey, item.value, fill);
-        cursorY += rowH + 5;
+        cursorY += rowH + 6;
     });
 
     cursorY += 6;
@@ -35744,7 +35741,7 @@ function drawReportDataRegionMap(ctx, rows, series, metricKey, cssWidth, cssHeig
         const pct = allTotal > 0 ? value / allTotal * 100 : 0;
         const fakeRow = { label: group.label, total: metrics, series: { total: metrics } };
         const rowTop = cursorY;
-        const rowH = 40;
+        const rowH = 46;
         reportDataDrawRegionGaugeRow(ctx, {
             x: listX - 8,
             y: rowTop,
@@ -35754,11 +35751,10 @@ function drawReportDataRegionMap(ctx, rows, series, metricKey, cssWidth, cssHeig
             value,
             pct,
             metricKey,
-            metricLabel: metric.label,
             color: group.color,
         });
         pushReportDataRectArea(areas, listX - 8, rowTop, rowW + 16, rowH, fakeRow, { key: 'total', label: '별도 집계', color: group.color }, metricKey, value, group.color);
-        cursorY += rowH + 6;
+        cursorY += rowH + 7;
     });
     return areas;
 }
