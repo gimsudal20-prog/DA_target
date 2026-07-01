@@ -26,8 +26,11 @@ accounts.csv
 .env.*
 
 # Local caches / generated scratch data
+cache/
 shopping_nvmid_cache.json
 .lazyweb/
+work/
+*.patch
 off_group_partial_copy_fix_patch/
 
 # OS/editor noise

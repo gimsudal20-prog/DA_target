@@ -68,6 +68,10 @@ def _campaign_type_label(value: Any) -> str:
     return "기타"
 
 
+def _campaign_type_sort_order(value: Any) -> int:
+    return {"파워링크": 0, "쇼핑검색": 1}.get(_campaign_type_label(value), 9)
+
+
 def _collect_stat_rows_from_payload(payload: Any) -> List[Dict[str, Any]]:
     if isinstance(payload, dict):
         direct = payload.get("data")
@@ -224,7 +228,11 @@ class PurchaseReportService:
                 "purchaseRor": round(purchase_ror, 2),
             })
 
-        detail_rows.sort(key=lambda row: (row.get("campaign_type") or "", -_number(row.get("purchaseConvAmt")), row.get("campaign_name") or ""))
+        detail_rows.sort(key=lambda row: (
+            _campaign_type_sort_order(row.get("campaign_type_code") or row.get("campaign_type")),
+            -_number(row.get("purchaseConvAmt")),
+            row.get("campaign_name") or "",
+        ))
         total_purchase_count = round(sum(_number(x.get("purchaseCcnt")) for x in summary_rows), 2)
         total_purchase_amount = int(sum(_number(x.get("purchaseConvAmt")) for x in summary_rows))
         return {

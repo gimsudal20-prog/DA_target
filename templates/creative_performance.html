@@ -1,0 +1,1766 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>소재별 성과</title>
+  <link rel="icon" href="/static/favicon/favicon.ico?v={{ favicon_version }}">
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --panel: #ffffff;
+      --panel-soft: #f8fafc;
+      --line: #d8e2ef;
+      --line-soft: #edf2f7;
+      --text: #101828;
+      --muted: #667085;
+      --muted-2: #94a3b8;
+      --blue: #2563eb;
+      --blue-strong: #1d4ed8;
+      --blue-soft: #eff6ff;
+      --green: #059669;
+      --green-soft: #ecfdf5;
+      --amber: #d97706;
+      --amber-soft: #fff7ed;
+      --red: #dc2626;
+      --radius: 14px;
+      --radius-sm: 10px;
+      --shadow: 0 1px 2px rgba(16, 24, 40, .05), 0 14px 40px rgba(15, 23, 42, .06);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 0 0, rgba(37, 99, 235, .07), transparent 330px),
+        linear-gradient(180deg, #f8fbff 0%, var(--bg) 42%, #eef3f9 100%);
+      color: var(--text);
+      font-family: Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 13px;
+      letter-spacing: 0;
+    }
+    button, input, select { font: inherit; letter-spacing: 0; }
+    button {
+      min-height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      color: #1f2937;
+      font-weight: 850;
+      cursor: pointer;
+      transition: transform .12s ease, border-color .12s ease, background .12s ease, box-shadow .12s ease;
+    }
+    button:hover { border-color: #b9c7d9; background: #f8fafc; box-shadow: 0 4px 14px rgba(15, 23, 42, .07); }
+    button:active { transform: translateY(1px); }
+    button.primary { border-color: var(--blue); background: var(--blue); color: #fff; box-shadow: 0 8px 18px rgba(37, 99, 235, .18); }
+    button.primary:hover { background: var(--blue-strong); }
+    button.ghost { background: transparent; border-color: transparent; color: #475569; }
+    button.ghost:hover { background: #eef2f7; border-color: #e2e8f0; }
+    button:disabled { cursor: not-allowed; opacity: .55; transform: none; box-shadow: none; }
+    select, input {
+      width: 100%;
+      height: 40px;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      background: #fff;
+      color: var(--text);
+      padding: 0 12px;
+      font-weight: 760;
+      outline: none;
+      transition: border-color .12s ease, box-shadow .12s ease, background .12s ease;
+    }
+    select:focus, input:focus { border-color: #93c5fd; box-shadow: 0 0 0 4px rgba(37, 99, 235, .10); }
+    .page {
+      max-width: 1560px;
+      margin: 0 auto;
+      padding: 20px 18px 28px;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 76px;
+      margin-bottom: 14px;
+      padding: 18px 20px;
+      border: 1px solid rgba(216, 226, 239, .9);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, .86);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+    .title-block { min-width: 0; }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 6px;
+      color: var(--blue);
+      font-size: 11px;
+      font-weight: 950;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.25;
+      font-weight: 950;
+      color: #0f172a;
+    }
+    .subtitle {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 760;
+    }
+    .top-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .top-actions button { padding: 0 14px; }
+    .controls {
+      position: sticky;
+      top: 10px;
+      z-index: 9;
+      display: grid;
+      grid-template-columns: minmax(160px, 1fr) minmax(150px, .9fr) repeat(2, minmax(138px, .8fr)) minmax(170px, 1fr) minmax(150px, .8fr);
+      gap: 12px;
+      padding: 16px;
+      border: 1px solid rgba(216, 226, 239, .95);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, .92);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+    .field label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 7px;
+      color: #344054;
+      font-size: 11.5px;
+      font-weight: 900;
+    }
+    .field.is-hidden { display: none; }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+    .summary-card, .chart-panel, .table-panel {
+      border: 1px solid rgba(216, 226, 239, .95);
+      border-radius: var(--radius);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+    .summary-card {
+      position: relative;
+      min-height: 96px;
+      padding: 15px;
+      overflow: hidden;
+    }
+    .summary-card::after {
+      content: '';
+      position: absolute;
+      right: -28px;
+      top: -36px;
+      width: 86px;
+      height: 86px;
+      border-radius: 999px;
+      background: rgba(37, 99, 235, .07);
+    }
+    .summary-label {
+      position: relative;
+      color: var(--muted);
+      font-size: 11.5px;
+      font-weight: 900;
+    }
+    .summary-value {
+      position: relative;
+      margin-top: 9px;
+      font-size: 23px;
+      line-height: 1.12;
+      font-weight: 950;
+      color: #0f172a;
+      word-break: keep-all;
+    }
+    .summary-note {
+      position: relative;
+      margin-top: 7px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 760;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .charts {
+      display: grid;
+      grid-template-columns: minmax(0, 1.12fr) minmax(340px, .88fr);
+      gap: 14px;
+      margin-top: 14px;
+    }
+    .chart-panel { min-width: 0; padding: 16px; }
+    .panel-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .panel-title {
+      font-size: 15px;
+      font-weight: 950;
+      color: #0f172a;
+    }
+    .panel-note {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #f1f5f9;
+      color: #475569;
+      font-size: 11px;
+      font-weight: 850;
+      text-align: right;
+      white-space: nowrap;
+    }
+    canvas {
+      width: 100%;
+      height: 300px;
+      display: block;
+      border: 1px solid var(--line-soft);
+      border-radius: 12px;
+      background: #fff;
+    }
+    .table-panel {
+      margin-top: 14px;
+      overflow: hidden;
+    }
+    .table-toolbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      min-height: 64px;
+      padding: 15px 16px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+    }
+    .table-tools {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      gap: 8px;
+      min-width: min(640px, 100%);
+    }
+    .search-input { max-width: 320px; min-width: 230px; }
+    .group-filter-tools {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 6px;
+      width: 100%;
+      margin-top: 6px;
+    }
+    .group-filter-tools button {
+      min-height: 32px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 11.5px;
+      background: #f8fafc;
+    }
+    .group-filter-tools .is-active {
+      border-color: var(--blue);
+      background: var(--blue-soft);
+      color: #1d4ed8;
+      box-shadow: none;
+    }
+    .group-filter-status {
+      margin-left: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+    .message {
+      margin-top: 12px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      color: var(--muted);
+      font-weight: 760;
+      white-space: pre-wrap;
+      box-shadow: 0 1px 2px rgba(16, 24, 40, .03);
+    }
+    .message.error { border-color: #fecaca; background: #fff7f7; color: #991b1b; }
+    .message.warn { border-color: #fed7aa; background: #fff8ed; color: #92400e; }
+    .group-section {
+      margin: 12px;
+      overflow: hidden;
+      border: 1px solid var(--line-soft);
+      border-radius: 13px;
+      background: #fff;
+    }
+    .group-section + .group-section { margin-top: 0; }
+    .group-head {
+      position: relative;
+      display: grid;
+      grid-template-columns: 34px minmax(300px, 1fr) repeat(5, minmax(98px, 128px));
+      gap: 10px;
+      align-items: center;
+      padding: 14px 15px;
+      background: linear-gradient(180deg, #f8fbff 0%, #f5f8fc 100%);
+      cursor: pointer;
+      transition: background .12s ease;
+    }
+    .group-head:hover { background: #eef6ff; }
+    .group-head.is-collapsed { background: #fbfcfe; }
+    .group-select {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+    }
+    .group-select input {
+      width: 16px;
+      height: 16px;
+      min-height: 16px;
+      margin: 0;
+      accent-color: var(--blue);
+      cursor: pointer;
+    }
+    .group-name { min-width: 0; }
+    .group-title-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      font-weight: 950;
+      color: #0f172a;
+    }
+    .group-title-text {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .group-toggle {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: #fff;
+      color: #475569;
+      border: 1px solid #dbe3ef;
+      font-size: 10.5px;
+      font-weight: 900;
+    }
+    .group-sub {
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 760;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .group-best {
+      display: inline-flex;
+      max-width: 100%;
+      margin-top: 8px;
+      padding: 5px 8px;
+      border-radius: 999px;
+      background: var(--green-soft);
+      color: #047857;
+      font-size: 11px;
+      font-weight: 900;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .metric-mini {
+      text-align: right;
+      font-weight: 950;
+      color: #0f172a;
+      font-variant-numeric: tabular-nums;
+    }
+    .metric-mini span {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--muted);
+      font-size: 10.5px;
+      font-weight: 900;
+    }
+    .group-table-wrap { overflow-x: auto; border-top: 1px solid var(--line-soft); }
+    .creative-table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      table-layout: fixed;
+      min-width: 1120px;
+    }
+    .creative-table th,
+    .creative-table td {
+      border-top: 1px solid var(--line-soft);
+      padding: 11px 12px;
+      vertical-align: middle;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .creative-table thead th { border-top: 0; }
+    .creative-table th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: #fff;
+      color: #475569;
+      font-size: 11px;
+      font-weight: 950;
+      white-space: nowrap;
+    }
+    .creative-table th:first-child,
+    .creative-table td:first-child { width: 35%; text-align: left; }
+    .creative-table th:nth-child(2),
+    .creative-table td:nth-child(2) { width: 78px; text-align: left; }
+    .creative-table th:nth-child(3),
+    .creative-table td:nth-child(3) { width: 86px; }
+    .creative-table th:nth-child(4),
+    .creative-table td:nth-child(4) { width: 120px; }
+    .creative-table th:nth-child(5),
+    .creative-table td:nth-child(5) { width: 132px; }
+    .creative-table th:nth-child(6),
+    .creative-table td:nth-child(6) { width: 96px; }
+    .creative-table th:nth-child(7),
+    .creative-table td:nth-child(7) { width: 110px; }
+    .creative-table th:nth-child(8),
+    .creative-table td:nth-child(8) { width: 96px; }
+    .creative-table th:nth-child(9),
+    .creative-table td:nth-child(9) { width: 122px; }
+    .creative-table tbody tr { transition: background .12s ease; }
+    .creative-table tbody tr:hover td { background: #f8fbff; }
+    .creative-table tr.best-row td { background: #f3fff8; }
+    .creative-table tr.best-row td:first-child { box-shadow: inset 4px 0 0 var(--green); }
+    .creative-main {
+      min-width: 0;
+      font-weight: 950;
+      color: #0f172a;
+      line-height: 1.38;
+      overflow-wrap: anywhere;
+    }
+    .creative-desc {
+      margin-top: 5px;
+      color: #344054;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+    .creative-meta {
+      margin-top: 7px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+    .creative-url-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .url-chip {
+      display: inline-grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: center;
+      max-width: min(100%, 380px);
+      min-height: 26px;
+      border: 1px solid #dbe3ef;
+      border-radius: 999px;
+      background: #fff;
+      color: #475569;
+      overflow: hidden;
+    }
+    .url-chip span {
+      align-self: stretch;
+      display: inline-flex;
+      align-items: center;
+      padding: 0 8px;
+      background: #f1f5f9;
+      color: #334155;
+      font-size: 10.5px;
+      font-weight: 950;
+    }
+    .url-chip code {
+      min-width: 0;
+      padding: 0 9px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: #2563eb;
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      max-width: 100%;
+      min-width: 46px;
+      min-height: 24px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid #cbd5e1;
+      background: #fff;
+      color: #475569;
+      font-size: 11px;
+      font-weight: 950;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .badge.ok { border-color: #bbf7d0; background: #f0fdf4; color: #047857; }
+    .badge.off { border-color: #fed7aa; background: var(--amber-soft); color: #b45309; }
+    .rank {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 27px;
+      height: 27px;
+      margin-right: 8px;
+      border-radius: 9px;
+      background: #eef2ff;
+      color: #3730a3;
+      font-size: 12px;
+      font-weight: 950;
+      vertical-align: middle;
+    }
+    .value-bar {
+      display: grid;
+      grid-template-columns: minmax(48px, auto) minmax(44px, 1fr);
+      gap: 8px;
+      align-items: center;
+      min-width: 0;
+    }
+    .value-bar span { white-space: nowrap; }
+    .value-bar-track {
+      height: 8px;
+      border-radius: 999px;
+      background: #e5e7eb;
+      overflow: hidden;
+    }
+    .value-bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: var(--blue);
+    }
+    .empty {
+      padding: 48px 18px;
+      color: var(--muted);
+      text-align: center;
+      font-weight: 850;
+    }
+    .loading {
+      position: fixed;
+      inset: 0;
+      display: none;
+      place-items: center;
+      z-index: 20;
+      background: rgba(248, 250, 252, .72);
+      backdrop-filter: blur(3px);
+    }
+    .loading.active { display: grid; }
+    .loading-box {
+      min-width: 250px;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+      box-shadow: 0 16px 44px rgba(15, 23, 42, .16);
+      text-align: center;
+      font-weight: 950;
+    }
+    .export-capture-root {
+      width: 1560px !important;
+      max-width: 1560px !important;
+      margin: 0 !important;
+      background: #f4f7fb !important;
+    }
+    .export-capture-root .topbar { position: static !important; }
+    .export-capture-root .table-panel { margin-top: 0 !important; }
+    .export-capture-root .group-head {
+      cursor: default !important;
+      grid-template-columns: minmax(360px, 1fr) repeat(5, minmax(98px, 128px)) !important;
+    }
+    .export-capture-root .group-head.is-collapsed + .group-table-wrap { display: none !important; }
+    .export-capture-root .group-toggle,
+    .export-capture-root .group-select,
+    .export-capture-root .top-actions,
+    .export-capture-root .table-tools { display: none !important; }
+    .export-capture-root .table-panel,
+    .export-capture-root .group-section,
+    .export-capture-root .group-table-wrap { overflow: visible !important; }
+    .export-capture-root .creative-table th { position: static !important; }
+    .export-capture-root * {
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    @media (max-width: 1280px) {
+      .controls { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .charts { grid-template-columns: 1fr; }
+      .group-head { grid-template-columns: 34px minmax(220px, 1fr) repeat(3, minmax(88px, 1fr)); }
+      .group-head .metric-mini:nth-last-child(-n+2) { display: none; }
+    }
+    @media (max-width: 760px) {
+      .page { padding: 12px; }
+      .topbar, .table-toolbar { align-items: stretch; flex-direction: column; }
+      .top-actions, .table-tools { width: 100%; justify-content: stretch; }
+      .top-actions button, .table-tools button { flex: 1 1 0; }
+      .controls { position: static; grid-template-columns: 1fr; }
+      .summary-grid { grid-template-columns: 1fr; }
+      .group-head { grid-template-columns: 1fr 1fr; }
+      .group-head .group-select,
+      .group-head .group-name { grid-column: 1 / -1; }
+      .metric-mini { text-align: left; }
+      .search-input { max-width: none; min-width: 0; }
+      .group-filter-tools { justify-content: flex-start; }
+      .url-chip { max-width: 100%; }
+      .creative-table { min-width: 1080px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="loading" id="loading"><div class="loading-box" id="loading_text">조회 중...</div></div>
+  <div class="page">
+    <header class="topbar">
+      <div class="title-block">
+        <div class="eyebrow">Creative Performance</div>
+        <h1>소재별 성과</h1>
+        <div class="subtitle" id="context_label">계정 정보를 확인하는 중입니다.</div>
+      </div>
+      <div class="top-actions">
+        <button type="button" class="ghost" onclick="location.href='/'">메인으로</button>
+        <button type="button" onclick="downloadCreativePerformanceImage()">이미지 저장</button>
+        <button type="button" class="primary" id="refresh_btn" onclick="fetchCreativePerformance()">성과 조회</button>
+      </div>
+    </header>
+
+    <section class="controls" aria-label="조회 조건">
+      <div class="field">
+        <label for="campaign_type">광고 유형</label>
+        <select id="campaign_type">
+          <option value="all">전체</option>
+          <option value="WEB_SITE">파워링크</option>
+          <option value="SHOPPING">쇼핑검색</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="date_preset">기간</label>
+        <select id="date_preset" onchange="syncDateFields()">
+          <option value="today">오늘</option>
+          <option value="yesterday">어제</option>
+          <option value="last7days">최근 7일</option>
+          <option value="custom">직접 기간</option>
+        </select>
+      </div>
+      <div class="field custom-date-field">
+        <label for="since">시작일</label>
+        <input type="date" id="since">
+      </div>
+      <div class="field custom-date-field">
+        <label for="until">종료일</label>
+        <input type="date" id="until">
+      </div>
+      <div class="field">
+        <label for="metric_mode">전환 기준</label>
+        <select id="metric_mode" onchange="renderAll()">
+          <option value="purchase">구매완료수</option>
+          <option value="conversion">전체 전환수</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="sort_mode">정렬</label>
+        <select id="sort_mode" onchange="renderAll()">
+          <option value="metric">전환 기준순</option>
+          <option value="ctr">클릭률순</option>
+          <option value="click">클릭수순</option>
+          <option value="cost">총비용순</option>
+        </select>
+      </div>
+    </section>
+
+    <div id="message_area"></div>
+
+    <section class="summary-grid" id="summary_grid"></section>
+
+    <section class="charts">
+      <div class="chart-panel">
+        <div class="panel-head">
+          <div class="panel-title">TOP 소재 랭킹</div>
+          <div class="panel-note" id="creative_chart_note">-</div>
+        </div>
+        <canvas id="creative_chart" height="300"></canvas>
+      </div>
+      <div class="chart-panel">
+        <div class="panel-head">
+          <div class="panel-title">광고그룹별 1위 소재</div>
+          <div class="panel-note" id="group_chart_note">-</div>
+        </div>
+        <canvas id="group_chart" height="300"></canvas>
+      </div>
+    </section>
+
+    <section class="table-panel">
+      <div class="table-toolbar">
+        <div>
+          <div class="panel-title">광고그룹별 소재 비교</div>
+          <div class="subtitle" id="table_note">그룹을 펼쳐 소재별 지표를 확인하세요.</div>
+        </div>
+        <div class="table-tools">
+          <input class="search-input" id="search_text" type="search" placeholder="소재명, 캠페인, 그룹 검색" oninput="renderAll()">
+          <button type="button" onclick="expandAllGroups(true)">전체 펼침</button>
+          <button type="button" onclick="expandAllGroups(false)">접기</button>
+          <div class="group-filter-tools">
+            <button type="button" onclick="selectAllVisibleGroups(true)">그룹 전체선택</button>
+            <button type="button" onclick="selectAllVisibleGroups(false)">선택 해제</button>
+            <button type="button" id="selected_only_btn" onclick="toggleSelectedGroupsOnly()">선택만 보기</button>
+            <button type="button" onclick="excludeSelectedGroups()">선택 제외</button>
+            <button type="button" onclick="resetGroupFilters()">제외 초기화</button>
+            <span class="group-filter-status" id="group_filter_status">선택 0개 · 제외 0개</span>
+          </div>
+        </div>
+      </div>
+      <div id="group_list"><div class="empty">아직 조회한 데이터가 없습니다.</div></div>
+    </section>
+  </div>
+
+  <script src="/static/vendor/html2canvas.min.js?v=1.4.1"></script>
+  <script>
+    const CONTEXT_KEY = 'naver_creative_performance_context_v1';
+    const API_KEY_STORAGE_KEY = 'naver_api_key';
+    const SECRET_KEY_STORAGE_KEY = 'naver_secret_key';
+    const CUSTOMER_ID_STORAGE_KEY = 'naver_customer_id';
+    let basePayload = null;
+    let lastData = null;
+    let collapsedGroups = new Set();
+    let selectedGroupIds = new Set();
+    let excludedGroupIds = new Set();
+    let showSelectedGroupsOnly = false;
+    const AUTO_HIDE_EMPTY_GROUPS = true;
+
+    function storageGet(storage, key) {
+      try { return storage.getItem(key); } catch (e) { return null; }
+    }
+    function storageSet(storage, key, value) {
+      try { storage.setItem(key, value); } catch (e) {}
+    }
+    function storageRemove(storage, key) {
+      try { storage.removeItem(key); } catch (e) {}
+    }
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    }
+    function escapeAttr(value) {
+      return escapeHtml(value).replace(/`/g, '&#96;');
+    }
+    function toMetricNumber(value) {
+      if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+      if (value === null || value === undefined) return 0;
+      const cleaned = String(value).replace(/,/g, '').replace(/원|%/g, '').trim();
+      if (!cleaned) return 0;
+      const n = Number(cleaned);
+      return Number.isFinite(n) ? n : 0;
+    }
+    function formatNumber(value, digits = 0) {
+      const n = toMetricNumber(value);
+      if (!Number.isFinite(n)) return '0';
+      return n.toLocaleString('ko-KR', { maximumFractionDigits: digits, minimumFractionDigits: 0 });
+    }
+    function formatCount(value) {
+      const n = Number(value || 0);
+      return Math.abs(n % 1) > 0.0001 ? formatNumber(n, 2) : formatNumber(n, 0);
+    }
+    function formatWon(value) {
+      return `${formatNumber(Math.round(Number(value || 0)))}원`;
+    }
+    function formatPercent(value) {
+      return `${formatNumber(Number(value || 0), 2)} %`;
+    }
+    function metricKey() {
+      return document.getElementById('metric_mode')?.value === 'conversion' ? 'ccnt' : 'purchaseCcnt';
+    }
+    function metricLabel() {
+      return document.getElementById('metric_mode')?.value === 'conversion' ? '전체 전환수' : '구매완료수';
+    }
+    function metricValue(row) {
+      return toMetricNumber(row?.metrics?.[metricKey()]);
+    }
+    function revenueKey() {
+      return document.getElementById('metric_mode')?.value === 'conversion' ? 'convAmt' : 'purchaseConvAmt';
+    }
+    function revenueLabel() {
+      return document.getElementById('metric_mode')?.value === 'conversion' ? '총전환매출' : '구매완료 매출';
+    }
+    function revenueValue(row) {
+      return toMetricNumber(row?.metrics?.[revenueKey()]);
+    }
+    function roasKey() {
+      return document.getElementById('metric_mode')?.value === 'conversion' ? 'ror' : 'purchaseRor';
+    }
+    function roasLabel() {
+      return document.getElementById('metric_mode')?.value === 'conversion' ? 'ROAS' : '구매 ROAS';
+    }
+    function roasValue(row) {
+      const m = row?.metrics || {};
+      const direct = toMetricNumber(m[roasKey()]);
+      if (Number.isFinite(direct) && direct > 0) return direct;
+      const cost = toMetricNumber(m.salesAmt);
+      return cost > 0 ? revenueValue(row) / cost * 100 : 0;
+    }
+    function setLoading(active, text = '조회 중...') {
+      document.getElementById('loading')?.classList.toggle('active', !!active);
+      const label = document.getElementById('loading_text');
+      if (label) label.textContent = text;
+    }
+    function showMessage(text, tone = '') {
+      const area = document.getElementById('message_area');
+      if (!area) return;
+      area.innerHTML = text ? `<div class="message ${tone}">${escapeHtml(text)}</div>` : '';
+    }
+    async function postJson(url, payload) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload || {})
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) throw new Error(data.details || data.error || `HTTP ${res.status}`);
+      return data;
+    }
+    function readInitialContext() {
+      const sessionRaw = storageGet(sessionStorage, CONTEXT_KEY);
+      const localRaw = storageGet(localStorage, CONTEXT_KEY);
+      let parsed = null;
+      for (const raw of [sessionRaw, localRaw]) {
+        if (!raw) continue;
+        try {
+          parsed = JSON.parse(raw);
+          break;
+        } catch (e) {}
+      }
+      if (localRaw) storageRemove(localStorage, CONTEXT_KEY);
+      if (parsed?.payload) parsed = parsed.payload;
+      if (!parsed) {
+        parsed = {
+          api_key: storageGet(sessionStorage, API_KEY_STORAGE_KEY) || storageGet(localStorage, API_KEY_STORAGE_KEY) || '',
+          secret_key: storageGet(sessionStorage, SECRET_KEY_STORAGE_KEY) || storageGet(localStorage, SECRET_KEY_STORAGE_KEY) || '',
+          customer_id: storageGet(sessionStorage, CUSTOMER_ID_STORAGE_KEY) || storageGet(localStorage, CUSTOMER_ID_STORAGE_KEY) || '',
+          target_scope: 'account',
+          campaign_ids: [],
+          adgroup_ids: [],
+          campaign_type: 'all',
+          date_preset: 'today',
+          since: '',
+          until: '',
+          metric_mode: 'purchase'
+        };
+      }
+      basePayload = parsed;
+      storageSet(sessionStorage, CONTEXT_KEY, JSON.stringify({ payload: basePayload, ts: Date.now() }));
+    }
+    function applyContextToControls() {
+      const payload = basePayload || {};
+      const typeEl = document.getElementById('campaign_type');
+      const presetEl = document.getElementById('date_preset');
+      const sinceEl = document.getElementById('since');
+      const untilEl = document.getElementById('until');
+      const metricEl = document.getElementById('metric_mode');
+      if (typeEl) typeEl.value = payload.campaign_type || 'all';
+      if (presetEl) presetEl.value = payload.date_preset || 'today';
+      if (sinceEl) sinceEl.value = payload.since || '';
+      if (untilEl) untilEl.value = payload.until || '';
+      if (metricEl) metricEl.value = payload.metric_mode || 'purchase';
+      syncDateFields();
+      updateContextLabel();
+    }
+    function syncDateFields() {
+      const custom = document.getElementById('date_preset')?.value === 'custom';
+      document.querySelectorAll('.custom-date-field input').forEach(el => { el.disabled = !custom; });
+    }
+    function scopeLabel(scope) {
+      if (scope === 'selected_campaigns') return `선택 캠페인 ${(basePayload?.campaign_ids || []).length.toLocaleString()}개`;
+      if (scope === 'selected_adgroups') return `선택 광고그룹 ${(basePayload?.adgroup_ids || []).length.toLocaleString()}개`;
+      return '계정 전체';
+    }
+    function updateContextLabel() {
+      const label = document.getElementById('context_label');
+      const account = basePayload?.account_name || basePayload?.customer_id || '광고주 미선택';
+      const scope = scopeLabel(basePayload?.target_scope || 'account');
+      if (label) label.textContent = `${account} · ${scope}`;
+    }
+    function buildPayload() {
+      const payload = { ...(basePayload || {}) };
+      payload.campaign_type = document.getElementById('campaign_type')?.value || 'all';
+      payload.date_preset = document.getElementById('date_preset')?.value || 'today';
+      payload.since = document.getElementById('since')?.value || '';
+      payload.until = document.getElementById('until')?.value || '';
+      payload.metric_mode = document.getElementById('metric_mode')?.value || 'purchase';
+      return payload;
+    }
+    function renderSummary(data) {
+      const rows = getFilteredRows();
+      const groups = getFilteredGroups();
+      const hiddenGroupCount = getAutoHiddenGroupCount();
+      const summary = aggregateRows(rows);
+      const totalMetric = rows.reduce((sum, row) => sum + metricValue(row), 0);
+      const totalRevenue = rows.reduce((sum, row) => sum + revenueValue(row), 0);
+      const totalRoas = Number(summary?.[roasKey()] || 0);
+      const activeRows = rows.filter(rowHasMeaningfulPerformance);
+      const best = [...rows].sort(compareRows)[0] || null;
+      const grid = document.getElementById('summary_grid');
+      if (!grid) return;
+      const cards = [
+        ['소재 수', formatNumber(rows.length), `성과 발생 ${formatNumber(activeRows.length)}개`],
+        ['광고그룹 수', formatNumber(groups.length), hiddenGroupCount ? `노출·클릭·비용·전환·매출 없는 그룹 ${formatNumber(hiddenGroupCount)}개 자동 숨김` : scopeLabel(data?.scope || basePayload?.target_scope || 'account')],
+        [metricLabel(), formatCount(totalMetric), data?.date_label || '-'],
+        [revenueLabel(), formatWon(totalRevenue), best ? `최고 소재 ${formatWon(revenueValue(best))}` : '-'],
+        [roasLabel(), formatPercent(totalRoas), `평균 CTR ${formatPercent(summary.ctr)}`],
+        ['총비용', formatWon(summary.salesAmt), `클릭 ${formatNumber(summary.clkCnt || 0)}회`],
+      ];
+      grid.innerHTML = cards.map(([label, value, note]) => `
+        <div class="summary-card">
+          <div class="summary-label">${escapeHtml(label)}</div>
+          <div class="summary-value">${escapeHtml(value)}</div>
+          <div class="summary-note">${escapeHtml(note)}</div>
+        </div>
+      `).join('');
+    }
+    function compareRows(a, b) {
+      const sort = document.getElementById('sort_mode')?.value || 'metric';
+      const keyValue = row => {
+        if (sort === 'ctr') return toMetricNumber(row?.metrics?.ctr);
+        if (sort === 'click') return toMetricNumber(row?.metrics?.clkCnt);
+        if (sort === 'cost') return toMetricNumber(row?.metrics?.salesAmt);
+        return metricValue(row);
+      };
+      const diff = keyValue(b) - keyValue(a);
+      if (Math.abs(diff) > 0.0001) return diff;
+      const clickDiff = toMetricNumber(b?.metrics?.clkCnt) - toMetricNumber(a?.metrics?.clkCnt);
+      if (clickDiff) return clickDiff;
+      return String(a?.headline || a?.productName || a?.ad_id || '').localeCompare(String(b?.headline || b?.productName || b?.ad_id || ''), 'ko');
+    }
+    function getSearchMatchedRows() {
+      const rows = Array.isArray(lastData?.rows) ? lastData.rows : [];
+      const q = String(document.getElementById('search_text')?.value || '').trim().toLowerCase();
+      if (!q) return rows;
+      return rows.filter(row => [
+        row.campaign_name, row.adgroup_name, row.headline, row.description,
+        row.productName, row.summary, row.ad_id, row.status
+      ].some(value => String(value || '').toLowerCase().includes(q)));
+    }
+    function rowHasMeaningfulPerformance(row) {
+      const m = row?.metrics || {};
+      // 노출이 1이라도 있으면 성과가 있는 광고그룹으로 표시합니다.
+      // 클릭/비용/전환/매출이 모두 0이어도 노출수가 있으면 숨기지 않습니다.
+      return ['impCnt', 'clkCnt', 'salesAmt', 'ccnt', 'purchaseCcnt', 'convAmt', 'purchaseConvAmt']
+        .some(key => toMetricNumber(m[key]) > 0);
+    }
+    function groupHasMeaningfulPerformance(group) {
+      if (!group || !Array.isArray(group.rows) || !group.rows.length) return false;
+      return group.rows.some(rowHasMeaningfulPerformance);
+    }
+    function getSearchMatchedGroups() {
+      return groupRows(getSearchMatchedRows());
+    }
+    function getManuallyFilteredGroups() {
+      return getSearchMatchedGroups().filter(group => {
+        const groupId = String(group.adgroup_id || '');
+        if (excludedGroupIds.has(groupId)) return false;
+        if (showSelectedGroupsOnly && !selectedGroupIds.has(groupId)) return false;
+        return true;
+      });
+    }
+    function getAutoHiddenGroupCount() {
+      if (!AUTO_HIDE_EMPTY_GROUPS) return 0;
+      return getManuallyFilteredGroups().filter(group => !groupHasMeaningfulPerformance(group)).length;
+    }
+    function getFilteredGroups() {
+      return getManuallyFilteredGroups().filter(group => {
+        if (AUTO_HIDE_EMPTY_GROUPS && !groupHasMeaningfulPerformance(group)) return false;
+        return true;
+      });
+    }
+    function getVisibleSelectableGroups() {
+      return getFilteredGroups().filter(group => !excludedGroupIds.has(String(group.adgroup_id || '')));
+    }
+    function getFilteredRows() {
+      return getFilteredGroups().flatMap(group => group.rows);
+    }
+    function updateGroupFilterStatus() {
+      const status = document.getElementById('group_filter_status');
+      const selectedCount = selectedGroupIds.size;
+      const excludedCount = excludedGroupIds.size;
+      if (status) status.textContent = `선택 ${formatNumber(selectedCount)}개 · 제외 ${formatNumber(excludedCount)}개`;
+      const btn = document.getElementById('selected_only_btn');
+      if (btn) {
+        btn.classList.toggle('is-active', showSelectedGroupsOnly);
+        btn.textContent = showSelectedGroupsOnly ? '선택만 보는 중' : '선택만 보기';
+      }
+    }
+    function toggleGroupSelection(groupId, event) {
+      if (event) event.stopPropagation();
+      const id = String(groupId || '');
+      if (!id) return;
+      const checked = !!event?.target?.checked;
+      if (checked) selectedGroupIds.add(id);
+      else selectedGroupIds.delete(id);
+      if (!selectedGroupIds.size) showSelectedGroupsOnly = false;
+      renderAll();
+    }
+    function selectAllVisibleGroups(checked) {
+      getVisibleSelectableGroups().forEach(group => {
+        const id = String(group.adgroup_id || '');
+        if (!id) return;
+        if (checked) selectedGroupIds.add(id);
+        else selectedGroupIds.delete(id);
+      });
+      if (!selectedGroupIds.size) showSelectedGroupsOnly = false;
+      renderAll();
+    }
+    function toggleSelectedGroupsOnly() {
+      if (!selectedGroupIds.size) {
+        showMessage('먼저 보고 싶은 광고그룹을 체크해주세요.', 'warn');
+        return;
+      }
+      showSelectedGroupsOnly = !showSelectedGroupsOnly;
+      renderAll();
+    }
+    function excludeSelectedGroups() {
+      if (!selectedGroupIds.size) {
+        showMessage('제외할 광고그룹을 먼저 체크해주세요.', 'warn');
+        return;
+      }
+      selectedGroupIds.forEach(id => excludedGroupIds.add(id));
+      selectedGroupIds.clear();
+      showSelectedGroupsOnly = false;
+      renderAll();
+    }
+    function resetGroupFilters() {
+      selectedGroupIds.clear();
+      excludedGroupIds.clear();
+      showSelectedGroupsOnly = false;
+      renderAll();
+    }
+    function groupRows(rows) {
+      const map = new Map();
+      rows.forEach(row => {
+        const id = String(row.adgroup_id || '');
+        if (!map.has(id)) {
+          map.set(id, {
+            adgroup_id: id,
+            adgroup_name: row.adgroup_name || id,
+            campaign_name: row.campaign_name || '',
+            campaign_type_label: row.campaign_type_label || '',
+            rows: []
+          });
+        }
+        map.get(id).rows.push(row);
+      });
+      return [...map.values()].sort((a, b) => {
+        const c = String(a.campaign_name).localeCompare(String(b.campaign_name), 'ko', { numeric: true });
+        return c || String(a.adgroup_name).localeCompare(String(b.adgroup_name), 'ko', { numeric: true });
+      });
+    }
+    function aggregateRows(rows) {
+      const out = { impCnt: 0, clkCnt: 0, salesAmt: 0, ccnt: 0, purchaseCcnt: 0, convAmt: 0, purchaseConvAmt: 0 };
+      rows.forEach(row => {
+        const m = row.metrics || {};
+        Object.keys(out).forEach(key => { out[key] += toMetricNumber(m[key]); });
+      });
+      out.ctr = out.impCnt > 0 ? out.clkCnt / out.impCnt * 100 : 0;
+      out.cpc = out.clkCnt > 0 ? out.salesAmt / out.clkCnt : 0;
+      out.ror = out.salesAmt > 0 ? out.convAmt / out.salesAmt * 100 : 0;
+      out.purchaseRor = out.salesAmt > 0 ? out.purchaseConvAmt / out.salesAmt * 100 : 0;
+      return out;
+    }
+    function normalizeStatusLabel(status) {
+      const text = String(status || '').trim();
+      const upper = text.toUpperCase();
+      if (!text) return '-';
+      if (upper === 'OFF' || upper.includes('OFF') || upper.includes('PAUSE') || upper.includes('DISABLE') || upper.includes('DELETE') || upper.includes('LOCK') || text.includes('중지') || text.includes('삭제') || text.includes('잠금')) return 'OFF';
+      if (upper === 'ON' || upper.includes('ELIGIBLE') || upper.includes('ACTIVE') || upper.includes('RUNNING') || upper.includes('NORMAL') || text.includes('운영')) return 'ON';
+      return 'ON';
+    }
+    function statusClass(status) {
+      return normalizeStatusLabel(status) === 'OFF' ? 'off' : 'ok';
+    }
+    function creativeTitle(row) {
+      return row.headline || row.productName || row.summary || row.ad_id || '-';
+    }
+    function renderUrlChips(row) {
+      const chips = [
+        ['PC', row?.pcFinalUrl],
+        ['MO', row?.mobileFinalUrl],
+      ].filter(([, url]) => String(url || '').trim());
+      if (!chips.length) return '';
+      return `<div class="creative-url-row">${chips.map(([label, url]) => `
+        <span class="url-chip" title="${escapeAttr(url)}"><span>${escapeHtml(label)}</span><code>${escapeHtml(url)}</code></span>
+      `).join('')}</div>`;
+    }
+    function renderMetricBar(value, max, formatter = formatCount) {
+      const pct = max > 0 ? Math.max(0, Math.min(100, value / max * 100)) : 0;
+      return `<div class="value-bar"><span>${escapeHtml(formatter(value))}</span><div class="value-bar-track"><div class="value-bar-fill" style="width:${pct}%"></div></div></div>`;
+    }
+    function renderTable(data) {
+      const wrap = document.getElementById('group_list');
+      const groups = getFilteredGroups();
+      const rows = groups.flatMap(group => group.rows);
+      const hiddenGroupCount = getAutoHiddenGroupCount();
+      const note = document.getElementById('table_note');
+      if (note) note.textContent = `${formatNumber(groups.length)}개 그룹 · ${formatNumber(rows.length)}개 소재 · ${metricLabel()} 기준 정렬${hiddenGroupCount ? ` · 노출·클릭·비용·전환·매출 없는 그룹 ${formatNumber(hiddenGroupCount)}개 자동 숨김` : ''}`;
+      if (!wrap) return;
+      if (!groups.length) {
+        wrap.innerHTML = hiddenGroupCount
+          ? `<div class="empty">성과가 발생한 광고그룹이 없습니다. 노출·클릭·비용·전환·매출이 모두 0인 그룹 ${escapeHtml(formatNumber(hiddenGroupCount))}개는 자동 제외되었습니다.</div>`
+          : '<div class="empty">표시할 성과 그룹이 없습니다. 검색어·제외 설정 또는 조회 기간을 확인해주세요.</div>';
+        return;
+      }
+      wrap.innerHTML = groups.map(group => {
+        const sorted = [...group.rows].sort(compareRows);
+        const best = sorted[0] || {};
+        const metrics = aggregateRows(sorted);
+        const maxMetric = Math.max(...sorted.map(metricValue), 0);
+        const collapsed = collapsedGroups.has(group.adgroup_id);
+        const body = collapsed ? '' : `
+          <div class="group-table-wrap">
+            <table class="creative-table">
+              <thead>
+                <tr>
+                  <th>소재</th>
+                  <th>상태</th>
+                  <th>클릭률</th>
+                  <th>${escapeHtml(metricLabel())}</th>
+                  <th>${escapeHtml(revenueLabel())}</th>
+                  <th>${escapeHtml(roasLabel())}</th>
+                  <th>노출수</th>
+                  <th>클릭수</th>
+                  <th>총비용</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${sorted.map((row, index) => {
+                  const m = row.metrics || {};
+                  return `
+                    <tr class="${index === 0 ? 'best-row' : ''}">
+                      <td>
+                        <div class="creative-main"><span class="rank">${index + 1}</span>${escapeHtml(creativeTitle(row))}</div>
+                        ${row.description ? `<div class="creative-desc">${escapeHtml(row.description)}</div>` : ''}
+                        <div class="creative-meta">${escapeHtml([row.ad_type_label, row.ad_id].filter(Boolean).join(' · '))}</div>
+                        ${renderUrlChips(row)}
+                      </td>
+                      <td><span class="badge ${statusClass(row.status)}">${escapeHtml(normalizeStatusLabel(row.status))}</span></td>
+                      <td>${escapeHtml(formatPercent(m.ctr))}</td>
+                      <td>${renderMetricBar(metricValue(row), maxMetric)}</td>
+                      <td>${escapeHtml(formatWon(revenueValue(row)))}</td>
+                      <td>${escapeHtml(formatPercent(roasValue(row)))}</td>
+                      <td>${escapeHtml(formatNumber(m.impCnt || 0))}</td>
+                      <td>${escapeHtml(formatNumber(m.clkCnt || 0))}</td>
+                      <td>${escapeHtml(formatWon(m.salesAmt || 0))}</td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+        return `
+          <section class="group-section">
+            <div class="group-head ${collapsed ? 'is-collapsed' : ''}" onclick="toggleGroup('${escapeAttr(group.adgroup_id)}')">
+              <label class="group-select" onclick="event.stopPropagation()" title="이 광고그룹 선택">
+                <input type="checkbox" onchange="toggleGroupSelection('${escapeAttr(group.adgroup_id)}', event)" ${selectedGroupIds.has(String(group.adgroup_id || '')) ? 'checked' : ''}>
+              </label>
+              <div class="group-name">
+                <div class="group-title-row">
+                  <span class="group-title-text">${escapeHtml(group.adgroup_name)}</span>
+                  <span class="group-toggle">${collapsed ? '펼치기' : '접기'}</span>
+                </div>
+                <div class="group-sub">${escapeHtml([group.campaign_name, group.campaign_type_label, `${sorted.length}개 소재`].filter(Boolean).join(' · '))}</div>
+                <div class="group-best">1위 소재: ${escapeHtml(creativeTitle(best))}</div>
+              </div>
+              <div class="metric-mini"><span>${escapeHtml(metricLabel())}</span>${escapeHtml(formatCount(sorted.reduce((sum, row) => sum + metricValue(row), 0)))}</div>
+              <div class="metric-mini"><span>클릭률</span>${escapeHtml(formatPercent(metrics.ctr))}</div>
+              <div class="metric-mini"><span>${escapeHtml(revenueLabel())}</span>${escapeHtml(formatWon(metrics[revenueKey()] || 0))}</div>
+              <div class="metric-mini"><span>${escapeHtml(roasLabel())}</span>${escapeHtml(formatPercent(metrics[roasKey()] || 0))}</div>
+              <div class="metric-mini"><span>총비용</span>${escapeHtml(formatWon(metrics.salesAmt))}</div>
+            </div>
+            ${body}
+          </section>
+        `;
+      }).join('');
+    }
+    function toggleGroup(groupId) {
+      const id = String(groupId || '');
+      if (collapsedGroups.has(id)) collapsedGroups.delete(id);
+      else collapsedGroups.add(id);
+      renderTable(lastData);
+    }
+    function expandAllGroups(expand) {
+      collapsedGroups = new Set();
+      if (!expand) {
+        getFilteredGroups().forEach(group => collapsedGroups.add(group.adgroup_id));
+      }
+      renderTable(lastData);
+    }
+    function chartLabel(row) {
+      const title = creativeTitle(row);
+      const group = row.adgroup_name || '';
+      return group ? `${group} · ${title}` : title;
+    }
+    function drawBarChart(canvas, items, options = {}) {
+      if (!canvas) return;
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+      canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+      const ctx = canvas.getContext('2d');
+      ctx.scale(dpr, dpr);
+      const w = rect.width;
+      const h = rect.height;
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, w, h);
+      const pad = { left: 150, right: 22, top: 22, bottom: 26 };
+      const plotW = Math.max(20, w - pad.left - pad.right);
+      const rowH = Math.max(18, Math.min(28, (h - pad.top - pad.bottom) / Math.max(items.length, 1)));
+      const max = Math.max(...items.map(item => Number(item.value || 0)), 0);
+      ctx.font = '700 11px Pretendard, sans-serif';
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText(max > 0 ? `${options.valueLabel || ''} 최대 ${formatCount(max)}` : '데이터 없음', pad.left, 14);
+      if (!items.length || max <= 0) {
+        ctx.fillStyle = '#667085';
+        ctx.textAlign = 'center';
+        ctx.fillText('표시할 차트 데이터가 없습니다.', w / 2, h / 2);
+        ctx.textAlign = 'left';
+        return;
+      }
+      items.forEach((item, index) => {
+        const y = pad.top + index * rowH;
+        const barW = Math.max(2, Number(item.value || 0) / max * plotW);
+        const label = String(item.label || '').slice(0, 26);
+        ctx.fillStyle = '#475569';
+        ctx.textAlign = 'right';
+        ctx.fillText(label, pad.left - 10, y + rowH * .68);
+        ctx.textAlign = 'left';
+        ctx.fillStyle = item.color || '#2563eb';
+        ctx.fillRect(pad.left, y + 5, barW, Math.max(8, rowH - 10));
+        ctx.fillStyle = '#0f172a';
+        ctx.fillText(formatCount(item.value), pad.left + barW + 6, y + rowH * .68);
+      });
+    }
+    function renderCharts() {
+      const rows = getFilteredRows();
+      const topRows = [...rows].sort(compareRows).slice(0, 10);
+      const creativeItems = topRows.map(row => ({
+        label: chartLabel(row),
+        value: metricValue(row),
+        color: metricKey() === 'purchaseCcnt' ? '#059669' : '#2563eb'
+      }));
+      const groups = getFilteredGroups().map(group => {
+        const best = [...group.rows].sort(compareRows)[0];
+        return {
+          label: group.adgroup_name,
+          value: best ? metricValue(best) : 0,
+          color: '#d97706'
+        };
+      }).sort((a, b) => b.value - a.value).slice(0, 10);
+      document.getElementById('creative_chart_note').textContent = metricLabel();
+      document.getElementById('group_chart_note').textContent = `${formatNumber(groups.length)}개 그룹`;
+      drawBarChart(document.getElementById('creative_chart'), creativeItems, { valueLabel: metricLabel() });
+      drawBarChart(document.getElementById('group_chart'), groups, { valueLabel: metricLabel() });
+    }
+    function safeImageFilename(value) {
+      const base = String(value || 'creative_performance').replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, '_').slice(0, 80);
+      return base || 'creative_performance';
+    }
+    function wrapCanvasText(ctx, text, maxWidth, maxLines = 2) {
+      const source = String(text || '').replace(/\s+/g, ' ').trim();
+      if (!source) return [];
+      const words = source.split(' ');
+      const lines = [];
+      let line = '';
+      const pushHard = word => {
+        let chunk = '';
+        for (const ch of word) {
+          if (ctx.measureText(chunk + ch).width > maxWidth && chunk) {
+            lines.push(chunk);
+            chunk = ch;
+            if (lines.length >= maxLines) return '';
+          } else {
+            chunk += ch;
+          }
+        }
+        return chunk;
+      };
+      for (const word of words) {
+        const test = line ? `${line} ${word}` : word;
+        if (ctx.measureText(test).width <= maxWidth) {
+          line = test;
+        } else {
+          if (line) lines.push(line);
+          if (lines.length >= maxLines) break;
+          line = ctx.measureText(word).width > maxWidth ? pushHard(word) : word;
+        }
+      }
+      if (line && lines.length < maxLines) lines.push(line);
+      if (lines.length === maxLines && ctx.measureText(lines[lines.length - 1]).width > maxWidth - 10) {
+        let last = lines[lines.length - 1];
+        while (last.length > 1 && ctx.measureText(`${last}...`).width > maxWidth) last = last.slice(0, -1);
+        lines[lines.length - 1] = `${last}...`;
+      }
+      return lines;
+    }
+    function drawRoundRect(ctx, x, y, w, h, r, fill, stroke = '') {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+      if (fill) {
+        ctx.fillStyle = fill;
+        ctx.fill();
+      }
+      if (stroke) {
+        ctx.strokeStyle = stroke;
+        ctx.stroke();
+      }
+    }
+    function downloadBlob(blob, filename) {
+      return new Promise((resolve, reject) => {
+        try {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          a.rel = 'noopener';
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      });
+    }
+    function downloadCanvasDataUrl(canvas, filename) {
+      return new Promise((resolve, reject) => {
+        try {
+          const a = document.createElement('a');
+          a.href = canvas.toDataURL('image/png');
+          a.download = filename;
+          a.rel = 'noopener';
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      });
+    }
+    function finishCanvasDownload(canvas, filename) {
+      return new Promise((resolve, reject) => {
+        try {
+          if (canvas.toBlob) {
+            canvas.toBlob(blob => {
+              if (blob) {
+                downloadBlob(blob, filename).then(resolve).catch(reject);
+                return;
+              }
+              downloadCanvasDataUrl(canvas, filename).then(resolve).catch(reject);
+            }, 'image/png');
+            return;
+          }
+          downloadCanvasDataUrl(canvas, filename).then(resolve).catch(reject);
+        } catch (err) {
+          reject(err);
+        }
+      });
+    }
+    function prepareImageExportRows(ctx, rows, creativeWidth) {
+      return rows.map((row, index) => {
+        ctx.font = '900 18px Pretendard, Arial, sans-serif';
+        const titleLines = wrapCanvasText(ctx, `${index + 1}. ${creativeTitle(row)}`, creativeWidth, 2);
+        ctx.font = '700 15px Pretendard, Arial, sans-serif';
+        const descLines = wrapCanvasText(ctx, row.description || '', creativeWidth, 2);
+        ctx.font = '700 13px Pretendard, Arial, sans-serif';
+        const metaLines = wrapCanvasText(ctx, [row.ad_type_label, row.ad_id].filter(Boolean).join(' · '), creativeWidth, 1);
+        const urlText = [
+          row.pcFinalUrl ? `PC ${row.pcFinalUrl}` : '',
+          row.mobileFinalUrl ? `MO ${row.mobileFinalUrl}` : '',
+        ].filter(Boolean).join(' / ');
+        const urlLines = wrapCanvasText(ctx, urlText, creativeWidth, 2);
+        const height = Math.max(88, 24 + titleLines.length * 22 + descLines.length * 18 + metaLines.length * 17 + urlLines.length * 17);
+        return { row, titleLines, descLines, metaLines, urlLines, height };
+      });
+    }
+    function drawImageTextLines(ctx, lines, x, y, lineHeight, fillStyle) {
+      ctx.fillStyle = fillStyle;
+      lines.forEach((line, idx) => ctx.fillText(line, x, y + idx * lineHeight));
+      return y + lines.length * lineHeight;
+    }
+    function drawImageTableCell(ctx, text, x, y, width, align = 'right', color = '#0f172a', font = '800 15px Pretendard, Arial, sans-serif') {
+      ctx.font = font;
+      ctx.fillStyle = color;
+      ctx.textAlign = align;
+      const tx = align === 'right' ? x + width - 12 : x + 12;
+      ctx.fillText(String(text || '-'), tx, y);
+      ctx.textAlign = 'left';
+    }
+    function downloadCreativePerformanceImageLegacy() {
+      if (!lastData) {
+        showMessage('먼저 소재별 성과를 조회해주세요.', 'warn');
+        return;
+      }
+      const rows = getFilteredRows();
+      if (!rows.length) {
+        showMessage('이미지로 저장할 조회 결과가 없습니다.', 'warn');
+        return;
+      }
+      const groups = groupRows(rows).map(group => ({ ...group, rows: [...group.rows].sort(compareRows) }));
+      const width = 1640;
+      const pad = 44;
+      const cols = [
+        { key: 'creative', label: '소재', w: 560 },
+        { key: 'status', label: '상태', w: 82 },
+        { key: 'ctr', label: '클릭률', w: 96 },
+        { key: 'metric', label: metricLabel(), w: 118 },
+        { key: 'revenue', label: revenueLabel(), w: 150 },
+        { key: 'roas', label: roasLabel(), w: 102 },
+        { key: 'imp', label: '노출수', w: 120 },
+        { key: 'click', label: '클릭수', w: 112 },
+        { key: 'cost', label: '총비용', w: 160 },
+      ];
+      const tableW = cols.reduce((sum, col) => sum + col.w, 0);
+      const measureCanvas = document.createElement('canvas');
+      const measureCtx = measureCanvas.getContext('2d');
+      const models = groups.map(group => {
+        const prepared = prepareImageExportRows(measureCtx, group.rows, cols[0].w - 24);
+        const metrics = aggregateRows(group.rows);
+        return { group, prepared, metrics };
+      });
+      const summaryH = 104;
+      let height = pad + 78 + summaryH + 34;
+      models.forEach(model => {
+        height += 74 + 38 + model.prepared.reduce((sum, item) => sum + item.height, 0) + 24;
+      });
+      const rawHeight = height + pad;
+      const maxCanvasSide = 30000;
+      height = Math.max(700, Math.min(rawHeight, maxCanvasSide));
+      const dpr = Math.max(1, Math.min(1.5, maxCanvasSide / Math.max(width, height), window.devicePixelRatio || 1));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.floor(width * dpr);
+      canvas.height = Math.floor(height * dpr);
+      const ctx = canvas.getContext('2d');
+      ctx.scale(dpr, dpr);
+      ctx.fillStyle = '#f5f7fb';
+      ctx.fillRect(0, 0, width, height);
+      ctx.textBaseline = 'top';
+      ctx.textAlign = 'left';
+
+      let y = pad;
+      ctx.font = '900 28px Pretendard, Arial, sans-serif';
+      ctx.fillStyle = '#0f172a';
+      ctx.fillText('소재별 성과 조회 결과', pad, y);
+      ctx.font = '800 14px Pretendard, Arial, sans-serif';
+      ctx.fillStyle = '#475569';
+      const account = basePayload?.account_name || basePayload?.customer_id || '-';
+      const period = [lastData?.since, lastData?.until].filter(Boolean).join(' ~ ') || lastData?.date_label || '-';
+      ctx.fillText(`${account} · ${scopeLabel(lastData?.scope || basePayload?.target_scope || 'account')} · ${period}`, pad, y + 40);
+      y += 78;
+
+      const summary = aggregateRows(rows);
+      const summaryCards = [
+        ['소재 수', formatNumber(rows.length)],
+        ['광고그룹 수', formatNumber(groups.length)],
+        [metricLabel(), formatCount(rows.reduce((sum, row) => sum + metricValue(row), 0))],
+        [revenueLabel(), formatWon(rows.reduce((sum, row) => sum + revenueValue(row), 0))],
+        [roasLabel(), formatPercent(summary[roasKey()] || 0)],
+        ['총비용', formatWon(summary.salesAmt)],
+      ];
+      const cardGap = 12;
+      const cardW = (tableW - cardGap * (summaryCards.length - 1)) / summaryCards.length;
+      summaryCards.forEach(([label, value], idx) => {
+        const x = pad + idx * (cardW + cardGap);
+        drawRoundRect(ctx, x, y, cardW, summaryH, 8, '#ffffff', '#d9e2ef');
+        ctx.font = '850 14px Pretendard, Arial, sans-serif';
+        ctx.fillStyle = '#667085';
+        ctx.fillText(label, x + 16, y + 18);
+        ctx.font = '900 26px Pretendard, Arial, sans-serif';
+        ctx.fillStyle = '#0f172a';
+        ctx.fillText(value, x + 16, y + 50);
+      });
+      y += summaryH + 34;
+
+      models.forEach(model => {
+        const group = model.group;
+        const metrics = model.metrics;
+        drawRoundRect(ctx, pad, y, tableW, 62, 8, '#eef6ff', '#d9e2ef');
+        ctx.font = '900 19px Pretendard, Arial, sans-serif';
+        ctx.fillStyle = '#0f172a';
+        ctx.fillText(group.adgroup_name || '-', pad + 16, y + 12);
+        ctx.font = '800 13px Pretendard, Arial, sans-serif';
+        ctx.fillStyle = '#475569';
+        ctx.fillText([group.campaign_name, `${group.rows.length}개 소재`, `클릭률 ${formatPercent(metrics.ctr)}`].filter(Boolean).join(' · '), pad + 16, y + 38);
+        drawImageTableCell(ctx, `${metricLabel()} ${formatCount(model.group.rows.reduce((sum, row) => sum + metricValue(row), 0))}`, pad + tableW - 260, y + 20, 244, 'right', '#0f172a', '900 16px Pretendard, Arial, sans-serif');
+        y += 74;
+
+        let x = pad;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(pad, y, tableW, 38);
+        ctx.strokeStyle = '#d9e2ef';
+        ctx.strokeRect(pad, y, tableW, 38);
+        cols.forEach(col => {
+          ctx.font = '900 13px Pretendard, Arial, sans-serif';
+          ctx.fillStyle = '#475569';
+          ctx.textAlign = col.key === 'creative' || col.key === 'status' ? 'left' : 'right';
+          ctx.fillText(col.label, col.key === 'creative' || col.key === 'status' ? x + 12 : x + col.w - 12, y + 12);
+          ctx.textAlign = 'left';
+          x += col.w;
+        });
+        y += 38;
+
+        model.prepared.forEach(item => {
+          const row = item.row;
+          const m = row.metrics || {};
+          ctx.fillStyle = Number(row.rank_in_group || 0) === 1 || item === model.prepared[0] ? '#f0fdf4' : '#ffffff';
+          ctx.fillRect(pad, y, tableW, item.height);
+          ctx.strokeStyle = '#e6edf5';
+          ctx.strokeRect(pad, y, tableW, item.height);
+          let cx = pad;
+          let textY = y + 14;
+          ctx.font = '900 18px Pretendard, Arial, sans-serif';
+          textY = drawImageTextLines(ctx, item.titleLines, cx + 12, textY, 22, '#0f172a');
+          ctx.font = '700 15px Pretendard, Arial, sans-serif';
+          textY = drawImageTextLines(ctx, item.descLines, cx + 12, textY + 2, 18, '#344054');
+          ctx.font = '700 13px Pretendard, Arial, sans-serif';
+          textY = drawImageTextLines(ctx, item.metaLines, cx + 12, textY + 4, 17, '#667085');
+          ctx.font = '800 13px Pretendard, Arial, sans-serif';
+          drawImageTextLines(ctx, item.urlLines, cx + 12, textY + 2, 17, '#2563eb');
+          cx += cols[0].w;
+          drawImageTableCell(ctx, normalizeStatusLabel(row.status), cx, y + 28, cols[1].w, 'left', normalizeStatusLabel(row.status) === 'OFF' ? '#b45309' : '#047857', '900 15px Pretendard, Arial, sans-serif');
+          cx += cols[1].w;
+          drawImageTableCell(ctx, formatPercent(m.ctr), cx, y + 28, cols[2].w);
+          cx += cols[2].w;
+          drawImageTableCell(ctx, formatCount(metricValue(row)), cx, y + 28, cols[3].w);
+          cx += cols[3].w;
+          drawImageTableCell(ctx, formatWon(revenueValue(row)), cx, y + 28, cols[4].w);
+          cx += cols[4].w;
+          drawImageTableCell(ctx, formatPercent(roasValue(row)), cx, y + 28, cols[5].w);
+          cx += cols[5].w;
+          drawImageTableCell(ctx, formatNumber(m.impCnt || 0), cx, y + 28, cols[6].w);
+          cx += cols[6].w;
+          drawImageTableCell(ctx, formatNumber(m.clkCnt || 0), cx, y + 28, cols[7].w);
+          cx += cols[7].w;
+          drawImageTableCell(ctx, formatWon(m.salesAmt || 0), cx, y + 28, cols[8].w);
+          y += item.height;
+        });
+        y += 24;
+      });
+
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
+      if (rawHeight > maxCanvasSide) {
+        showMessage('조회 결과가 많아 이미지 하단 일부가 잘릴 수 있습니다. 필요한 그룹만 선택하거나 제외한 뒤 다시 다운로드하면 전체가 더 선명하게 저장됩니다.', 'warn');
+      }
+      return finishCanvasDownload(canvas, `${safeImageFilename(basePayload?.account_name || basePayload?.customer_id)}_소재별성과_${stamp}.png`);
+    }
+
+    async function waitForFontsReady() {
+      if (document.fonts && document.fonts.ready) {
+        try { await document.fonts.ready; } catch (e) {}
+      }
+    }
+    async function waitForNextPaint() {
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    }
+    function buildCreativePerformanceExportRoot() {
+      const root = document.createElement('div');
+      root.className = 'page export-capture-root';
+      root.style.width = '1560px';
+      root.style.maxWidth = '1560px';
+      root.style.margin = '0';
+      root.style.padding = '12px 12px 18px';
+      root.style.background = '#f4f7fb';
+
+      const tablePanel = document.querySelector('.table-panel')?.cloneNode(true);
+      if (tablePanel) {
+        tablePanel.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
+        tablePanel.querySelector('.table-toolbar')?.remove();
+        tablePanel.querySelectorAll('.group-select').forEach(el => el.remove());
+        tablePanel.querySelectorAll('.group-toggle').forEach(el => { el.textContent = ''; });
+        tablePanel.querySelectorAll('.group-head').forEach(el => el.removeAttribute('onclick'));
+        root.appendChild(tablePanel);
+      }
+
+      return root;
+    }
+    async function renderDomNodeToCanvas(node) {
+      await waitForFontsReady();
+      if (typeof html2canvas !== 'function') {
+        throw new Error('이미지 캡처 라이브러리를 불러오지 못했습니다.');
+      }
+      const stage = document.createElement('div');
+      stage.style.position = 'absolute';
+      stage.style.left = '0';
+      stage.style.top = '0';
+      stage.style.zIndex = '-1';
+      stage.style.pointerEvents = 'none';
+      stage.style.background = '#f4f7fb';
+      stage.style.width = '1560px';
+      stage.appendChild(node);
+      document.body.appendChild(stage);
+      try {
+        await waitForNextPaint();
+        const target = stage.firstElementChild;
+        const width = Math.max(960, Math.ceil(target.scrollWidth || target.getBoundingClientRect().width));
+        const height = Math.max(700, Math.ceil(target.scrollHeight || target.getBoundingClientRect().height));
+        const maxSide = 30000;
+        const maxPixels = 85000000;
+        const scaleByPixels = Math.sqrt(maxPixels / Math.max(1, width * height));
+        const desiredScale = Math.max(1.5, window.devicePixelRatio || 1);
+        const scale = Math.max(0.45, Math.min(2, maxSide / Math.max(width, height), scaleByPixels, desiredScale));
+        return await html2canvas(target, {
+          backgroundColor: '#f4f7fb',
+          scale,
+          width,
+          height,
+          windowWidth: width,
+          windowHeight: height,
+          scrollX: 0,
+          scrollY: 0,
+          useCORS: true,
+          allowTaint: false,
+          logging: false,
+          imageTimeout: 15000,
+          onclone: clonedDoc => {
+            clonedDoc.querySelectorAll('.export-capture-root .group-table-wrap').forEach(el => {
+              el.style.overflow = 'visible';
+            });
+            clonedDoc.querySelectorAll('.export-capture-root .creative-table th').forEach(el => {
+              el.style.position = 'static';
+            });
+          },
+        });
+      } finally {
+        stage.remove();
+      }
+    }
+    async function downloadCreativePerformanceImage() {
+      if (!lastData) {
+        showMessage('먼저 소재별 성과를 조회해주세요.', 'warn');
+        return;
+      }
+      const rows = getFilteredRows();
+      if (!rows.length) {
+        const hiddenGroupCount = getAutoHiddenGroupCount();
+        showMessage(hiddenGroupCount ? `성과가 발생한 광고그룹이 없습니다. 노출·클릭·비용·전환·매출이 모두 0인 그룹 ${formatNumber(hiddenGroupCount)}개는 자동 제외되었습니다.` : '이미지로 저장할 조회 결과가 없습니다.', 'warn');
+        return;
+      }
+      const previousCollapsedGroups = new Set(collapsedGroups);
+      const previousScrollX = window.scrollX;
+      const previousScrollY = window.scrollY;
+      try {
+        showMessage('현재 화면 UI 그대로 이미지를 저장하는 중입니다...', 'warn');
+        setLoading(true, '이미지 저장용 화면 생성 중...');
+        collapsedGroups = new Set();
+        renderAll();
+        await waitForNextPaint();
+        const exportRoot = buildCreativePerformanceExportRoot();
+        const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
+        try {
+          const canvas = await renderDomNodeToCanvas(exportRoot);
+          await finishCanvasDownload(canvas, `${safeImageFilename(basePayload?.account_name || basePayload?.customer_id)}_소재별성과_${stamp}.png`);
+        } catch (captureErr) {
+          console.warn('DOM 캡처 저장 실패, 안정 모드로 다시 저장합니다.', captureErr);
+          showMessage('화면 캡처 방식이 실패해 안정 모드로 이미지를 저장합니다...', 'warn');
+          await waitForNextPaint();
+          await downloadCreativePerformanceImageLegacy();
+        }
+        showMessage('');
+      } catch (err) {
+        console.error(err);
+        showMessage(`이미지 저장 실패: ${err?.message || err}`, 'error');
+      } finally {
+        collapsedGroups = previousCollapsedGroups;
+        renderAll();
+        window.scrollTo(previousScrollX, previousScrollY);
+        setLoading(false);
+      }
+    }
+
+    function renderMessages(data) {
+      const warnings = Array.isArray(data?.warnings) ? data.warnings : [];
+      const errors = Array.isArray(data?.errors) ? data.errors : [];
+      if (errors.length) showMessage(`오류: ${errors.join(' / ')}`, 'error');
+      else if (warnings.length) showMessage(`참고: ${warnings.join(' / ')}`, 'warn');
+      else showMessage('');
+    }
+    function renderAll() {
+      if (!lastData) return;
+      renderMessages(lastData);
+      renderSummary(lastData);
+      renderCharts();
+      renderTable(lastData);
+      updateGroupFilterStatus();
+    }
+    async function fetchCreativePerformance() {
+      const payload = buildPayload();
+      if (!payload.api_key || !payload.secret_key || !payload.customer_id) {
+        showMessage('API 정보 및 광고주를 확인할 수 없습니다. 메인 화면에서 광고주를 선택한 뒤 다시 열어주세요.', 'error');
+        return;
+      }
+      setLoading(true, '소재별 성과 조회 중...');
+      document.getElementById('refresh_btn').disabled = true;
+      try {
+        const data = await postJson('/get_creative_performance_stats', payload);
+        lastData = data;
+        basePayload = payload;
+        selectedGroupIds.clear();
+        excludedGroupIds.clear();
+        showSelectedGroupsOnly = false;
+        storageSet(sessionStorage, CONTEXT_KEY, JSON.stringify({ payload: basePayload, ts: Date.now() }));
+        updateContextLabel();
+        renderAll();
+      } catch (err) {
+        showMessage(err.message || '소재별 성과 조회 실패', 'error');
+      } finally {
+        document.getElementById('refresh_btn').disabled = false;
+        setLoading(false);
+      }
+    }
+    window.addEventListener('resize', () => {
+      if (lastData) renderCharts();
+    });
+    readInitialContext();
+    applyContextToControls();
+    if (basePayload?.api_key && basePayload?.secret_key && basePayload?.customer_id) {
+      fetchCreativePerformance();
+    } else {
+      showMessage('API 정보 및 광고주를 확인할 수 없습니다. 메인 화면에서 광고주를 선택한 뒤 다시 열어주세요.', 'error');
+    }
+  </script>
+</body>
+</html>

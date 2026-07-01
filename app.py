@@ -15,7 +15,7 @@ import sys
 import time
 import threading
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, Iterable, List, Tuple, Optional
 from urllib.parse import urlparse, urlencode
@@ -62,6 +62,8 @@ from routes.change_routes import create_change_blueprint
 from services.change_service import ChangeService
 from routes.copy_delete_routes import create_copy_delete_blueprint
 from services.copy_delete_service import CopyDeleteService
+from routes.ai_analysis_routes import create_ai_analysis_blueprint
+from services.ai_analysis_service import AIAnalysisService
 from werkzeug.exceptions import HTTPException
 from utils.labels import (
     AD_EXTENSION_TYPE_LABELS,
@@ -121,6 +123,8 @@ DELETE_IO_WORKERS = 12
 BID_IO_WORKERS = 8
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
+CACHE_DIR = os.path.join(BASE_DIR, "cache")
+os.makedirs(CACHE_DIR, exist_ok=True)
 ACTION_LOG_PATH = os.path.join(LOG_DIR, "action_history.jsonl")
 _ACTION_LOG_LOCK = threading.RLock()
 _ACTION_LOG_MAX_LINES = 2000
@@ -162,6 +166,8 @@ LOG_ACTION_LABELS = {
     "/copy_restricted_media_settings": "노출 제한 매체 복사(파워링크)",
     "/update_adgroup_options": "광고그룹 옵션 변경",
     "/update_adgroup_search_options": "파워링크 검색옵션 변경",
+    "/update_adgroup_bid_amt": "광고그룹 입찰가 변경",
+    "/update_age_targets_bulk": "연령대 타겟 일괄 변경",
     "/update_budget": "예산 변경",
     "/update_schedule": "시간대 설정 변경",
     "/update_schedule_campaign_bulk": "캠페인 시간대 일괄 변경",
@@ -182,6 +188,7 @@ LOG_ACTION_LABELS = {
     "/update_powerlink_device_bid_weights": "파워링크 PC/모바일 입찰가중치 변경",
     "/update_contents_network_bid_amt": "추천/콘텐츠 지면 입찰가 변경",
     "/set_searched_powerlink_keyword_state": "조회 키워드 ON/OFF 변경",
+    "/set_keywords_state_by_scope": "선택 범위 키워드 ON/OFF 변경",
     "/adjust_keyword_bids_by_threshold": "상하한 기준 입찰가 조정",
     "/update_keyword_bids_avg_position": "평균순위 기준 입찰가 적용",
     "/preview_keyword_avg_position_by_search": "검색어 기준 평균순위 입찰가 미리보기",
@@ -199,13 +206,14 @@ LOG_ACTION_LABELS = {
     "/set_asset_state_by_ids": "ID별 소재/확장소재 상태 변경",
     "/update_ad_product_name": "노출용 상품명 수정",
     "/update_ad_product_names_bulk": "노출용 상품명 대량 변경",
+    "/bulk_update_ad_product_names_csv": "소재ID 기준 노출용 상품명 대량 변경",
     "/update_shopping_ad_bid": "쇼핑 소재 입찰가 변경",
     "/delete_selected": "선택 삭제",
     "/clear_action_logs": "로그 비우기",
 }
 ACTION_LOG_EXCLUDED_PATHS = {
     "/get_campaigns", "/get_adgroups", "/get_biz_channels", "/get_keywords", "/get_ads",
-    "/get_ad_extensions", "/get_restricted_keywords", "/find_powerlink_duplicate_keywords", "/find_account_powerlink_duplicate_keywords", "/get_powerlink_keyword_stats", "/search_powerlink_keywords", "/search_adgroups_global", "/export_powerlink_keywords_excel", "/query_account_ads", "/query_account_extensions", "/query_account_keywords", "/export_account_ads_excel", "/export_account_extensions_excel", "/export_account_keywords_excel", "/get_purchase_report_current", "/export_purchase_report_current_excel", "/get_action_logs", "/health", "/favicon.ico", "/",
+    "/get_ad_extensions", "/get_restricted_keywords", "/find_powerlink_duplicate_keywords", "/find_account_powerlink_duplicate_keywords", "/get_powerlink_keyword_stats", "/get_shopping_query_conversion_insights", "/get_shopping_query_non_conversion_insights", "/get_dimension_performance_stats", "/search_powerlink_keywords", "/search_adgroups_global", "/export_powerlink_keywords_excel", "/query_account_ads", "/query_account_extensions", "/query_account_keywords", "/export_account_ads_excel", "/export_account_extensions_excel", "/export_account_keywords_excel", "/api/ai-analysis/chat", "/get_purchase_report_current", "/export_purchase_report_current_excel", "/get_action_logs", "/health", "/favicon.ico", "/",
     "/sample_headers", "/delete_sample_headers", "/clear_action_logs",
 }
 def _safe_json_body() -> Dict[str, Any]:
@@ -243,8 +251,23 @@ def _action_summary(path: str, payload: Dict[str, Any]) -> str:
         src = payload.get('source_ids') or payload.get('entity_ids') or []
         if not isinstance(src, list):
             src = [src] if src else []
+        src_campaigns = payload.get('source_campaign_ids') or []
+        if not isinstance(src_campaigns, list):
+            src_campaigns = [src_campaigns] if src_campaigns else []
+        target_adgroups = payload.get('target_adgroup_ids') or []
+        if not isinstance(target_adgroups, list):
+            target_adgroups = [target_adgroups] if target_adgroups else []
+        target_campaigns = payload.get('target_campaign_ids') or []
+        if not isinstance(target_campaigns, list):
+            target_campaigns = [target_campaigns] if target_campaigns else []
         custom_cnt = _line_count(payload.get('custom_names_text'))
         pieces = [f"대상={len(src)}"]
+        if src_campaigns:
+            pieces.append(f"원본캠페인={len(src_campaigns)}")
+        if target_adgroups:
+            pieces.append(f"타겟그룹={len(target_adgroups)}")
+        if target_campaigns:
+            pieces.append(f"타겟캠페인선택={len(target_campaigns)}")
         if str(payload.get('copy_count') or '').strip():
             pieces.append(f"복사수={payload.get('copy_count')}")
         if custom_cnt:
@@ -282,6 +305,13 @@ def _action_summary(path: str, payload: Dict[str, Any]) -> str:
     if path == "/update_ad_product_names_bulk":
         rows = payload.get("rows") or []
         return f"그룹={len(rows)} | 상품명 대량 변경"
+    if path == "/bulk_update_ad_product_names_csv":
+        file_names = []
+        try:
+            file_names = [f.filename for f in request.files.values() if getattr(f, 'filename', '')]
+        except Exception:
+            file_names = []
+        return (f"소재ID 기준 상품명 대량 변경 | 파일={', '.join(file_names[:2])}" if file_names else "소재ID 기준 상품명 대량 변경 | 파일 업로드")
     if path == "/update_shopping_ad_bid":
         return f"소재ID={str(payload.get('ad_id') or '').strip()} | 입찰가={payload.get('bid_amt')}"
     if path in {"/set_ads_state_by_scope", "/set_ad_extensions_state_by_scope", "/set_asset_state_by_ids"}:
@@ -297,7 +327,16 @@ def _action_summary(path: str, payload: Dict[str, Any]) -> str:
         if not isinstance(types, list):
             types = [types] if types else []
         return f"{enabled_label} | 캠페인={len(camp_ids)} | 그룹={len(adg_ids)} | 유형={','.join([str(x) for x in types[:6]]) or 'ALL'}"
-    if path in {"/update_budget", "/set_campaign_state", "/set_adgroup_state_by_scope", "/update_media", "/add_restricted_media_ids", "/copy_restricted_media_settings", "/update_adgroup_options", "/update_adgroup_search_options", "/update_schedule", "/update_schedule_campaign_bulk", "/update_non_search_keyword_exclusion", "/update_keyword_bids", "/update_bid_mode_by_scope", "/update_keyword_bids_by_search", "/update_keyword_bid_weights_by_search", "/adjust_keyword_bids_by_threshold", "/update_keyword_bids_avg_position", "/preview_keyword_avg_position_by_search", "/update_keyword_avg_position_by_search", "/update_powerlink_device_bid_weights", "/update_contents_network_bid_amt", "/set_ads_state_by_scope", "/set_ad_extensions_state_by_scope", "/set_asset_state_by_ids"}:
+    if path == "/set_keywords_state_by_scope":
+        camp_ids = payload.get('campaign_ids') or []
+        adg_ids = payload.get('adgroup_ids') or []
+        if not isinstance(camp_ids, list):
+            camp_ids = [camp_ids] if camp_ids else []
+        if not isinstance(adg_ids, list):
+            adg_ids = [adg_ids] if adg_ids else []
+        enabled_label = "ON" if _boolish(payload.get('enabled'), True) else "OFF"
+        return f"{enabled_label} | 캠페인={len(camp_ids)} | 그룹={len(adg_ids)}"
+    if path in {"/update_budget", "/set_campaign_state", "/set_adgroup_state_by_scope", "/update_media", "/add_restricted_media_ids", "/copy_restricted_media_settings", "/update_adgroup_options", "/update_adgroup_search_options", "/update_adgroup_bid_amt", "/update_age_targets_bulk", "/update_schedule", "/update_schedule_campaign_bulk", "/update_non_search_keyword_exclusion", "/update_keyword_bids", "/update_bid_mode_by_scope", "/update_keyword_bids_by_search", "/update_keyword_bid_weights_by_search", "/adjust_keyword_bids_by_threshold", "/update_keyword_bids_avg_position", "/preview_keyword_avg_position_by_search", "/update_keyword_avg_position_by_search", "/update_powerlink_device_bid_weights", "/update_contents_network_bid_amt", "/set_keywords_state_by_scope", "/set_ads_state_by_scope", "/set_ad_extensions_state_by_scope", "/set_asset_state_by_ids"}:
         ids = payload.get('entity_ids') or payload.get('campaign_ids') or payload.get('adgroup_ids') or []
         if not isinstance(ids, list):
             ids = [ids] if ids else []
@@ -317,6 +356,14 @@ def _action_summary(path: str, payload: Dict[str, Any]) -> str:
             extra.append(f"입찰가={payload.get('bid_amt')}")
         if str(payload.get('contents_network_bid_amt') or '').strip():
             extra.append(f"콘텐츠입찰가={payload.get('contents_network_bid_amt')}")
+        if path == "/update_age_targets_bulk":
+            mode_label = "선택제외" if str(payload.get("mode") or "include_selected") == "exclude_selected" else "선택노출"
+            age_codes = payload.get("age_codes") or []
+            if not isinstance(age_codes, list):
+                age_codes = [age_codes] if age_codes else []
+            extra.append(f"연령={mode_label}:{len(age_codes)}개")
+            if str(payload.get("bid_weight") or "").strip():
+                extra.append(f"가중치={payload.get('bid_weight')}%")
         overrides = payload.get('keyword_bid_overrides') or payload.get('bid_overrides') or []
         if isinstance(overrides, list) and overrides:
             extra.append(f"개별입찰가={len(overrides)}건")
@@ -364,7 +411,7 @@ def _action_summary(path: str, payload: Dict[str, Any]) -> str:
     if path == "/create_restricted_keywords_simple":
         keyword_text = payload.get('keywords') if payload.get('keywords') is not None else payload.get('keywords_text')
         return f"제외키워드={_line_count(keyword_text)}"
-    if path in {"/bulk_upload_text_ads", "/bulk_upload_rsa_ads", "/bulk_upload_shopping_products", "/bulk_upload_powerlink_bundle", "/bulk_update_shopping_ad_bids", "/bulk_update_shopping_product_ad_bids", "/bulk_update_contents_network_bid_amt", "/bulk_upload_headlines", "/bulk_upload_extensions", "/bulk_delete_powerlink_ads_excel", "/bulk_delete_extensions_excel"}:
+    if path in {"/bulk_upload_text_ads", "/bulk_upload_rsa_ads", "/bulk_upload_shopping_products", "/bulk_upload_powerlink_bundle", "/bulk_update_shopping_ad_bids", "/bulk_update_shopping_product_ad_bids", "/bulk_update_ad_product_names_csv", "/bulk_update_contents_network_bid_amt", "/bulk_upload_headlines", "/bulk_upload_extensions", "/bulk_delete_powerlink_ads_excel", "/bulk_delete_extensions_excel"}:
         file_names = []
         try:
             file_names = [f.filename for f in request.files.values() if getattr(f, 'filename', '')]
@@ -378,6 +425,8 @@ def _action_summary(path: str, payload: Dict[str, Any]) -> str:
             return (f"쇼핑 소재 입찰가 대량 변경 | 파일={', '.join(file_names[:2])}" if file_names else "쇼핑 소재 입찰가 대량 변경")
         if path == "/bulk_update_shopping_product_ad_bids":
             return (f"쇼핑 상품 소재 입찰가 대량 변경 | 파일={', '.join(file_names[:2])}" if file_names else "쇼핑 상품 소재 입찰가 대량 변경")
+        if path == "/bulk_update_ad_product_names_csv":
+            return (f"소재ID 기준 상품명 대량 변경 | 파일={', '.join(file_names[:2])}" if file_names else "소재ID 기준 상품명 대량 변경")
         if path == "/bulk_update_contents_network_bid_amt":
             return (f"추천/콘텐츠 지면 입찰가 대량 변경 | 파일={', '.join(file_names[:2])}" if file_names else "추천/콘텐츠 지면 입찰가 대량 변경")
         if path == "/bulk_delete_powerlink_ads_excel":
@@ -385,7 +434,7 @@ def _action_summary(path: str, payload: Dict[str, Any]) -> str:
         if path == "/bulk_delete_extensions_excel":
             return (f"확장소재ID 삭제 | 파일={', '.join(file_names[:2])}" if file_names else "확장소재ID 삭제 | 파일 업로드")
         if path == "/bulk_upload_extensions":
-            ext_label = _bulk_extension_type_label(payload.get("ext_type") or payload.get("extension_type") or "")
+            ext_label = _bulk_upload_ext_type_label(payload.get("ext_type") or payload.get("extension_type") or "")
             return (f"{ext_label} 대량등록 | 파일={', '.join(file_names[:2])}" if file_names else f"{ext_label} 대량등록 | 파일 업로드")
         return f"파일={', '.join(file_names[:2])}" if file_names else "파일 업로드"
     count_keys = ('ids', 'entity_ids', 'source_ids', 'campaign_ids', 'adgroup_ids', 'parent_ids', 'rows')
@@ -1538,7 +1587,7 @@ def _is_shopping_campaign_type(value: Any) -> bool:
     s = str(value or "").strip().upper()
     if not s:
         return False
-    return s in {"SHOPPING", "SHOPPING_BRAND", "CATALOG", "PRODUCT", "SHOPPING_PRODUCT"} or ("SHOPPING" in s) or ("CATALOG" in s) or ("PRODUCT" in s and s != "WEB_SITE")
+    return s in {"쇼핑", "쇼핑검색", "쇼검", "카탈로그", "SHOPPING", "SHOPPING_BRAND", "CATALOG", "PRODUCT", "SHOPPING_PRODUCT"} or ("SHOPPING" in s) or ("CATALOG" in s) or ("PRODUCT" in s and s != "WEB_SITE")
 def _default_adgroup_type_for_campaign(value: Any) -> str:
     s = str(value or "").strip().upper()
     if s == "SHOPPING_BRAND":
@@ -3106,9 +3155,31 @@ PERFORMANCE_METRIC_ALIASES = {
     "purchaseCcnt": ("purchaseCcnt", "purchaseCnt", "purchaseConvCnt", "purchaseConversions"),
     "purchaseConvAmt": ("purchaseConvAmt", "purchaseAmt", "purchaseAmount", "purchaseConversionValue"),
     "purchaseRor": ("purchaseRor", "purchaseRoas", "purchaseROAS"),
+    "avgRnk": ("avgRnk", "averageRank", "avgRank", "rank", "평균노출순위"),
 }
 PERFORMANCE_STAT_ROW_LIST_KEYS = ("data", "rows", "items", "stats", "summaries", "results", "breakdowns", "breakdown")
 PERFORMANCE_STAT_ROW_DICT_KEYS = ("metrics", "metric", "summary", "stat", "fields", "values", "result", "breakdown", "event")
+PERFORMANCE_DEMOGRAPHIC_FIELDS = ["impCnt", "clkCnt", "salesAmt", "ccnt", "convAmt", "purchaseCcnt", "purchaseConvAmt"]
+PERFORMANCE_DEMOGRAPHIC_LIGHT_FIELDS = ["impCnt", "clkCnt", "salesAmt", "ccnt", "convAmt"]
+PERFORMANCE_BREAKDOWN_FIELDS = ["impCnt", "clkCnt", "salesAmt", "ccnt", "convAmt", "purchaseCcnt", "purchaseConvAmt", "purchaseRor", "avgRnk"]
+PERFORMANCE_DEMOGRAPHIC_CRITERION_FIELDS = PERFORMANCE_BREAKDOWN_FIELDS
+PERFORMANCE_GENDER_CRITERION_FALLBACK_OPTIONS = [
+    {"code": "GNM", "label": "남성"},
+    {"code": "GNF", "label": "여성"},
+]
+PERFORMANCE_DEMOGRAPHIC_AGE_KEYS = (
+    "ageRangeNm", "ageRangeName", "ageRange", "ageGroupNm", "ageGroupName",
+    "ageGroup", "ageNm", "ageName", "age", "ageCd", "ageCode",
+)
+PERFORMANCE_DEMOGRAPHIC_GENDER_KEYS = (
+    "genderNm", "genderName", "gender", "genderTp", "genderType",
+    "sex", "sexNm", "sexName",
+)
+PERFORMANCE_TIME_HOUR_KEYS = (
+    "hh24", "hour", "hourOfDay", "hour24", "timeHour",
+    "statHour", "baseHour", "hourNm", "hourName",
+)
+PERFORMANCE_BREAKDOWN_VALUE_KEYS = ("name", "value", "label", "displayName", "codeName", "text", "description")
 PERFORMANCE_KEYWORD_REPORT_CACHE_TTL = 300
 PERFORMANCE_KEYWORD_REPORT_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK = threading.Lock()
@@ -3116,6 +3187,82 @@ PERFORMANCE_KEYWORD_INVENTORY_CACHE_TTL = 600
 PERFORMANCE_KEYWORD_INVENTORY_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 PERFORMANCE_SHOPPING_QUERY_CACHE_TTL = 600
 PERFORMANCE_SHOPPING_QUERY_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+PERFORMANCE_SHOPPING_QUERY_INSIGHT_CACHE_TTL = 600
+PERFORMANCE_SHOPPING_QUERY_INSIGHT_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+PERFORMANCE_SHOPPING_QUERY_NON_CONVERSION_CACHE_TTL = 600
+PERFORMANCE_SHOPPING_QUERY_NON_CONVERSION_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+PERFORMANCE_SHOPPING_QUERY_REPORT_ROW_CACHE_TTL = 900
+PERFORMANCE_SHOPPING_QUERY_REPORT_ROW_CACHE: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
+PERFORMANCE_SHOPPING_QUERY_PARSE_VERSION = "shopping-query-parse-v13-ad-summary-layout"
+PERFORMANCE_SHOPPING_QUERY_REPORT_MIN_TIMEOUT_SECONDS = 2.0
+PERFORMANCE_SHOPPING_QUERY_REPORT_MAX_TIMEOUT_SECONDS = 180.0
+PERFORMANCE_SHOPPING_QUERY_FAST_TIMEOUT_SECONDS = 2.4
+PERFORMANCE_TEXT_REPORT_ENRICHMENT_TIMEOUT_SECONDS = 4.5
+PERFORMANCE_SHOPPING_QUERY_BACKGROUND_TIMEOUT_SECONDS = 600.0
+PERFORMANCE_SHOPPING_QUERY_REPORT_WARMING_TTL_SECONDS = PERFORMANCE_SHOPPING_QUERY_BACKGROUND_TIMEOUT_SECONDS + 90.0
+PERFORMANCE_SHOPPING_QUERY_REPORT_WORKERS = 3
+PERFORMANCE_DIMENSION_REPORT_WORKERS = 2
+PERFORMANCE_SHOPPING_QUERY_REPORT_WARMING: Dict[str, float] = {}
+PERFORMANCE_DIMENSION_REPORT_MAX_DAYS = 45
+PERFORMANCE_MEDIA_CATALOG_URL = "https://manage.searchad.naver.com/file/static/naver_ad_media.xlsx"
+PERFORMANCE_MEDIA_CATALOG_CACHE_TTL = 24 * 60 * 60
+PERFORMANCE_MEDIA_CATALOG_CACHE: Dict[str, Tuple[float, Dict[str, Dict[str, Any]]]] = {}
+PERFORMANCE_MEDIA_CATALOG_LOCK = threading.Lock()
+PERFORMANCE_MEDIA_MASTER_REPORT_ITEMS = ("Media", "MEDIA", "media")
+PERFORMANCE_SUPPLEMENTAL_MEDIA_CATALOG_ROWS = [
+    # The official media XLSX can lag behind newer shopping placements that already
+    # appear in stat-report downloads. Keep these rows narrow and let official rows
+    # override them whenever Naver adds the same IDs to the XLSX.
+    ("612593", "다음-PC", True, False),
+    ("612594", "다음-모바일", True, False),
+    ("335738", "Bing-PC", True, False),
+    ("335739", "Bing-Mobile", True, False),
+    ("424040", "네이버 검색탭 - 모바일", True, False),
+    ("341893", "네이버 통합검색 추천-모바일", True, False),
+    ("370822", "네이버 통합검색 추천 - PC", True, False),
+    ("684924", "네이버 통합검색 네이버플러스 스토어 - 모바일", True, False),
+    ("684925", "네이버 통합검색 네이버플러스 스토어 - PC", True, False),
+    ("684926", "네이버플러스 스토어 - 모바일", True, False),
+    ("684927", "네이버플러스 스토어 - PC", True, False),
+    ("644590", "네이버 메인 - 모바일", False, True),
+    ("662393", "네이버 메인 - PC", False, True),
+    ("766980", "네이버 마이 - 모바일", False, True),
+    ("746834", "네이버 부동산 - 모바일", False, True),
+    ("788300", "네이버 블로그", False, True),
+    ("783978", "네이버 쇼핑 검색창 - 모바일", False, True),
+]
+PERFORMANCE_SUPPLEMENTAL_SEARCH_MEDIA_IDS = {
+    media_id for media_id, _name, search_area, _contents_area in PERFORMANCE_SUPPLEMENTAL_MEDIA_CATALOG_ROWS
+    if search_area
+}
+PERFORMANCE_SUPPLEMENTAL_CONTENTS_MEDIA_IDS = {
+    media_id for media_id, _name, _search_area, contents_area in PERFORMANCE_SUPPLEMENTAL_MEDIA_CATALOG_ROWS
+    if contents_area
+}
+PERFORMANCE_REGION_LABELS = {
+    "00": "해외",
+    "01": "강원도",
+    "02": "경기도",
+    "03": "경상남도",
+    "04": "경상북도",
+    "05": "광주광역시",
+    "06": "대구광역시",
+    "07": "대전광역시",
+    "08": "부산광역시",
+    "09": "서울특별시",
+    "10": "울산광역시",
+    "11": "인천광역시",
+    "12": "전라남도",
+    "13": "전라북도",
+    "14": "제주특별자치도",
+    "15": "충청남도",
+    "16": "충청북도",
+    "17": "세종특별자치시",
+    "99": "국내 위치 미확인",
+}
+PERFORMANCE_REGION_CODES = set(PERFORMANCE_REGION_LABELS.keys())
+PERFORMANCE_CREATIVE_TARGET_CACHE_TTL = 600
+PERFORMANCE_CREATIVE_TARGET_CACHE: Dict[str, Tuple[float, Tuple[List[Dict[str, Any]], List[str]]]] = {}
 
 def _performance_deep_values(value: Any, keys: Iterable[str], max_depth: int = 6) -> List[Any]:
     key_set = {str(k) for k in keys if str(k or "").strip()}
@@ -3158,7 +3305,10 @@ def _performance_nested_value(row: Dict[str, Any], *keys: str) -> Any:
 
 def _performance_target_id(row: Dict[str, Any], kind: str) -> str:
     kind = str(kind or "").strip().lower()
-    if kind == "adgroup":
+    if kind in {"ad", "creative", "asset"}:
+        keys = ("nccAdId", "adId", "ad_id", "id")
+        prefix = "nad-"
+    elif kind == "adgroup":
         keys = ("nccAdgroupId", "adgroupId", "adGroupId", "id")
         prefix = "grp-"
     else:
@@ -3188,6 +3338,8 @@ def _performance_stats_id_is_valid(value: Any, kind: str = "") -> bool:
         return value_s.startswith("cmp-")
     if kind_s == "adgroup":
         return value_s.startswith("grp-")
+    if kind_s in {"ad", "creative", "asset"}:
+        return value_s.startswith(("nad-", "ad-"))
     return bool(re.match(r"^(cmp|grp|nkw|nad)-", value_s))
 
 def _performance_campaign_type_label(value: Any) -> str:
@@ -3200,9 +3352,13 @@ def _performance_campaign_bucket(value: Any) -> str:
     key = str(value or "").strip().upper()
     if _is_shopping_campaign_type(key):
         return "SHOPPING"
-    if key in {"WEB_SITE", "POWERLINK", "WEB"}:
+    if key in {"WEB_SITE", "POWERLINK", "WEB", "파워링크"}:
         return "WEB_SITE"
     return key
+
+def _performance_campaign_type_sort_order(value: Any) -> int:
+    bucket = _performance_campaign_bucket(value)
+    return {"WEB_SITE": 0, "SHOPPING": 1}.get(bucket, 9)
 
 def _performance_number(value: Any) -> float:
     if value is None or value == "":
@@ -3245,6 +3401,15 @@ def _performance_date_range(preset: str, since: Any = "", until: Any = "", *, ex
         return yesterday.isoformat(), yesterday.isoformat(), "어제"
     if preset_norm in {"last7days", "last_7_days", "7days", "최근7일"}:
         return (yesterday - timedelta(days=6)).isoformat(), yesterday.isoformat(), "최근 7일 (오늘 제외)"
+    if preset_norm in {"last30days", "last_30_days", "30days", "최근30일"}:
+        return (yesterday - timedelta(days=29)).isoformat(), yesterday.isoformat(), "최근 30일 (오늘 제외)"
+    if preset_norm in {"last90days", "last_90_days", "90days", "최근90일"}:
+        return (yesterday - timedelta(days=89)).isoformat(), yesterday.isoformat(), "최근 90일 (오늘 제외)"
+    if preset_norm in {"thismonth", "this_month", "currentmonth", "current_month", "month", "이번달", "금월"}:
+        since_d = today.replace(day=1)
+        if since_d > yesterday:
+            raise ValueError("이번달은 오늘을 제외하면 조회할 날짜가 없습니다.")
+        return since_d.isoformat(), yesterday.isoformat(), "이번달 (오늘 제외)"
     if exclude_today:
         return yesterday.isoformat(), yesterday.isoformat(), "어제"
     return today.isoformat(), today.isoformat(), "오늘"
@@ -3295,6 +3460,23 @@ def _stat_row_context(row: Dict[str, Any], context: Dict[str, Any] | None = None
 def _stat_row_has_metric(row: Dict[str, Any]) -> bool:
     return any(_performance_row_value(row, key) not in (None, "") for key in PERFORMANCE_METRIC_ALIASES.keys())
 
+def _stat_row_context_without_metrics(context: Dict[str, Any] | None) -> Dict[str, Any]:
+    if not isinstance(context, dict):
+        return {}
+    metric_keys = {str(key or "").casefold() for key in PERFORMANCE_METRIC_ALIASES.keys()}
+    for aliases in PERFORMANCE_METRIC_ALIASES.values():
+        metric_keys.update(str(alias or "").casefold() for alias in aliases)
+    metric_keys.update({
+        "ctr", "crto", "drtcrto", "ror", "roas", "purchaseror", "purchaseroas",
+        "cpc", "cvr", "cpconv", "viewcnt", "recentavgrnk", "recentavgcpc",
+        "pcnxavgrnk", "mblnxavgrnk", "_avgrnkweightedsum", "_avgrnkweight",
+    })
+    return {
+        key: value
+        for key, value in context.items()
+        if str(key or "").casefold() not in metric_keys
+    }
+
 def _collect_stat_rows_from_json(value: Any, context: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
     if isinstance(value, list):
         rows: List[Dict[str, Any]] = []
@@ -3305,9 +3487,23 @@ def _collect_stat_rows_from_json(value: Any, context: Dict[str, Any] | None = No
         return []
     rows: List[Dict[str, Any]] = []
     next_context = _stat_row_context(value, context)
+    known_keys = set(PERFORMANCE_STAT_ROW_DICT_KEYS) | set(PERFORMANCE_STAT_ROW_LIST_KEYS)
+    if value and not any(key in known_keys for key in value.keys()) and all(isinstance(v, (dict, list)) for v in value.values()):
+        nested_rows: List[Dict[str, Any]] = []
+        for nested in value.values():
+            nested_rows.extend(_collect_stat_rows_from_json(nested, next_context))
+        if nested_rows:
+            return nested_rows
+    requested_breakdown = str((context or {}).get("__requested_breakdown") or "").strip()
     for key in PERFORMANCE_STAT_ROW_LIST_KEYS:
         if key in value:
-            rows.extend(_collect_stat_rows_from_json(value.get(key), next_context))
+            list_context = next_context
+            if key in {"breakdowns", "breakdown"}:
+                list_context = _stat_row_context_without_metrics(next_context)
+            if requested_breakdown and key in {"breakdowns", "breakdown"}:
+                list_context = dict(list_context)
+                list_context["__breakdown_key"] = requested_breakdown
+            rows.extend(_collect_stat_rows_from_json(value.get(key), list_context))
     flat = _flatten_stat_row(value, context)
     flat_has_metric = _stat_row_has_metric(flat)
     if flat_has_metric or (not rows and _stat_row_id(flat)):
@@ -3316,14 +3512,21 @@ def _collect_stat_rows_from_json(value: Any, context: Dict[str, Any] | None = No
         for key in PERFORMANCE_STAT_ROW_DICT_KEYS:
             if key in value:
                 rows.extend(_collect_stat_rows_from_json(value.get(key), next_context))
+    if not rows:
+        for key, nested in (value or {}).items():
+            if key in set(PERFORMANCE_STAT_ROW_DICT_KEYS) | set(PERFORMANCE_STAT_ROW_LIST_KEYS):
+                continue
+            if isinstance(nested, (dict, list)):
+                rows.extend(_collect_stat_rows_from_json(nested, next_context))
     return rows
 
-def _stats_rows_from_response(res: Any) -> List[Dict[str, Any]]:
+def _stats_rows_from_response(res: Any, breakdown: str = "") -> List[Dict[str, Any]]:
     try:
         data = res.json()
     except Exception:
         return []
-    return _collect_stat_rows_from_json(data)
+    context = {"__requested_breakdown": str(breakdown or "").strip()} if breakdown else None
+    return _collect_stat_rows_from_json(data, context)
 
 def _stat_row_id(row: Dict[str, Any]) -> str:
     for key in ("id", "entityId", "statId", "nccId", "nccCampaignId", "campaignId", "nccAdgroupId", "adgroupId", "adGroupId", "nccKeywordId", "keywordId", "nccAdId", "adId"):
@@ -3332,7 +3535,7 @@ def _stat_row_id(row: Dict[str, Any]) -> str:
             return value
     return ""
 
-def _fetch_stats_rows(api_key: str, secret_key: str, cid: str, ids: List[str], fields: List[str], since: str, until: str, breakdown: str = "", id_kind: str = "", time_increment: str = "allDays", parallel_workers: int = 1):
+def _fetch_stats_rows(api_key: str, secret_key: str, cid: str, ids: List[str], fields: List[str], since: str, until: str, breakdown: str = "", id_kind: str = "", time_increment: str = "allDays", parallel_workers: int = 1, recover_individual: bool = True):
     rows: List[Dict[str, Any]] = []
     errors: List[str] = []
     invalid_ids: List[str] = []
@@ -3350,11 +3553,14 @@ def _fetch_stats_rows(api_key: str, secret_key: str, cid: str, ids: List[str], f
         errors.append(f"통계 조회에서 유효하지 않은 ID {len(invalid_ids)}개 제외: {sample}")
     def request_batch(batch: List[str]):
         params = {
-            "ids": ",".join(batch),
             "fields": json.dumps(fields),
             "timeRange": json.dumps({"since": since, "until": until}),
             "timeIncrement": str(time_increment or "allDays"),
         }
+        if len(batch) == 1:
+            params["id"] = batch[0]
+        else:
+            params["ids"] = ",".join(batch)
         if breakdown:
             params["breakdown"] = breakdown
         return _do_req("GET", api_key, secret_key, cid, "/stats", params=params)
@@ -3373,6 +3579,9 @@ def _fetch_stats_rows(api_key: str, secret_key: str, cid: str, ids: List[str], f
             if int(getattr(res, "status_code", 0) or 0) in {429, 500, 502, 503, 504}:
                 batch_errors.append(_short_log_text(getattr(res, "text", ""), 500) or f"/stats {getattr(res, 'status_code', '')}")
                 return batch_rows, batch_errors
+            if not recover_individual:
+                batch_errors.append(_short_log_text(getattr(res, "text", ""), 500) or f"/stats {getattr(res, 'status_code', '')}")
+                return batch_rows, batch_errors
             if len(batch) <= 1:
                 batch_errors.append(_short_log_text(getattr(res, "text", ""), 500) or f"/stats {getattr(res, 'status_code', '')}")
                 return batch_rows, batch_errors
@@ -3381,7 +3590,7 @@ def _fetch_stats_rows(api_key: str, secret_key: str, cid: str, ids: List[str], f
             for one_id in batch:
                 one_res = request_batch([one_id])
                 if getattr(one_res, "status_code", 0) == 200:
-                    batch_rows.extend(_stats_rows_from_response(one_res))
+                    batch_rows.extend(_stats_rows_from_response(one_res, breakdown=breakdown))
                     recovered += 1
                 else:
                     detail = _short_log_text(getattr(one_res, "text", ""), 220) or f"/stats {getattr(one_res, 'status_code', '')}"
@@ -3390,7 +3599,7 @@ def _fetch_stats_rows(api_key: str, secret_key: str, cid: str, ids: List[str], f
                 batch_errors.append(f"통계 배치 일부 실패: 정상 {recovered}개, 제외 {len(failed)}개")
                 batch_errors.extend(failed[:5])
             return batch_rows, batch_errors
-        batch_rows.extend(_stats_rows_from_response(res))
+        batch_rows.extend(_stats_rows_from_response(res, breakdown=breakdown))
         return batch_rows, batch_errors
 
     batches = [id_list[start:start + 100] for start in range(0, len(id_list), 100)]
@@ -3409,7 +3618,7 @@ def _fetch_stats_rows(api_key: str, secret_key: str, cid: str, ids: List[str], f
                 errors.extend(batch_errors)
     return rows, errors
 
-def _fetch_stats_rows_for_targets(api_key: str, secret_key: str, cid: str, targets: List[Dict[str, Any]], fields: List[str], since: str, until: str, breakdown: str = "", id_kind: str = "", time_increment: str = "allDays"):
+def _fetch_stats_rows_for_targets(api_key: str, secret_key: str, cid: str, targets: List[Dict[str, Any]], fields: List[str], since: str, until: str, breakdown: str = "", id_kind: str = "", time_increment: str = "allDays", parallel_workers: int = 0, recover_individual: bool = True):
     rows: List[Dict[str, Any]] = []
     errors: List[str] = []
     grouped_ids: Dict[str, List[str]] = {}
@@ -3423,11 +3632,1279 @@ def _fetch_stats_rows_for_targets(api_key: str, secret_key: str, cid: str, targe
             continue
         seen_by_group[group_key].add(target_id)
         grouped_ids.setdefault(group_key, []).append(target_id)
-    for id_group in grouped_ids.values():
-        group_rows, group_errors = _fetch_stats_rows(api_key, secret_key, cid, id_group, fields, since, until, breakdown=breakdown, id_kind=id_kind, time_increment=time_increment)
+    id_groups = [id_group for id_group in grouped_ids.values() if id_group]
+    if not id_groups:
+        return rows, errors
+
+    worker_budget = max(1, int(parallel_workers or FAST_IO_WORKERS or 1))
+
+    def fetch_group(id_group: List[str]) -> Tuple[List[Dict[str, Any]], List[str]]:
+        batch_count = max(1, (len(id_group) + 99) // 100)
+        group_workers = max(1, min(worker_budget, batch_count))
+        return _fetch_stats_rows(api_key, secret_key, cid, id_group, fields, since, until, breakdown=breakdown, id_kind=id_kind, time_increment=time_increment, parallel_workers=group_workers, recover_individual=recover_individual)
+
+    if len(id_groups) <= 1:
+        group_rows, group_errors = fetch_group(id_groups[0])
         rows.extend(group_rows)
         errors.extend(group_errors)
+    else:
+        with ThreadPoolExecutor(max_workers=min(worker_budget, len(id_groups))) as ex:
+            futures = [ex.submit(fetch_group, id_group) for id_group in id_groups]
+            for fut in as_completed(futures):
+                group_rows, group_errors = fut.result()
+                rows.extend(group_rows)
+                errors.extend(group_errors)
     return rows, errors
+
+def _fetch_stats_rows_individual_for_targets(api_key: str, secret_key: str, cid: str, targets: List[Dict[str, Any]], fields: List[str], since: str, until: str, breakdown: str = "", id_kind: str = "", time_increment: str = "allDays", parallel_workers: int = 0):
+    rows: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    ids: List[str] = []
+    seen: set[str] = set()
+    for target in targets or []:
+        target_id = str((target or {}).get("id") or "").strip()
+        if not target_id or target_id in seen:
+            continue
+        seen.add(target_id)
+        ids.append(target_id)
+    if not ids:
+        return rows, errors
+    workers = max(1, min(int(parallel_workers or FAST_IO_WORKERS or 1), len(ids)))
+
+    def fetch_one(target_id: str) -> Tuple[List[Dict[str, Any]], List[str]]:
+        return _fetch_stats_rows(
+            api_key, secret_key, cid, [target_id], fields, since, until,
+            breakdown=breakdown,
+            id_kind=id_kind,
+            time_increment=time_increment,
+            parallel_workers=1,
+            recover_individual=False,
+        )
+
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futures = [ex.submit(fetch_one, target_id) for target_id in ids]
+        for fut in as_completed(futures):
+            item_rows, item_errors = fut.result()
+            rows.extend(item_rows)
+            errors.extend(item_errors)
+    return rows, errors
+
+def _demographic_dimension_values(row: Dict[str, Any], aliases: Iterable[str]) -> List[str]:
+    alias_set = {str(alias or "").strip().casefold() for alias in aliases if str(alias or "").strip()}
+    values: List[str] = []
+
+    def add(value: Any):
+        text = str(value or "").strip()
+        if text and text not in values:
+            values.append(text)
+
+    def walk(node: Any, depth: int = 6):
+        if depth < 0:
+            return
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if str(key or "").strip().casefold() in alias_set and value not in (None, ""):
+                    add(value)
+                if isinstance(value, (dict, list)):
+                    walk(value, depth - 1)
+
+            marker_values = [
+                node.get("key"), node.get("field"), node.get("name"), node.get("type"),
+                node.get("dimension"), node.get("breakdown"), node.get("breakdownType"),
+                node.get("breakdownName"), node.get("column"),
+            ]
+            if any(str(marker or "").strip().casefold() in alias_set for marker in marker_values):
+                for value_key in ("value", "label", "displayName", "codeName", "text", "description"):
+                    if node.get(value_key) not in (None, ""):
+                        add(node.get(value_key))
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, depth - 1)
+
+    walk(row or {})
+    if not values and isinstance(row, dict):
+        requested = str(row.get("__breakdown_key") or row.get("__requested_breakdown") or "").strip()
+        requested_parts = [part.strip().casefold() for part in re.split(r"[,|]", requested) if part.strip()]
+        if any(part in alias_set for part in requested_parts):
+            for value_key in PERFORMANCE_BREAKDOWN_VALUE_KEYS:
+                value = row.get(value_key)
+                if value not in (None, ""):
+                    add(value)
+                    break
+    return values
+
+def _normalize_demographic_age(value: Any) -> Dict[str, Any]:
+    raw = str(value or "").strip()
+    raw_upper = raw.upper()
+    label = raw
+    if raw_upper in globals().get("AGE_CRITERION_LABELS", {}):
+        label = AGE_CRITERION_LABELS.get(raw_upper, raw)
+    elif raw_upper == "AG60XX":
+        label = "60세 이상"
+    if not label:
+        label = "연령 알 수 없음"
+    compact = label.replace("만", "")
+    nums = [int(x) for x in re.findall(r"\d+", compact)]
+    unknown = any(token in compact for token in ("알 수 없음", "미상", "기타", "UNKNOWN", "Unknown"))
+    if unknown or raw_upper in {"AGXXXX", "UNKNOWN"}:
+        return {"key": "unknown", "label": "알 수 없음", "sort": 9999, "raw": raw}
+    if nums:
+        start = nums[0]
+        if re.search(r"\d+\s*대", compact):
+            return {"key": f"{start}s", "label": f"{start}대", "sort": start, "raw": raw}
+        if any(token in compact for token in ("미만", "under", "Under", "이하")) and len(nums) == 1:
+            return {"key": f"under-{start}", "label": f"{start}세 미만", "sort": max(0, start - 1), "raw": raw}
+        if any(token in compact for token in ("이상", "over", "Over", "+")) and len(nums) == 1:
+            return {"key": f"{start}+", "label": f"{start}+", "sort": start, "raw": raw}
+        if len(nums) >= 2:
+            return {"key": f"{start}-{nums[1]}", "label": f"{start}-{nums[1]}", "sort": start, "raw": raw}
+        return {"key": str(start), "label": f"{start}", "sort": start, "raw": raw}
+    safe_key = re.sub(r"\s+", "_", label.casefold()) or "unknown"
+    return {"key": safe_key, "label": label, "sort": 9998, "raw": raw}
+
+def _normalize_demographic_gender(value: Any) -> Dict[str, Any]:
+    raw = str(value or "").strip()
+    compact = re.sub(r"[\s_\-]+", "", raw).casefold()
+    if compact in {"m", "male", "man", "men", "남", "남자", "남성"}:
+        return {"key": "male", "label": "남성", "sort": 0, "raw": raw}
+    if compact in {"f", "female", "woman", "women", "여", "여자", "여성"}:
+        return {"key": "female", "label": "여성", "sort": 1, "raw": raw}
+    if not compact or compact in {"unknown", "unknown_gender", "none", "기타", "미상", "알수없음"}:
+        return {"key": "unknown", "label": "알 수 없음", "sort": 9, "raw": raw}
+    return {"key": compact, "label": raw, "sort": 5, "raw": raw}
+
+def _demographic_metric_has_value(metric: Dict[str, Any]) -> bool:
+    return any(_performance_number(metric.get(key)) > 0 for key in ("impCnt", "clkCnt", "salesAmt", "ccnt", "convAmt", "purchaseCcnt", "purchaseConvAmt"))
+
+def _finalized_demographic_metric(metric: Dict[str, Any]) -> Dict[str, Any]:
+    return _finalize_perf_metric(dict(metric or _build_empty_perf_metric()))
+
+def _build_age_gender_demographic_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    buckets: Dict[str, Dict[str, Any]] = {}
+    for row in rows or []:
+        age_values = _demographic_dimension_values(row, PERFORMANCE_DEMOGRAPHIC_AGE_KEYS)
+        gender_values = _demographic_dimension_values(row, PERFORMANCE_DEMOGRAPHIC_GENDER_KEYS)
+        if not age_values or not gender_values:
+            continue
+        age = _normalize_demographic_age(age_values[0])
+        gender = _normalize_demographic_gender(gender_values[0])
+        bucket = buckets.setdefault(age["key"], {
+            "age_key": age["key"],
+            "age_label": age["label"],
+            "age_raw": age["raw"],
+            "sort": age["sort"],
+            "series": {},
+            "total": _build_empty_perf_metric(),
+        })
+        series = bucket["series"].setdefault(gender["key"], {
+            "gender_key": gender["key"],
+            "gender_label": gender["label"],
+            "sort": gender["sort"],
+            "metrics": _build_empty_perf_metric(),
+        })
+        _add_stat_to_metric(series["metrics"], row)
+        _add_stat_to_metric(bucket["total"], row)
+    out: List[Dict[str, Any]] = []
+    for bucket in buckets.values():
+        bucket["total"] = _finalized_demographic_metric(bucket["total"])
+        bucket["series"] = [
+            {**series, "metrics": _finalized_demographic_metric(series.get("metrics") or {})}
+            for series in sorted(bucket.get("series", {}).values(), key=lambda item: (item.get("sort", 9), str(item.get("gender_label") or "")))
+        ]
+        out.append(bucket)
+    return sorted(out, key=lambda item: (item.get("sort", 9999), str(item.get("age_label") or "")))
+
+def _build_single_demographic_rows(rows: List[Dict[str, Any]], dimension: str) -> List[Dict[str, Any]]:
+    aliases = PERFORMANCE_DEMOGRAPHIC_AGE_KEYS if dimension == "age" else PERFORMANCE_DEMOGRAPHIC_GENDER_KEYS
+    buckets: Dict[str, Dict[str, Any]] = {}
+    for row in rows or []:
+        values = _demographic_dimension_values(row, aliases)
+        if not values:
+            continue
+        item = _normalize_demographic_age(values[0]) if dimension == "age" else _normalize_demographic_gender(values[0])
+        bucket = buckets.setdefault(item["key"], {
+            "key": item["key"],
+            "label": item["label"],
+            "raw": item["raw"],
+            "sort": item["sort"],
+            "metrics": _build_empty_perf_metric(),
+        })
+        _add_stat_to_metric(bucket["metrics"], row)
+    out = []
+    for bucket in buckets.values():
+        bucket["metrics"] = _finalized_demographic_metric(bucket.get("metrics") or {})
+        out.append(bucket)
+    return sorted(out, key=lambda item: (item.get("sort", 9999), str(item.get("label") or "")))
+
+def _fetch_demographic_breakdown_rows(api_key: str, secret_key: str, cid: str, targets: List[Dict[str, Any]], fields: List[str], since: str, until: str, breakdown: str, id_kind: str) -> Tuple[List[Dict[str, Any]], List[str]]:
+    rows, errors = _fetch_stats_rows_for_targets(
+        api_key, secret_key, cid, targets, fields, since, until,
+        breakdown=breakdown,
+        id_kind=id_kind,
+        time_increment="allDays",
+        parallel_workers=FAST_IO_WORKERS,
+        recover_individual=False,
+    )
+    if not rows:
+        individual_rows, individual_errors = _fetch_stats_rows_individual_for_targets(
+            api_key, secret_key, cid, targets, fields, since, until,
+            breakdown=breakdown,
+            id_kind=id_kind,
+            time_increment="allDays",
+            parallel_workers=FAST_IO_WORKERS,
+        )
+        if individual_rows:
+            return individual_rows, individual_errors
+        if individual_errors:
+            errors.extend(individual_errors[:8])
+    if not rows and fields != PERFORMANCE_BREAKDOWN_FIELDS:
+        light_rows, light_errors = _fetch_stats_rows_for_targets(
+            api_key, secret_key, cid, targets, PERFORMANCE_BREAKDOWN_FIELDS, since, until,
+            breakdown=breakdown,
+            id_kind=id_kind,
+            time_increment="allDays",
+            parallel_workers=FAST_IO_WORKERS,
+            recover_individual=False,
+        )
+        if light_rows:
+            return light_rows, light_errors
+        if light_errors:
+            errors.extend(light_errors[:8])
+    return rows, errors
+
+def _criterion_option_label_from_row(row: Dict[str, Any], fallback_code: str = "") -> str:
+    label = str(_row_first_present(row or {}, ["name", "codeName", "label", "description", "text"], "") or "").strip()
+    return label or str(fallback_code or "").strip()
+
+def _resolve_gender_criterion_options(api_key: str, secret_key: str, cid: str) -> Tuple[List[Dict[str, str]], str]:
+    res, rows = _fetch_criterion_dictionary_entries(api_key, secret_key, cid, "GN")
+    if res.status_code != 200 or not rows:
+        return [dict(item) for item in PERFORMANCE_GENDER_CRITERION_FALLBACK_OPTIONS], (
+            f"성별 사전 조회 실패로 기본 후보 코드를 사용했습니다: {_response_detail_text(res)}"
+        )
+    options: List[Dict[str, str]] = []
+    seen: set[str] = set()
+    for row in rows or []:
+        code = str(_row_first_present(row, ["dictionaryCode", "code", "criterionCode", "targetCode"], "") or "").strip().upper()
+        if not code or not code.startswith("GN") or code in seen:
+            continue
+        seen.add(code)
+        options.append({"code": code, "label": _criterion_option_label_from_row(row, code)})
+    if not options:
+        return [dict(item) for item in PERFORMANCE_GENDER_CRITERION_FALLBACK_OPTIONS], "성별 사전에 GN 코드가 없어 기본 후보 코드를 사용했습니다."
+    return options, ""
+
+def _criterion_id(owner_id: Any, dictionary_code: Any) -> str:
+    owner = str(owner_id or "").strip()
+    code = str(dictionary_code or "").strip().upper()
+    return f"{owner}~{code}" if owner and code else ""
+
+def _criterion_stat_targets_for_dimension(target_rows: List[Dict[str, Any]], options: List[Dict[str, str]], dimension: str) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, str]]]:
+    targets: List[Dict[str, Any]] = []
+    meta_by_id: Dict[str, Dict[str, str]] = {}
+    seen: set[str] = set()
+    for target in target_rows or []:
+        owner_id = str((target or {}).get("id") or (target or {}).get("adgroup_id") or "").strip()
+        if not owner_id:
+            continue
+        for option in options or []:
+            code = str((option or {}).get("code") or "").strip().upper()
+            if not code:
+                continue
+            criterion_id = _criterion_id(owner_id, code)
+            if not criterion_id or criterion_id in seen:
+                continue
+            seen.add(criterion_id)
+            label = str((option or {}).get("label") or code).strip()
+            criterion_target = {
+                "id": criterion_id,
+                "name": label,
+                "owner_id": owner_id,
+                "adgroup_id": owner_id,
+                "campaign_id": str((target or {}).get("campaign_id") or ""),
+                "campaign_name": str((target or {}).get("campaign_name") or ""),
+                "campaign_type": str((target or {}).get("campaign_type") or "UNKNOWN"),
+                "dictionary_code": code,
+                "criterion_dimension": dimension,
+            }
+            targets.append(criterion_target)
+            meta_by_id[criterion_id] = {
+                "criterion_id": criterion_id,
+                "owner_id": owner_id,
+                "dictionary_code": code,
+                "label": label,
+                "dimension": dimension,
+            }
+    return targets, meta_by_id
+
+def _annotate_criterion_stat_rows(rows: List[Dict[str, Any]], meta_by_id: Dict[str, Dict[str, str]], dimension: str) -> List[Dict[str, Any]]:
+    annotated: List[Dict[str, Any]] = []
+    label_key = "ageRangeNm" if dimension == "age" else "genderNm"
+    code_key = "ageCode" if dimension == "age" else "genderCode"
+    for row in rows or []:
+        stat_id = _stat_row_id(row)
+        meta = meta_by_id.get(stat_id)
+        if not meta:
+            continue
+        item = dict(row or {})
+        item[label_key] = meta.get("label") or meta.get("dictionary_code") or ""
+        item[code_key] = meta.get("dictionary_code") or ""
+        item["criterionId"] = meta.get("criterion_id") or stat_id
+        item["ownerId"] = meta.get("owner_id") or ""
+        annotated.append(item)
+    return annotated
+
+def _fetch_demographic_criterion_rows(api_key: str, secret_key: str, cid: str, target_rows: List[Dict[str, Any]], since: str, until: str) -> Dict[str, Any]:
+    errors: List[str] = []
+    warnings: List[str] = []
+    age_options, age_warning = _resolve_age_criterion_options(api_key, secret_key, cid)
+    gender_options, gender_warning = _resolve_gender_criterion_options(api_key, secret_key, cid)
+    if age_warning:
+        warnings.append(age_warning)
+    if gender_warning:
+        warnings.append(gender_warning)
+    age_targets, age_meta = _criterion_stat_targets_for_dimension(target_rows, age_options, "age")
+    gender_targets, gender_meta = _criterion_stat_targets_for_dimension(target_rows, gender_options, "gender")
+    age_raw_rows: List[Dict[str, Any]] = []
+    gender_raw_rows: List[Dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        futures = {}
+        if age_targets:
+            futures[ex.submit(
+                _fetch_stats_rows_for_targets,
+                api_key, secret_key, cid, age_targets, PERFORMANCE_DEMOGRAPHIC_CRITERION_FIELDS, since, until,
+                "", "", "allDays", FAST_IO_WORKERS, False,
+            )] = ("age", age_meta)
+        if gender_targets:
+            futures[ex.submit(
+                _fetch_stats_rows_for_targets,
+                api_key, secret_key, cid, gender_targets, PERFORMANCE_DEMOGRAPHIC_CRITERION_FIELDS, since, until,
+                "", "", "allDays", FAST_IO_WORKERS, False,
+            )] = ("gender", gender_meta)
+        for fut in as_completed(futures):
+            dimension, meta_by_id = futures[fut]
+            try:
+                raw_rows, item_errors = fut.result()
+            except Exception as e:
+                raw_rows, item_errors = [], [str(e)]
+            errors.extend(item_errors[:8])
+            annotated = _annotate_criterion_stat_rows(raw_rows, meta_by_id, dimension)
+            if dimension == "age":
+                age_raw_rows = annotated
+            else:
+                gender_raw_rows = annotated
+    age_rows = _build_single_demographic_rows(age_raw_rows, "age")
+    gender_rows = _build_single_demographic_rows(gender_raw_rows, "gender")
+    return {
+        "available": bool(age_rows or gender_rows),
+        "mode": "split" if (age_rows or gender_rows) else "none",
+        "source": "criterion_stats",
+        "scope_note": "연령/성별 자료는 타겟팅 Criterion 통계(ownerId~dictionaryCode) 기준입니다.",
+        "target_count": len(target_rows or []),
+        "age_gender_rows": [],
+        "age_rows": age_rows,
+        "gender_rows": gender_rows,
+        "warnings": warnings,
+        "errors": errors[:8],
+        "debug": {
+            "criterion_id_format": "ownerId~dictionaryCode",
+            "age_option_count": len(age_options or []),
+            "gender_option_count": len(gender_options or []),
+            "age_criterion_id_count": len(age_targets or []),
+            "gender_criterion_id_count": len(gender_targets or []),
+            "raw_age_row_count": len(age_raw_rows or []),
+            "raw_gender_row_count": len(gender_raw_rows or []),
+            "parsed_age_row_count": len(age_rows or []),
+            "parsed_gender_row_count": len(gender_rows or []),
+        },
+    }
+
+def _get_performance_demographics(api_key: str, secret_key: str, cid: str, target_rows: List[Dict[str, Any]], level: str, since: str, until: str, stats_id_kind: str) -> Dict[str, Any]:
+    criterion_result = _fetch_demographic_criterion_rows(api_key, secret_key, cid, target_rows, since, until) if target_rows else {
+        "available": False,
+        "mode": "none",
+        "source": "criterion_stats",
+        "scope_note": "연령/성별 자료는 타겟팅 Criterion 통계(ownerId~dictionaryCode) 기준입니다.",
+        "target_count": 0,
+        "age_gender_rows": [],
+        "age_rows": [],
+        "gender_rows": [],
+        "warnings": [],
+        "errors": [],
+    }
+    if criterion_result.get("available"):
+        return criterion_result
+
+    shopping_targets = [
+        row for row in (target_rows or [])
+        if _performance_campaign_bucket((row or {}).get("campaign_type")) == "SHOPPING"
+    ]
+    base = {
+        "available": False,
+        "mode": "none",
+        "source": "shopping_stats_breakdown",
+        "scope_note": "연령/성별 자료는 타겟팅 Criterion 통계 우선, 쇼핑검색은 /stats 단일 breakdown 보조 기준입니다.",
+        "target_count": len(shopping_targets),
+        "age_gender_rows": [],
+        "age_rows": [],
+        "gender_rows": [],
+        "warnings": list(criterion_result.get("warnings") or []),
+        "errors": list(criterion_result.get("errors") or []),
+    }
+    if not shopping_targets:
+        base["warnings"].append("Criterion 통계와 쇼핑검색 breakdown 모두 응답 행이 없습니다.")
+        return base
+
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        age_future = ex.submit(
+            _fetch_demographic_breakdown_rows,
+            api_key, secret_key, cid, shopping_targets, PERFORMANCE_BREAKDOWN_FIELDS,
+            since, until, "ageRangeNm", stats_id_kind,
+        )
+        gender_future = ex.submit(
+            _fetch_demographic_breakdown_rows,
+            api_key, secret_key, cid, shopping_targets, PERFORMANCE_BREAKDOWN_FIELDS,
+            since, until, "genderNm", stats_id_kind,
+        )
+        age_raw_rows, age_errors = age_future.result()
+        gender_raw_rows, gender_errors = gender_future.result()
+
+    age_rows = _build_single_demographic_rows(age_raw_rows, "age")
+    gender_rows = _build_single_demographic_rows(gender_raw_rows, "gender")
+    if age_rows or gender_rows:
+        base.update({
+            "available": True,
+            "mode": "split",
+            "age_rows": age_rows,
+            "gender_rows": gender_rows,
+            "warnings": [],
+            "errors": (list(criterion_result.get("errors") or []) + age_errors + gender_errors)[:8],
+            "debug": {
+                "criterion_debug": criterion_result.get("debug") or {},
+                "raw_age_row_count": len(age_raw_rows or []),
+                "raw_gender_row_count": len(gender_raw_rows or []),
+                "parsed_age_row_count": len(age_rows or []),
+                "parsed_gender_row_count": len(gender_rows or []),
+                "attempted_breakdowns": ["ageRangeNm", "genderNm"],
+            },
+        })
+        return base
+
+    criterion_debug = criterion_result.get("debug") or {}
+    attempted_criterion_ids = int(criterion_debug.get("age_criterion_id_count") or 0) + int(criterion_debug.get("gender_criterion_id_count") or 0)
+    base["warnings"].append(f"연령/성별 데이터가 없습니다. Criterion ID {attempted_criterion_ids}개 및 쇼핑검색 광고그룹 ID {len(shopping_targets)}개를 기간 합계(allDays) 기준으로 재시도했지만 응답 행이 없었습니다.")
+    base["errors"] = (list(criterion_result.get("errors") or []) + age_errors + gender_errors)[:8]
+    base["debug"] = {
+        "criterion_debug": criterion_result.get("debug") or {},
+        "target_count": len(shopping_targets),
+        "stats_id_kind": stats_id_kind,
+        "attempted_breakdowns": ["ageRangeNm", "genderNm"],
+        "raw_error_count": len(age_errors + gender_errors),
+    }
+    return base
+
+def _normalize_time_hour(value: Any) -> Dict[str, Any]:
+    raw = str(value or "").strip()
+    match = re.search(r"\d{1,2}", raw)
+    if not match:
+        return {"key": "unknown", "label": "시간 알 수 없음", "sort": 999, "raw": raw}
+    hour = max(0, min(23, int(match.group(0))))
+    return {"key": f"{hour:02d}", "label": f"{hour:02d}시", "sort": hour, "raw": raw}
+
+def _build_time_breakdown_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    buckets: Dict[str, Dict[str, Any]] = {}
+    for row in rows or []:
+        hour_values = _demographic_dimension_values(row, PERFORMANCE_TIME_HOUR_KEYS)
+        if not hour_values:
+            continue
+        hour = _normalize_time_hour(hour_values[0])
+        bucket = buckets.setdefault(hour["key"], {
+            "key": hour["key"],
+            "label": hour["label"],
+            "raw": hour["raw"],
+            "sort": hour["sort"],
+            "metrics": _build_empty_perf_metric(),
+        })
+        _add_stat_to_metric(bucket["metrics"], row)
+    out: List[Dict[str, Any]] = []
+    for bucket in buckets.values():
+        bucket["metrics"] = _finalize_perf_metric(bucket.get("metrics") or {})
+        out.append(bucket)
+    return sorted(out, key=lambda item: (item.get("sort", 999), str(item.get("label") or "")))
+
+def _standalone_report_target_payload(payload: Dict[str, Any], *, forced_type_filter: str | None = None) -> Tuple[str, str, str, str, str, List[str], List[str]]:
+    scope = _normalize_performance_scope(payload.get("target_scope") or payload.get("scope"))
+    type_filter = _normalize_performance_type_filter(forced_type_filter or payload.get("campaign_type") or payload.get("type_filter"))
+    since, until, date_label = _performance_date_range(
+        payload.get("date_preset"),
+        payload.get("since"),
+        payload.get("until"),
+        exclude_today=_boolish(payload.get("exclude_today"), False),
+    )
+    campaign_ids = [str(x or "").strip() for x in (payload.get("campaign_ids") or []) if str(x or "").strip()]
+    adgroup_ids = [str(x or "").strip() for x in (payload.get("adgroup_ids") or []) if str(x or "").strip()]
+    return scope, type_filter, since, until, date_label, campaign_ids, adgroup_ids
+
+def _sum_metrics_from_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    summary = _build_empty_perf_metric()
+    for row in rows or []:
+        metrics = row.get("metrics") if isinstance(row, dict) else None
+        if not isinstance(metrics, dict):
+            continue
+        for key in ("impCnt", "clkCnt", "salesAmt", "ccnt", "convAmt", "purchaseCcnt", "purchaseConvAmt", "cartCcnt", "cartConvAmt"):
+            summary[key] += _performance_number(metrics.get(key))
+        avg_rnk = _performance_number(metrics.get("avgRnk"))
+        if avg_rnk > 0:
+            weight = max(1.0, _performance_number(metrics.get("impCnt")))
+            summary["_avgRnkWeightedSum"] = _performance_number(summary.get("_avgRnkWeightedSum")) + (avg_rnk * weight)
+            summary["_avgRnkWeight"] = _performance_number(summary.get("_avgRnkWeight")) + weight
+    return _finalize_perf_metric(summary)
+
+def _get_age_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    scope, requested_type_filter, since, until, date_label, campaign_ids, adgroup_ids = _standalone_report_target_payload(payload)
+    type_filter = requested_type_filter
+    level = "adgroup"
+    target_rows, warnings = _collect_performance_targets(
+        api_key, secret_key, cid, scope, level, type_filter, campaign_ids, adgroup_ids,
+        include_ad_counts=False,
+    )
+    stats_id_kind = "adgroup" if level == "adgroup" else "campaign"
+    if not target_rows:
+        demographics = {
+            "available": False,
+            "mode": "none",
+            "scope_note": "연령/성별 자료는 타겟팅 Criterion 통계(ownerId~dictionaryCode) 기준입니다.",
+            "target_count": 0,
+            "age_gender_rows": [],
+            "age_rows": [],
+            "gender_rows": [],
+            "warnings": ["조회할 파워링크/쇼핑검색 광고그룹 대상이 없습니다."],
+            "errors": [],
+        }
+    else:
+        demographics = _get_performance_demographics(api_key, secret_key, cid, target_rows, level, since, until, stats_id_kind)
+    all_rows = []
+    if demographics.get("mode") == "age_gender":
+        all_rows = [{"metrics": row.get("total") or {}} for row in (demographics.get("age_gender_rows") or [])]
+    elif demographics.get("mode") == "split":
+        split_rows = demographics.get("age_rows") or demographics.get("gender_rows") or []
+        all_rows = [{"metrics": row.get("metrics") or {}} for row in split_rows]
+    summary = _sum_metrics_from_rows(all_rows)
+    type_label = "전체 유형" if type_filter == "ALL" else _performance_campaign_type_label(type_filter)
+    return {
+        "message": f"{date_label} {type_label} 연령별 데이터 조회 완료 · 대상 {len(target_rows)}개",
+        "demographics": demographics,
+        "summary": summary,
+        "warnings": warnings + list(demographics.get("warnings") or []),
+        "errors": list(demographics.get("errors") or [])[:30],
+        "scope": scope,
+        "result_level": level,
+        "campaign_type": type_filter,
+        "since": since,
+        "until": until,
+        "date_label": date_label,
+    }
+
+def _clamp_time_breakdown_supported_range(since: str, until: str, date_label: str) -> Tuple[str, str, str, List[str], Dict[str, Any]]:
+    """
+    NAVER /stats hh24 breakdown only supports the most recent 7 days.
+    Keep the UI from surfacing repeated 11004 BAD_REQUEST errors by clamping
+    time-breakdown requests to the API-supported window.
+    """
+    warnings: List[str] = []
+    meta: Dict[str, Any] = {
+        "requested_since": since,
+        "requested_until": until,
+        "requested_date_label": date_label,
+        "time_breakdown_api_limit_days": 7,
+        "range_was_clamped": False,
+    }
+    try:
+        since_d = date.fromisoformat(str(since or ""))
+        until_d = date.fromisoformat(str(until or ""))
+    except Exception:
+        return since, until, date_label, warnings, meta
+
+    yesterday = _today_kst() - timedelta(days=1)
+    supported_since = yesterday - timedelta(days=6)
+    effective_since = max(since_d, supported_since)
+    effective_until = min(until_d, yesterday)
+
+    if effective_since > effective_until:
+        effective_since = supported_since
+        effective_until = yesterday
+
+    if effective_since != since_d or effective_until != until_d:
+        meta["range_was_clamped"] = True
+        meta["effective_since"] = effective_since.isoformat()
+        meta["effective_until"] = effective_until.isoformat()
+        warnings.append(
+            "네이버 /stats 시간대별(hh24) breakdown은 최근 7일까지만 응답되어, "
+            f"선택 기간({since_d.isoformat()}~{until_d.isoformat()}) 대신 "
+            f"API 지원 범위({effective_since.isoformat()}~{effective_until.isoformat()})로 자동 조회했습니다."
+        )
+        date_label = f"{date_label} 중 시간대 API 지원 범위"
+    else:
+        meta["effective_since"] = since
+        meta["effective_until"] = until
+
+    return effective_since.isoformat(), effective_until.isoformat(), date_label, warnings, meta
+
+def _get_time_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    scope, type_filter, since, until, date_label, campaign_ids, adgroup_ids = _standalone_report_target_payload(payload)
+    requested_since, requested_until, requested_date_label = since, until, date_label
+    since, until, date_label, range_warnings, range_meta = _clamp_time_breakdown_supported_range(since, until, date_label)
+    level = "adgroup"
+    warnings: List[str] = list(range_warnings)
+    target_rows, target_warnings = _collect_performance_targets(
+        api_key, secret_key, cid, scope, level, type_filter, campaign_ids, adgroup_ids,
+        include_ad_counts=False,
+    )
+    warnings.extend(target_warnings)
+    stats_id_kind = "adgroup" if level == "adgroup" else "campaign"
+    rows: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    if target_rows:
+        rows, errors = _fetch_stats_rows_for_targets(
+            api_key, secret_key, cid, target_rows, PERFORMANCE_BREAKDOWN_FIELDS, since, until,
+            breakdown="hh24",
+            id_kind=stats_id_kind,
+            time_increment="allDays",
+            parallel_workers=FAST_IO_WORKERS,
+            recover_individual=False,
+        )
+        if not rows:
+            individual_rows, individual_errors = _fetch_stats_rows_individual_for_targets(
+                api_key, secret_key, cid, target_rows, PERFORMANCE_BREAKDOWN_FIELDS, since, until,
+                breakdown="hh24",
+                id_kind=stats_id_kind,
+                time_increment="allDays",
+                parallel_workers=FAST_IO_WORKERS,
+            )
+            if individual_rows:
+                rows, errors = individual_rows, individual_errors
+            elif individual_errors:
+                errors.extend(individual_errors[:8])
+    time_rows = _build_time_breakdown_rows(rows)
+    summary = _sum_metrics_from_rows(time_rows)
+    if target_rows and not time_rows and not errors:
+        warnings.append(f"시간대별 breakdown 데이터가 없습니다. 광고그룹 ID {len(target_rows)}개를 기간 합계(allDays) 기준으로 재시도했지만 응답 행이 없었습니다.")
+    return {
+        "message": f"{date_label} 시간대별 데이터 조회 완료 · 대상 {len(target_rows)}개",
+        "rows": time_rows,
+        "summary": summary,
+        "warnings": warnings,
+        "errors": errors[:30],
+        "scope": scope,
+        "result_level": level,
+        "campaign_type": type_filter,
+        "since": since,
+        "until": until,
+        "date_label": date_label,
+        "requested_since": requested_since,
+        "requested_until": requested_until,
+        "requested_date_label": requested_date_label,
+        "range_was_clamped": bool(range_meta.get("range_was_clamped")),
+        "target_count": len(target_rows),
+        "debug": {
+            "raw_breakdown_row_count": len(rows or []),
+            "parsed_time_row_count": len(time_rows or []),
+            "attempted_breakdown": "hh24",
+            "time_increment": "allDays",
+            **range_meta,
+        },
+    }
+
+def _dimension_report_day_count(since: str, until: str) -> int:
+    return (date.fromisoformat(until) - date.fromisoformat(since)).days + 1
+
+def _dimension_target_sets(target_rows: List[Dict[str, Any]]) -> Tuple[set[str], set[str], set[str]]:
+    campaign_ids = {
+        str((row or {}).get("campaign_id") or (row or {}).get("id") or "").strip()
+        for row in (target_rows or [])
+        if str((row or {}).get("campaign_id") or (row or {}).get("id") or "").strip()
+    }
+    adgroup_ids = {
+        str((row or {}).get("adgroup_id") or (row or {}).get("id") or "").strip()
+        for row in (target_rows or [])
+        if str((row or {}).get("adgroup_id") or (row or {}).get("id") or "").strip().lower().startswith("grp-")
+    }
+    type_keys = {
+        _performance_campaign_bucket((row or {}).get("campaign_type"))
+        for row in (target_rows or [])
+        if _performance_campaign_bucket((row or {}).get("campaign_type")) in {"WEB_SITE", "SHOPPING"}
+    }
+    return campaign_ids, adgroup_ids, type_keys
+
+def _dimension_row_in_scope(row: Dict[str, Any], campaign_ids: set[str], adgroup_ids: set[str]) -> bool:
+    campaign_id = str((row or {}).get("campaign_id") or "").strip()
+    adgroup_id = str((row or {}).get("adgroup_id") or "").strip()
+    if campaign_ids and campaign_id not in campaign_ids:
+        return False
+    if adgroup_ids and adgroup_id and adgroup_id not in adgroup_ids:
+        return False
+    return True
+
+def _dimension_campaign_type_map(target_rows: List[Dict[str, Any]]) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    for row in target_rows or []:
+        campaign_id = str((row or {}).get("campaign_id") or (row or {}).get("nccCampaignId") or (row or {}).get("id") or "").strip()
+        bucket = _performance_campaign_bucket((row or {}).get("campaign_type"))
+        if campaign_id and bucket:
+            out[campaign_id] = bucket
+    return out
+
+def _dimension_row_campaign_bucket(row: Dict[str, Any], campaign_type_by_id: Dict[str, str]) -> str:
+    campaign_id = str((row or {}).get("campaign_id") or "").strip()
+    return str((campaign_type_by_id or {}).get(campaign_id) or "").strip()
+
+def _dimension_bucket_info(row: Dict[str, Any], dimension: str, media_catalog: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    dimension_norm = str(dimension or "").strip().lower()
+    if dimension_norm == "area":
+        return _performance_media_area_info((row or {}).get("media"), media_catalog, (row or {}).get("source"))
+    if dimension_norm == "media":
+        media_id = _performance_media_code((row or {}).get("media"))
+        media = (media_catalog or {}).get(media_id) or {}
+        is_unknown = not bool(media_id)
+        is_unresolved = bool(media_id and not media)
+        if is_unknown:
+            label = "매체 코드 없음"
+        elif is_unresolved:
+            label = f"매체명 미확인 ({media_id})"
+        else:
+            label = str(media.get("name") or f"매체 {media_id}").strip()
+        return {
+            "key": media_id or "unknown",
+            "label": label,
+            "sort": label,
+            "media_id": media_id,
+            "media_name": label,
+            "url": str(media.get("url") or "").strip(),
+            "search_area": _boolish(media.get("search_area"), False),
+            "contents_area": _boolish(media.get("contents_area"), False),
+            "is_unknown_media": is_unknown,
+            "is_unresolved_media": is_unresolved,
+        }
+    raw_region_code = _performance_region_raw((row or {}).get("region_code"))
+    region_code = _performance_region_code(raw_region_code)
+    return {
+        "key": region_code,
+        "label": PERFORMANCE_REGION_LABELS.get(region_code, "지역 미확인"),
+        "sort": 999 if region_code == "unknown" else int(region_code),
+        "region_code": region_code,
+        "raw_region_code": raw_region_code,
+        "is_unknown_region": not bool(raw_region_code),
+        "is_unresolved_region": bool(raw_region_code and region_code == "unknown"),
+    }
+
+def _dimension_media_is_individual_blog(row: Dict[str, Any]) -> bool:
+    key = str((row or {}).get("key") or (row or {}).get("media_id") or "").strip()
+    label = str((row or {}).get("label") or (row or {}).get("media_name") or "").strip()
+    url = str((row or {}).get("url") or "").strip().lower()
+    compact = re.sub(r"\s+", "", label)
+    if key == "788300" or compact == "네이버블로그":
+        return False
+    if "blog.naver.com" in url or "m.blog.naver.com" in url:
+        return True
+    return bool("블로그" in compact and compact != "네이버블로그")
+
+def _add_dimension_activity_to_metric(metric: Dict[str, Any], row: Dict[str, Any]) -> None:
+    impressions = _performance_number((row or {}).get("impCnt"))
+    clicks = _performance_number((row or {}).get("clkCnt"))
+    cost = _performance_number((row or {}).get("salesAmt"))
+    metric["impCnt"] += int(round(impressions))
+    metric["clkCnt"] += int(round(clicks))
+    metric["salesAmt"] += cost
+    sum_ad_rank = _performance_number((row or {}).get("sum_ad_rank"))
+    if sum_ad_rank > 0 and impressions > 0:
+        metric["_avgRnkWeightedSum"] = _performance_number(metric.get("_avgRnkWeightedSum")) + sum_ad_rank
+        metric["_avgRnkWeight"] = _performance_number(metric.get("_avgRnkWeight")) + impressions
+
+def _add_dimension_conversion_to_metric(metric: Dict[str, Any], row: Dict[str, Any]) -> None:
+    count = _performance_number((row or {}).get("conversion_count"))
+    amount = _performance_number((row or {}).get("sales_by_conversion"))
+    if count <= 0:
+        return
+    metric["ccnt"] += count
+    metric["convAmt"] += amount
+    if _boolish((row or {}).get("is_purchase"), False):
+        metric["purchaseCcnt"] += count
+        metric["purchaseConvAmt"] += amount
+    elif _boolish((row or {}).get("is_cart"), False):
+        metric["cartCcnt"] += count
+        metric["cartConvAmt"] += amount
+
+def _aggregate_dimension_report_rows(
+    activity_rows: List[Dict[str, Any]],
+    conversion_rows: List[Dict[str, Any]],
+    dimension: str,
+    media_catalog: Dict[str, Dict[str, Any]],
+    campaign_ids: set[str],
+    adgroup_ids: set[str],
+) -> List[Dict[str, Any]]:
+    buckets: Dict[str, Dict[str, Any]] = {}
+
+    def bucket_for(row: Dict[str, Any]) -> Dict[str, Any] | None:
+        if not _dimension_row_in_scope(row, campaign_ids, adgroup_ids):
+            return None
+        info = _dimension_bucket_info(row, dimension, media_catalog)
+        key = str(info.get("key") or "unknown")
+        bucket = buckets.setdefault(key, {
+            "key": key,
+            "label": str(info.get("label") or key),
+            "raw": str(info.get("media_id") or info.get("raw_region_code") or info.get("region_code") or key),
+            "sort": info.get("sort", 999),
+            "meta": {k: v for k, v in info.items() if k not in {"key", "label", "sort"}},
+            "metrics": _build_empty_perf_metric(),
+        })
+        if str(dimension or "").strip().lower() == "media":
+            bucket["meta"]["is_individual_blog_media"] = _dimension_media_is_individual_blog({
+                **bucket.get("meta", {}),
+                "key": key,
+                "label": bucket.get("label"),
+            })
+        return bucket
+
+    for row in activity_rows or []:
+        bucket = bucket_for(row)
+        if bucket is not None:
+            _add_dimension_activity_to_metric(bucket["metrics"], row)
+    for row in conversion_rows or []:
+        bucket = bucket_for(row)
+        if bucket is not None:
+            _add_dimension_conversion_to_metric(bucket["metrics"], row)
+
+    out: List[Dict[str, Any]] = []
+    for bucket in buckets.values():
+        bucket["metrics"] = _finalize_perf_metric(bucket.get("metrics") or {})
+        if any(_performance_number(bucket["metrics"].get(key)) > 0 for key in ("impCnt", "clkCnt", "salesAmt", "ccnt", "convAmt", "purchaseCcnt")):
+            out.append(bucket)
+    dimension_norm = str(dimension or "").strip().lower()
+    if dimension_norm == "media":
+        out.sort(key=lambda item: (
+            1 if str(item.get("key") or "") == "unknown" else 0,
+            -_performance_number((item.get("metrics") or {}).get("impCnt")),
+            str(item.get("label") or ""),
+        ))
+    else:
+        out.sort(key=lambda item: (item.get("sort", 999), str(item.get("label") or "")))
+    return out
+
+def _dimension_media_metric_has_data(metrics: Dict[str, Any]) -> bool:
+    return any(
+        _performance_number((metrics or {}).get(key)) > 0
+        for key in ("impCnt", "clkCnt", "salesAmt", "ccnt", "convAmt", "purchaseCcnt", "purchaseConvAmt")
+    )
+
+def _summarize_dimension_media_lookup(
+    activity_rows: List[Dict[str, Any]],
+    conversion_rows: List[Dict[str, Any]],
+    media_catalog: Dict[str, Dict[str, Any]],
+    campaign_ids: set[str],
+    adgroup_ids: set[str],
+) -> Dict[str, Any]:
+    unknown = {
+        "row_count": 0,
+        "metrics": _build_empty_perf_metric(),
+    }
+    unresolved: Dict[str, Dict[str, Any]] = {}
+
+    def unresolved_bucket(media_id: str) -> Dict[str, Any]:
+        return unresolved.setdefault(media_id, {
+            "media_id": media_id,
+            "row_count": 0,
+            "metrics": _build_empty_perf_metric(),
+        })
+
+    def add_row(row: Dict[str, Any], *, conversion: bool = False) -> None:
+        if not _dimension_row_in_scope(row, campaign_ids, adgroup_ids):
+            return
+        media_id = _performance_media_code((row or {}).get("media"))
+        target = None
+        if not media_id:
+            target = unknown
+        elif media_id not in (media_catalog or {}):
+            target = unresolved_bucket(media_id)
+        if target is None:
+            return
+        target["row_count"] = int(target.get("row_count") or 0) + 1
+        if conversion:
+            _add_dimension_conversion_to_metric(target["metrics"], row)
+        else:
+            _add_dimension_activity_to_metric(target["metrics"], row)
+
+    for row in activity_rows or []:
+        add_row(row, conversion=False)
+    for row in conversion_rows or []:
+        add_row(row, conversion=True)
+
+    unknown["metrics"] = _finalize_perf_metric(unknown.get("metrics") or {})
+    unknown["has_data"] = bool(unknown.get("row_count") or 0) and _dimension_media_metric_has_data(unknown.get("metrics") or {})
+
+    unresolved_rows: List[Dict[str, Any]] = []
+    for item in unresolved.values():
+        item["metrics"] = _finalize_perf_metric(item.get("metrics") or {})
+        if _dimension_media_metric_has_data(item.get("metrics") or {}):
+            unresolved_rows.append(item)
+    unresolved_rows.sort(key=lambda item: (
+        -_performance_number((item.get("metrics") or {}).get("impCnt")),
+        -_performance_number((item.get("metrics") or {}).get("clkCnt")),
+        str(item.get("media_id") or ""),
+    ))
+
+    return {
+        "unknown": unknown,
+        "unresolved": unresolved_rows[:80],
+        "unresolved_count": len(unresolved_rows),
+        "catalog_source": f"{PERFORMANCE_MEDIA_CATALOG_URL} + /master-reports Media",
+    }
+
+def _summarize_dimension_region_lookup(
+    activity_rows: List[Dict[str, Any]],
+    conversion_rows: List[Dict[str, Any]],
+    campaign_ids: set[str],
+    adgroup_ids: set[str],
+) -> Dict[str, Any]:
+    unknown = {
+        "row_count": 0,
+        "metrics": _build_empty_perf_metric(),
+    }
+    unresolved: Dict[str, Dict[str, Any]] = {}
+
+    def unresolved_bucket(raw_region_code: str) -> Dict[str, Any]:
+        return unresolved.setdefault(raw_region_code, {
+            "region_code": raw_region_code,
+            "row_count": 0,
+            "metrics": _build_empty_perf_metric(),
+        })
+
+    def add_row(row: Dict[str, Any], *, conversion: bool = False) -> None:
+        if not _dimension_row_in_scope(row, campaign_ids, adgroup_ids):
+            return
+        raw_region_code = _performance_region_raw((row or {}).get("region_code"))
+        region_code = _performance_region_code(raw_region_code)
+        if region_code != "unknown":
+            return
+        target = unresolved_bucket(raw_region_code) if raw_region_code else unknown
+        target["row_count"] = int(target.get("row_count") or 0) + 1
+        if conversion:
+            _add_dimension_conversion_to_metric(target["metrics"], row)
+        else:
+            _add_dimension_activity_to_metric(target["metrics"], row)
+
+    for row in activity_rows or []:
+        add_row(row, conversion=False)
+    for row in conversion_rows or []:
+        add_row(row, conversion=True)
+
+    unknown["metrics"] = _finalize_perf_metric(unknown.get("metrics") or {})
+    unknown["has_data"] = bool(unknown.get("row_count") or 0) and _dimension_media_metric_has_data(unknown.get("metrics") or {})
+
+    unresolved_rows: List[Dict[str, Any]] = []
+    for item in unresolved.values():
+        item["metrics"] = _finalize_perf_metric(item.get("metrics") or {})
+        if _dimension_media_metric_has_data(item.get("metrics") or {}):
+            unresolved_rows.append(item)
+    unresolved_rows.sort(key=lambda item: (
+        -_performance_number((item.get("metrics") or {}).get("impCnt")),
+        -_performance_number((item.get("metrics") or {}).get("clkCnt")),
+        str(item.get("region_code") or ""),
+    ))
+
+    return {
+        "unknown": unknown,
+        "unresolved": unresolved_rows[:80],
+        "unresolved_count": len(unresolved_rows),
+        "valid_codes": sorted(PERFORMANCE_REGION_CODES),
+    }
+
+def _collect_dimension_report_rows(
+    api_key: str,
+    secret_key: str,
+    cid: str,
+    since: str,
+    until: str,
+    report_types: List[str],
+) -> Tuple[Dict[str, List[Dict[str, Any]]], List[str], List[str], Dict[str, Any]]:
+    rows_by_type: Dict[str, List[Dict[str, Any]]] = {}
+    warnings: List[str] = []
+    errors: List[str] = []
+    meta_by_type: Dict[str, Any] = {}
+    if not report_types:
+        return rows_by_type, warnings, errors, meta_by_type
+    with ThreadPoolExecutor(max_workers=min(len(report_types), PERFORMANCE_DIMENSION_REPORT_WORKERS)) as executor:
+        futures = {
+            executor.submit(
+                _fetch_dimension_detail_report_rows,
+                api_key,
+                secret_key,
+                cid,
+                since,
+                until,
+                report_type,
+                18.0,
+                background_on_timeout=True,
+            ): report_type
+            for report_type in report_types
+        }
+        for future in as_completed(futures):
+            report_type = futures[future]
+            try:
+                rows, item_errors, item_meta = future.result()
+            except Exception as exc:
+                rows, item_errors, item_meta = [], [f"{report_type} 리포트 조회 실패: {exc}"], {}
+            rows_by_type[report_type] = rows
+            meta_by_type[report_type] = item_meta
+            for message in item_errors or []:
+                if _dimension_report_is_pending_message(message):
+                    continue
+                if "파싱 결과 0건" in str(message):
+                    warnings.append(str(message))
+                else:
+                    errors.append(str(message))
+    return rows_by_type, warnings, errors, meta_by_type
+
+def _dimension_report_is_pending_message(message: Any) -> bool:
+    text = str(message or "")
+    return any(token in text for token in (
+        "아직 생성 중",
+        "아직 파일 생성 중",
+        "추가 생성 중",
+        "백그라운드에서 계속 준비",
+        "준비되는 대로 자동 갱신",
+        "준비된 데이터만 먼저",
+    ))
+
+def _summarize_dimension_report_pending(report_meta: Dict[str, Any]) -> Dict[str, Any]:
+    pending_reports: List[Dict[str, Any]] = []
+    pending_count = 0
+    requested_count = 0
+    cached_count = 0
+    downloaded_count = 0
+    background_refresh = False
+    for report_type, meta in (report_meta or {}).items():
+        if not isinstance(meta, dict):
+            continue
+        report_pending = int(_performance_number(meta.get("pending_report_count")))
+        report_requested = int(_performance_number(meta.get("requested_date_count")))
+        report_cached = int(_performance_number(meta.get("cached_date_count")))
+        report_downloaded = int(_performance_number(meta.get("downloaded_report_count")))
+        requested_count += report_requested
+        cached_count += report_cached
+        downloaded_count += report_downloaded
+        background_refresh = background_refresh or _boolish(meta.get("background_refresh"), False)
+        if report_pending > 0:
+            pending_count += report_pending
+            pending_reports.append({
+                "report_type": str(report_type or meta.get("report_type") or ""),
+                "pending_report_count": report_pending,
+                "requested_date_count": report_requested,
+                "cached_date_count": report_cached,
+                "downloaded_report_count": report_downloaded,
+            })
+    if pending_count > 0:
+        message = f"상세 리포트 {pending_count}건을 준비 중입니다. 완료되면 자동으로 다시 조회합니다."
+    else:
+        message = ""
+    return {
+        "pending_report_count": pending_count,
+        "background_refresh": bool(background_refresh or pending_count > 0),
+        "pending_reports": pending_reports,
+        "requested_report_count": requested_count,
+        "cached_report_count": cached_count,
+        "downloaded_report_count": downloaded_count,
+        "message": message,
+    }
+
+def _get_dimension_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    dimension = str(payload.get("dimension") or "").strip().lower()
+    dimension_labels = {
+        "area": "검색/콘텐츠 영역별",
+        "media": "매체별",
+        "region": "지역별",
+    }
+    if dimension not in dimension_labels:
+        raise ValueError("dimension은 area, media, region 중 하나여야 합니다.")
+    scope, type_filter, since, until, date_label, campaign_ids, adgroup_ids = _standalone_report_target_payload(payload)
+    day_count = _dimension_report_day_count(since, until)
+    if day_count > PERFORMANCE_DIMENSION_REPORT_MAX_DAYS:
+        raise ValueError(f"상세보고서 기반 데이터는 최대 {PERFORMANCE_DIMENSION_REPORT_MAX_DAYS}일까지 조회할 수 있습니다.")
+
+    target_rows, target_warnings = _collect_performance_targets(
+        api_key, secret_key, cid, scope, "adgroup", type_filter, campaign_ids, adgroup_ids,
+        include_ad_counts=False,
+    )
+    target_campaign_ids, target_adgroup_ids, type_keys = _dimension_target_sets(target_rows)
+    campaign_type_by_id = _dimension_campaign_type_map(target_rows)
+    use_media_summary_reports = dimension in {"area", "media"}
+    ad_activity_report_type = "AD" if use_media_summary_reports else "AD_DETAIL"
+    ad_conversion_report_type = "AD_CONVERSION" if use_media_summary_reports else "AD_CONVERSION_DETAIL"
+    ad_activity_fallback_report_type = "AD_DETAIL" if use_media_summary_reports else "AD"
+    ad_conversion_fallback_report_type = "AD_CONVERSION_DETAIL" if use_media_summary_reports else "AD_CONVERSION"
+    primary_report_types: List[str] = []
+    if {"WEB_SITE", "SHOPPING"} & type_keys:
+        primary_report_types.extend([ad_activity_report_type, ad_conversion_report_type])
+    if type_filter in {"WEB_SITE", "SHOPPING"} and target_rows and not ({"WEB_SITE", "SHOPPING"} & type_keys):
+        primary_report_types.extend([ad_activity_report_type, ad_conversion_report_type])
+    fallback_report_types: List[str] = []
+    if "SHOPPING" in type_keys or (type_filter == "SHOPPING" and target_rows):
+        fallback_report_types.extend(["SHOPPINGKEYWORD_DETAIL", "SHOPPINGKEYWORD_CONVERSION_DETAIL"])
+    primary_report_types = list(dict.fromkeys(primary_report_types))
+    fallback_report_types = list(dict.fromkeys(fallback_report_types))
+    has_shopping_target = bool("SHOPPING" in type_keys or (type_filter == "SHOPPING" and target_rows))
+
+    report_types: List[str] = list(primary_report_types)
+    if not report_types and fallback_report_types:
+        report_types = list(fallback_report_types)
+
+    media_catalog: Dict[str, Dict[str, Any]] = {}
+    media_warning = ""
+    if dimension in {"area", "media"}:
+        media_catalog, media_warning = _load_performance_media_catalog(api_key, secret_key, cid)
+    rows_by_type, report_warnings, report_errors, report_meta = _collect_dimension_report_rows(
+        api_key, secret_key, cid, since, until, report_types,
+    )
+    pending_summary = _summarize_dimension_report_pending(report_meta)
+    activity_rows: List[Dict[str, Any]] = []
+    conversion_rows: List[Dict[str, Any]] = []
+    ad_activity_rows = list(rows_by_type.get(ad_activity_report_type) or [])
+    ad_conversion_rows = list(rows_by_type.get(ad_conversion_report_type) or [])
+
+    def scoped_shopping_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return [
+            row for row in (rows or [])
+            if _dimension_row_in_scope(row, target_campaign_ids, target_adgroup_ids)
+            and _dimension_row_campaign_bucket(row, campaign_type_by_id) == "SHOPPING"
+        ]
+
+    shopping_ad_activity_rows = scoped_shopping_rows(ad_activity_rows)
+    shopping_ad_conversion_rows = scoped_shopping_rows(ad_conversion_rows)
+    # SHOPPINGKEYWORD reports are keyword/search-term based and can omit shopping
+    # content placements. Prefer AD/AD_DETAIL reports for dimension views and
+    # use SHOPPINGKEYWORD_DETAIL only as a last fallback when those have no rows.
+    if has_shopping_target and not shopping_ad_activity_rows and ad_activity_fallback_report_type not in rows_by_type:
+        ad_fallback_rows_by_type, ad_fallback_warnings, ad_fallback_errors, ad_fallback_meta = _collect_dimension_report_rows(
+            api_key, secret_key, cid, since, until, [ad_activity_fallback_report_type, ad_conversion_fallback_report_type],
+        )
+        rows_by_type.update(ad_fallback_rows_by_type)
+        report_meta.update(ad_fallback_meta)
+        report_warnings.extend(ad_fallback_warnings)
+        report_errors.extend(ad_fallback_errors)
+        report_types = list(dict.fromkeys(report_types + [ad_activity_fallback_report_type, ad_conversion_fallback_report_type]))
+        fallback_activity_rows = scoped_shopping_rows(list(rows_by_type.get(ad_activity_fallback_report_type) or []))
+        fallback_conversion_rows = scoped_shopping_rows(list(rows_by_type.get(ad_conversion_fallback_report_type) or []))
+        ad_activity_rows.extend(fallback_activity_rows)
+        ad_conversion_rows.extend(fallback_conversion_rows)
+        shopping_ad_activity_rows = scoped_shopping_rows(ad_activity_rows)
+        shopping_ad_conversion_rows = scoped_shopping_rows(ad_conversion_rows)
+    needs_shopping_fallback = bool(fallback_report_types and has_shopping_target and not shopping_ad_activity_rows)
+    if needs_shopping_fallback and not any(report_type in rows_by_type for report_type in fallback_report_types):
+        fallback_rows_by_type, fallback_warnings, fallback_errors, fallback_meta = _collect_dimension_report_rows(
+            api_key, secret_key, cid, since, until, fallback_report_types,
+        )
+        rows_by_type.update(fallback_rows_by_type)
+        report_meta.update(fallback_meta)
+        report_warnings.extend(fallback_warnings)
+        report_errors.extend(fallback_errors)
+        report_types = list(dict.fromkeys(report_types + fallback_report_types))
+        report_warnings.append("쇼핑검색 광고효과 리포트에서 대상 행을 받지 못해 키워드 상세 리포트로 대체했습니다. 이 경우 콘텐츠 지면은 일부 누락될 수 있습니다.")
+    activity_rows.extend(ad_activity_rows)
+    conversion_rows.extend(ad_conversion_rows)
+    if needs_shopping_fallback:
+        activity_rows.extend(rows_by_type.get("SHOPPINGKEYWORD_DETAIL") or [])
+        if not shopping_ad_conversion_rows:
+            conversion_rows.extend(rows_by_type.get("SHOPPINGKEYWORD_CONVERSION_DETAIL") or [])
+    rows = _aggregate_dimension_report_rows(
+        activity_rows,
+        conversion_rows,
+        dimension,
+        media_catalog,
+        target_campaign_ids,
+        target_adgroup_ids,
+    )
+    media_lookup = {}
+    region_lookup = {}
+    if dimension == "media":
+        include_blog_media = _boolish(payload.get("include_blog_media"), False)
+        blog_rows = [
+            row for row in rows
+            if _boolish(((row or {}).get("meta") or {}).get("is_individual_blog_media"), False)
+        ]
+        if blog_rows:
+            rows = [
+                row for row in rows
+                if not _boolish(((row or {}).get("meta") or {}).get("is_individual_blog_media"), False)
+            ]
+        media_lookup = _summarize_dimension_media_lookup(
+            activity_rows,
+            conversion_rows,
+            media_catalog,
+            target_campaign_ids,
+            target_adgroup_ids,
+        )
+        media_lookup["blog"] = {
+            "included": include_blog_media,
+            "row_count": len(blog_rows),
+            "rows": blog_rows if include_blog_media else [],
+            "summary": _sum_metrics_from_rows(blog_rows),
+        }
+    elif dimension == "region":
+        region_lookup = _summarize_dimension_region_lookup(
+            activity_rows,
+            conversion_rows,
+            target_campaign_ids,
+            target_adgroup_ids,
+        )
+    summary = _sum_metrics_from_rows(rows)
+    warnings = list(target_warnings or [])
+    if media_warning:
+        warnings.append(media_warning)
+    warnings.extend(report_warnings[:12])
+    if target_rows and not rows and not report_errors and not pending_summary.get("pending_report_count"):
+        warnings.append(f"{dimension_labels[dimension]} 상세보고서 데이터가 없습니다.")
+    type_label = "전체 유형" if type_filter == "ALL" else _performance_campaign_type_label(type_filter)
+    pending_count = int(pending_summary.get("pending_report_count") or 0)
+    message = (
+        f"{date_label} {type_label} {dimension_labels[dimension]} 데이터 준비 중 · 상세 리포트 {pending_count}건 생성 중"
+        if pending_count > 0
+        else f"{date_label} {type_label} {dimension_labels[dimension]} 데이터 조회 완료 · 대상 {len(target_rows)}개"
+    )
+    return {
+        "message": message,
+        "rows": rows,
+        "summary": summary,
+        "warnings": warnings[:30],
+        "errors": report_errors[:30],
+        "pending_report_count": pending_count,
+        "background_refresh": bool(pending_summary.get("background_refresh")),
+        "pending_reports": pending_summary.get("pending_reports") or [],
+        "pending_report_message": pending_summary.get("message") or "",
+        "scope": scope,
+        "result_level": "adgroup",
+        "campaign_type": type_filter,
+        "since": since,
+        "until": until,
+        "date_label": date_label,
+        "dimension": dimension,
+        "dimension_label": dimension_labels[dimension],
+        "media_lookup": media_lookup,
+        "region_lookup": region_lookup,
+        "target_count": len(target_rows),
+        "report_types": report_types,
+        "source": "stat_reports",
+        "debug": {
+            "day_count": day_count,
+            "activity_row_count": len(activity_rows or []),
+            "conversion_row_count": len(conversion_rows or []),
+            "parsed_bucket_count": len(rows or []),
+            "media_catalog_count": len(media_catalog or {}),
+            "blog_media_count": int(((media_lookup or {}).get("blog") or {}).get("row_count") or 0),
+            "unresolved_media_count": int((media_lookup or {}).get("unresolved_count") or 0),
+            "unresolved_region_count": int((region_lookup or {}).get("unresolved_count") or 0),
+            "pending_report_count": pending_count,
+            "report_meta": report_meta,
+        },
+    }
 
 PERFORMANCE_DATE_ALIASES = (
     "date", "statDate", "baseDate", "ymd", "dt", "day",
@@ -3631,8 +5108,13 @@ def _build_empty_perf_metric() -> Dict[str, Any]:
         "cpc": 0,
         "purchaseCcnt": 0,
         "purchaseConvAmt": 0,
+        "cartCcnt": 0,
+        "cartConvAmt": 0,
         "ccnt": 0,
         "convAmt": 0,
+        "avgRnk": 0,
+        "_avgRnkWeightedSum": 0,
+        "_avgRnkWeight": 0,
     }
 
 def _add_stat_to_metric(metric: Dict[str, Any], row: Dict[str, Any]):
@@ -3643,25 +5125,42 @@ def _add_stat_to_metric(metric: Dict[str, Any], row: Dict[str, Any]):
     metric["convAmt"] += _performance_number(_performance_row_value(row, "convAmt"))
     metric["purchaseCcnt"] += _performance_number(_performance_row_value(row, "purchaseCcnt"))
     metric["purchaseConvAmt"] += _performance_number(_performance_row_value(row, "purchaseConvAmt"))
-
+    avg_rnk = _performance_row_value(row, "avgRnk")
+    if avg_rnk not in (None, ""):
+        weight = max(1.0, _performance_number(_performance_row_value(row, "impCnt")))
+        metric["_avgRnkWeightedSum"] = _performance_number(metric.get("_avgRnkWeightedSum")) + (_performance_number(avg_rnk) * weight)
+        metric["_avgRnkWeight"] = _performance_number(metric.get("_avgRnkWeight")) + weight
 def _add_purchase_stat_to_metric(metric: Dict[str, Any], row: Dict[str, Any]):
     purchase_count = _performance_row_value(row, "purchaseCcnt")
     purchase_amount = _performance_row_value(row, "purchaseConvAmt")
     metric["purchaseCcnt"] += _performance_number(purchase_count if purchase_count not in (None, "") else _performance_row_value(row, "ccnt"))
     metric["purchaseConvAmt"] += _performance_number(purchase_amount if purchase_amount not in (None, "") else _performance_row_value(row, "convAmt"))
 
+def _add_cart_stat_to_metric(metric: Dict[str, Any], row: Dict[str, Any]):
+    metric["cartCcnt"] += _performance_number(_performance_row_value(row, "ccnt"))
+    metric["cartConvAmt"] += _performance_number(_performance_row_value(row, "convAmt"))
+
 def _finalize_perf_metric(metric: Dict[str, Any]) -> Dict[str, Any]:
     imp = _performance_number(metric.get("impCnt"))
     clicks = _performance_number(metric.get("clkCnt"))
     cost = _performance_number(metric.get("salesAmt"))
+    total_count = _performance_number(metric.get("ccnt"))
     total_conv_amt = _performance_number(metric.get("convAmt"))
+    purchase_count = _performance_number(metric.get("purchaseCcnt"))
     purchase_conv_amt = _performance_number(metric.get("purchaseConvAmt"))
+    cart_count = _performance_number(metric.get("cartCcnt"))
+    cart_conv_amt = _performance_number(metric.get("cartConvAmt"))
+    avg_weight = _performance_number(metric.get("_avgRnkWeight"))
     metric["ctr"] = round((clicks / imp * 100) if imp > 0 else 0, 2)
     metric["cpc"] = round((cost / clicks) if clicks > 0 else 0, 2)
-    metric["purchaseRor"] = round((purchase_conv_amt / cost * 100) if cost > 0 else 0, 2)
-    metric["ror"] = round((total_conv_amt / cost * 100) if cost > 0 else 0, 2)
-    metric["ccnt"] = round(_performance_number(metric.get("ccnt")), 2)
-    metric["purchaseCcnt"] = round(_performance_number(metric.get("purchaseCcnt")), 2)
+    metric["purchaseRor"] = round((purchase_conv_amt / cost * 100) if cost > 0 and purchase_count > 0 else 0, 2)
+    metric["cartRor"] = round((cart_conv_amt / cost * 100) if cost > 0 and cart_count > 0 else 0, 2)
+    metric["ror"] = round((total_conv_amt / cost * 100) if cost > 0 and total_count > 0 else 0, 2)
+    metric["avgRnk"] = round((_performance_number(metric.get("_avgRnkWeightedSum")) / avg_weight) if avg_weight > 0 else _performance_number(metric.get("avgRnk")), 2)
+    metric["ccnt"] = round(total_count, 2)
+    metric["purchaseCcnt"] = round(purchase_count, 2)
+    metric["cartCcnt"] = round(cart_count if cart_count > 0 else max(0.0, total_count - purchase_count), 2)
+    metric["cartConvAmt"] = round(cart_conv_amt if cart_conv_amt > 0 else max(0.0, total_conv_amt - purchase_conv_amt), 2)
     return metric
 
 PERFORMANCE_PURCHASE_EVENT_KEYS = ("eventCode", "eventName", "eventType", "conversionType", "convType", "conversionName", "name", "type")
@@ -3676,6 +5175,21 @@ def _row_matches_purchase_event(row: Dict[str, Any], configured_codes: List[str]
         code_set = {str(x or "").strip().lower() for x in configured_codes if str(x or "").strip()}
         return any(x in code_set or x.replace(" ", "") in code_set for x in normalized)
     return any((x == "1" or "구매" in x or "purchase" in x or "order" in x or "pay" in x or "결제" in x) for x in normalized)
+
+def _row_matches_cart_event(row: Dict[str, Any], configured_codes: List[str]) -> bool:
+    candidates = _performance_deep_values(row or {}, PERFORMANCE_PURCHASE_EVENT_KEYS)
+    normalized = [str(x or "").strip().lower() for x in candidates if str(x or "").strip()]
+    if configured_codes:
+        code_set = {str(x or "").strip().lower() for x in configured_codes if str(x or "").strip()}
+        return any(x in code_set or x.replace(" ", "") in code_set for x in normalized)
+    return any(
+        x == "3"
+        or "장바구니" in x
+        or "cart" in x
+        or "basket" in x
+        or "addtocart" in x.replace(" ", "").replace("_", "").replace("-", "")
+        for x in normalized
+    )
 
 def _collect_performance_targets(api_key: str, secret_key: str, cid: str, scope: str, level: str, type_filter: str, campaign_ids: List[str], adgroup_ids: List[str], include_ad_counts: bool = True):
     res_camp, campaign_rows = _fetch_campaigns(api_key, secret_key, cid)
@@ -3804,13 +5318,14 @@ def _get_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dic
     campaign_ids = [str(x or "").strip() for x in (payload.get("campaign_ids") or []) if str(x or "").strip()]
     adgroup_ids = [str(x or "").strip() for x in (payload.get("adgroup_ids") or []) if str(x or "").strip()]
     purchase_event_codes = _split_filter_words(payload.get("purchase_event_code") or payload.get("purchase_event_codes"))
+    cart_event_codes = _split_filter_words(payload.get("cart_event_code") or payload.get("cart_event_codes"))
     target_rows, warnings = _collect_performance_targets(
         api_key, secret_key, cid, scope, level, type_filter, campaign_ids, adgroup_ids,
         include_ad_counts=not _boolish(payload.get("skip_ad_counts"), False),
     )
     ids = [row["id"] for row in target_rows]
     if not ids:
-        return {
+        empty_result = {
             "message": "조회 대상이 없습니다.",
             "rows": [],
             "summary": _finalize_perf_metric(_build_empty_perf_metric()),
@@ -3823,24 +5338,43 @@ def _get_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dic
             "until": until,
             "date_label": date_label,
         }
+        if _boolish(payload.get("include_demographics"), False):
+            empty_result["demographics"] = {
+                "available": False,
+                "mode": "none",
+                "warnings": ["조회 대상이 없어 연령/성별 자료를 표시할 수 없습니다."],
+                "errors": [],
+            }
+        return empty_result
     if not _boolish(payload.get("skip_bid_snapshots"), False):
         _enrich_performance_bid_snapshots(api_key, secret_key, cid, target_rows, level, warnings)
     stats_id_kind = "adgroup" if level == "adgroup" else "campaign"
-    use_purchase_event_breakdown = bool(purchase_event_codes)
+    use_purchase_event_breakdown = bool(purchase_event_codes) or bool(cart_event_codes) or _boolish(payload.get("include_cart_event_breakdown"), False)
     stats_fields = PERFORMANCE_STAT_FIELDS
     if use_purchase_event_breakdown:
         stats_fields = [field for field in PERFORMANCE_STAT_FIELDS if field not in {"purchaseCcnt", "purchaseConvAmt", "purchaseRor"}]
-    stats_rows, errors = _fetch_stats_rows_for_targets(api_key, secret_key, cid, target_rows, stats_fields, since, until, id_kind=stats_id_kind)
+    stats_rows, errors = _fetch_stats_rows_for_targets(api_key, secret_key, cid, target_rows, stats_fields, since, until, id_kind=stats_id_kind, parallel_workers=FAST_IO_WORKERS)
+    demographics = None
+    if _boolish(payload.get("include_demographics"), False):
+        try:
+            demographics = _get_performance_demographics(api_key, secret_key, cid, target_rows, level, since, until, stats_id_kind)
+        except Exception as e:
+            demographics = {
+                "available": False,
+                "mode": "none",
+                "warnings": ["연령/성별 자료 조회 중 오류가 발생했습니다."],
+                "errors": [str(e)],
+            }
     daily_stats_rows: List[Dict[str, Any]] = []
     daily_errors: List[str] = []
     if level in {"campaign", "adgroup"} and _boolish(payload.get("include_daily_metrics"), True):
-        daily_stats_rows, daily_errors = _fetch_stats_rows_for_targets(api_key, secret_key, cid, target_rows, PERFORMANCE_STAT_FIELDS, since, until, id_kind=stats_id_kind, time_increment="daily")
+        daily_stats_rows, daily_errors = _fetch_stats_rows_for_targets(api_key, secret_key, cid, target_rows, PERFORMANCE_STAT_FIELDS, since, until, id_kind=stats_id_kind, time_increment="daily", parallel_workers=FAST_IO_WORKERS)
         errors.extend(daily_errors[:10])
     daily_metrics_by_group = _build_performance_daily_map(target_rows, level, daily_stats_rows)
     purchase_rows: List[Dict[str, Any]] = []
     if use_purchase_event_breakdown:
         purchase_errors: List[str]
-        purchase_rows, purchase_errors = _fetch_stats_rows_for_targets(api_key, secret_key, cid, target_rows, PERFORMANCE_PURCHASE_FIELDS, since, until, breakdown="eventCode", id_kind=stats_id_kind)
+        purchase_rows, purchase_errors = _fetch_stats_rows_for_targets(api_key, secret_key, cid, target_rows, PERFORMANCE_PURCHASE_FIELDS, since, until, breakdown="eventCode", id_kind=stats_id_kind, parallel_workers=FAST_IO_WORKERS)
         errors.extend(purchase_errors[:10])
     metric_by_id: Dict[str, Dict[str, Any]] = defaultdict(_build_empty_perf_metric)
     for stat_row in stats_rows:
@@ -3848,14 +5382,16 @@ def _get_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dic
         if stat_id:
             _add_stat_to_metric(metric_by_id[stat_id], stat_row)
     purchase_match_count = 0
+    cart_match_count = 0
     if use_purchase_event_breakdown:
         for purchase_row in purchase_rows:
-            if not _row_matches_purchase_event(purchase_row, purchase_event_codes):
-                continue
             stat_id = _stat_row_id(purchase_row)
-            if stat_id:
+            if stat_id and _row_matches_purchase_event(purchase_row, purchase_event_codes):
                 _add_purchase_stat_to_metric(metric_by_id[stat_id], purchase_row)
                 purchase_match_count += 1
+            if stat_id and _row_matches_cart_event(purchase_row, cart_event_codes):
+                _add_cart_stat_to_metric(metric_by_id[stat_id], purchase_row)
+                cart_match_count += 1
     else:
         for stat_row in stats_rows:
             purchase_count = _performance_number(_performance_row_value(stat_row, "purchaseCcnt"))
@@ -3883,19 +5419,25 @@ def _get_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dic
                 **target,
                 "metrics": _build_empty_perf_metric(),
             })
-        for key in ("impCnt", "clkCnt", "salesAmt", "ccnt", "convAmt", "purchaseCcnt", "purchaseConvAmt"):
+        for key in ("impCnt", "clkCnt", "salesAmt", "ccnt", "convAmt", "purchaseCcnt", "purchaseConvAmt", "cartCcnt", "cartConvAmt"):
             group["metrics"][key] += _performance_number(metric.get(key))
     summary = _build_empty_perf_metric()
     rows: List[Dict[str, Any]] = []
     for group in grouped.values():
         metrics = _finalize_perf_metric(group["metrics"])
-        for key in ("impCnt", "clkCnt", "salesAmt", "ccnt", "convAmt", "purchaseCcnt", "purchaseConvAmt"):
+        for key in ("impCnt", "clkCnt", "salesAmt", "ccnt", "convAmt", "purchaseCcnt", "purchaseConvAmt", "cartCcnt", "cartConvAmt"):
             summary[key] += _performance_number(metrics.get(key))
         group["metrics"] = metrics
         group["daily_metrics"] = daily_metrics_by_group.get(str(group.get("id") or ""), [])
         rows.append(group)
     summary = _finalize_perf_metric(summary)
-    rows.sort(key=lambda row: (-_performance_number((row.get("metrics") or {}).get("salesAmt")), str(row.get("name") or "").casefold()))
+    if level == "type":
+        rows.sort(key=lambda row: (
+            _performance_campaign_type_sort_order(row.get("campaign_type") or row.get("id") or row.get("name")),
+            str(row.get("name") or "").casefold(),
+        ))
+    else:
+        rows.sort(key=lambda row: (-_performance_number((row.get("metrics") or {}).get("salesAmt")), str(row.get("name") or "").casefold()))
     if use_purchase_event_breakdown and purchase_rows and purchase_match_count == 0:
         warnings.append("구매완료 이벤트를 자동 식별하지 못해 구매완료수와 구매완료 ROAS는 0으로 표시됩니다.")
     level_label = {"type": "유형별 전체", "campaign": "캠페인별", "adgroup": "광고그룹별"}.get(level, "성과")
@@ -3913,6 +5455,406 @@ def _get_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dic
         "until": until,
         "date_label": date_label,
         "purchase_event_match_count": purchase_match_count,
+        "cart_event_match_count": cart_match_count,
+        "demographics": demographics,
+    }
+
+def _creative_status_label(ad_item: Dict[str, Any] | None) -> str:
+    ad_item = ad_item or {}
+    raw = ad_item.get("raw") if isinstance(ad_item.get("raw"), dict) else ad_item
+    locked = _bool_or_none(_first_non_empty(
+        ad_item.get("userLock"),
+        raw.get("userLock"),
+        ad_item.get("userLocked"),
+        raw.get("userLocked"),
+        ad_item.get("isUserLocked"),
+        raw.get("isUserLocked"),
+    ))
+    if locked is True:
+        return "OFF"
+    deleted = _bool_or_none(_first_non_empty(ad_item.get("delFlag"), raw.get("delFlag")))
+    if deleted is True:
+        return "OFF"
+    enabled = _bool_or_none(_first_non_empty(
+        ad_item.get("enable"),
+        raw.get("enable"),
+        ad_item.get("enabled"),
+        raw.get("enabled"),
+    ))
+    if enabled is False:
+        return "OFF"
+    paused = _bool_or_none(_first_non_empty(ad_item.get("paused"), raw.get("paused")))
+    if paused is True:
+        return "OFF"
+    status = str(_first_non_empty(ad_item.get("status"), raw.get("status")) or "").strip()
+    inspect = str(_first_non_empty(ad_item.get("inspectStatus"), raw.get("inspectStatus")) or "").strip()
+    reason = str(_first_non_empty(
+        ad_item.get("statusReason"),
+        raw.get("statusReason"),
+        _lookup_status_text(ad_item, ["statusReason", "statusDetail", "statusMessage", "statusDescription"]),
+    ) or "").strip()
+    status_blob = " ".join([status, inspect, reason]).strip().upper()
+    off_tokens = (
+        "OFF", "PAUSE", "PAUSED", "DISABLE", "DISABLED", "DELETE", "DELETED",
+        "LOCK", "LOCKED", "STOP", "STOPPED", "SUSPEND", "SUSPENDED",
+        "중지", "삭제", "잠금", "OFF"
+    )
+    return "OFF" if any(token in status_blob for token in off_tokens) else "ON"
+
+def _creative_ad_type(ad_item: Dict[str, Any] | None) -> str:
+    ad_item = ad_item or {}
+    raw = ad_item.get("raw") if isinstance(ad_item.get("raw"), dict) else ad_item
+    ad_body = raw.get("ad") if isinstance(raw.get("ad"), dict) else {}
+    return str(_first_non_empty(ad_item.get("type"), raw.get("type"), ad_body.get("type")) or "").strip()
+
+def _creative_score_tuple(row: Dict[str, Any], metric_mode: str = "purchase") -> Tuple[float, float, float, float, float]:
+    metrics = row.get("metrics") or {}
+    primary_key = "ccnt" if str(metric_mode or "").strip().lower() in {"conversion", "ccnt", "total"} else "purchaseCcnt"
+    return (
+        _performance_number(metrics.get(primary_key)),
+        _performance_number(metrics.get("clkCnt")),
+        _performance_number(metrics.get("ctr")),
+        -_performance_number(metrics.get("salesAmt")),
+        _performance_number(metrics.get("impCnt")),
+    )
+
+def _collect_creative_performance_targets(
+    api_key: str,
+    secret_key: str,
+    cid: str,
+    scope: str,
+    type_filter: str,
+    campaign_ids: List[str],
+    adgroup_ids: List[str],
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    cache_key = json.dumps([
+        "creative-targets-v1",
+        cid,
+        scope,
+        type_filter,
+        sorted(str(x or "").strip() for x in (campaign_ids or []) if str(x or "").strip()),
+        sorted(str(x or "").strip() for x in (adgroup_ids or []) if str(x or "").strip()),
+    ], ensure_ascii=False, separators=(",", ":"))
+    now = time.monotonic()
+    with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
+        cached = PERFORMANCE_CREATIVE_TARGET_CACHE.get(cache_key)
+        if cached and now - cached[0] <= PERFORMANCE_CREATIVE_TARGET_CACHE_TTL:
+            rows, cached_warnings = cached[1]
+            return copy.deepcopy(rows), list(cached_warnings)
+
+    adgroup_rows, warnings = _collect_performance_targets(
+        api_key,
+        secret_key,
+        cid,
+        scope,
+        "adgroup",
+        type_filter,
+        campaign_ids,
+        adgroup_ids,
+        include_ad_counts=False,
+    )
+    if not adgroup_rows:
+        return [], warnings
+
+    creative_rows: List[Dict[str, Any]] = []
+    seen_ad_ids: set[str] = set()
+    max_workers = max(1, min(FAST_IO_WORKERS, len(adgroup_rows)))
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        future_map = {
+            ex.submit(_fetch_ads, api_key, secret_key, cid, str(row.get("adgroup_id") or row.get("id") or "")): row
+            for row in adgroup_rows
+            if str(row.get("adgroup_id") or row.get("id") or "").strip()
+        }
+        for fut in as_completed(future_map):
+            adgroup = future_map[fut]
+            adgroup_id = str(adgroup.get("adgroup_id") or adgroup.get("id") or "").strip()
+            try:
+                res_ads, ads = fut.result()
+            except Exception as exc:
+                warnings.append(f"[{adgroup.get('adgroup_name') or adgroup_id}] 소재 조회 실패: {exc}")
+                continue
+            if getattr(res_ads, "status_code", 0) != 200:
+                warnings.append(f"[{adgroup.get('adgroup_name') or adgroup_id}] 소재 조회 실패: {getattr(res_ads, 'text', '')}")
+                continue
+            for ad in ads or []:
+                if not isinstance(ad, dict):
+                    continue
+                ad_id = _performance_target_id(ad, "ad")
+                if not ad_id:
+                    continue
+                dedupe_key = f"{adgroup_id}:{ad_id}"
+                if dedupe_key in seen_ad_ids:
+                    continue
+                seen_ad_ids.add(dedupe_key)
+                text_fields = _extract_lookup_ad_text_fields(ad)
+                ad_type = _creative_ad_type(ad)
+                creative_rows.append({
+                    "id": ad_id,
+                    "ad_id": ad_id,
+                    "adgroup_id": adgroup_id,
+                    "adgroup_name": str(adgroup.get("adgroup_name") or adgroup.get("name") or adgroup_id),
+                    "campaign_id": str(adgroup.get("campaign_id") or ""),
+                    "campaign_name": str(adgroup.get("campaign_name") or ""),
+                    "campaign_type": str(adgroup.get("campaign_type") or ""),
+                    "campaign_type_label": str(adgroup.get("campaign_type_label") or ""),
+                    "ad_type": ad_type,
+                    "ad_type_label": label_ad_type(ad_type, default=ad_type or "-"),
+                    "status": _creative_status_label(ad),
+                    "headline": str(text_fields.get("headline") or ""),
+                    "description": str(text_fields.get("description") or ""),
+                    "productName": str(text_fields.get("productName") or ""),
+                    "pcFinalUrl": str(text_fields.get("pcFinalUrl") or ""),
+                    "mobileFinalUrl": str(text_fields.get("mobileFinalUrl") or ""),
+                    "referenceKey": str(text_fields.get("referenceKey") or ""),
+                    "summary": _summarize_lookup_ad(ad),
+                    "metrics": _build_empty_perf_metric(),
+                })
+    if not warnings:
+        with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
+            if len(PERFORMANCE_CREATIVE_TARGET_CACHE) >= 100:
+                PERFORMANCE_CREATIVE_TARGET_CACHE.pop(min(PERFORMANCE_CREATIVE_TARGET_CACHE, key=lambda key: PERFORMANCE_CREATIVE_TARGET_CACHE[key][0]), None)
+            PERFORMANCE_CREATIVE_TARGET_CACHE[cache_key] = (time.monotonic(), (copy.deepcopy(creative_rows), []))
+    return creative_rows, warnings
+
+def _collect_creatives_for_report_adgroups(
+    api_key: str,
+    secret_key: str,
+    cid: str,
+    report_rows: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    adgroup_meta: Dict[str, Dict[str, str]] = {}
+    for row in report_rows or []:
+        adgroup_id = str(row.get("adgroup_id") or "").strip()
+        if not adgroup_id:
+            continue
+        adgroup_meta.setdefault(adgroup_id, {
+            "adgroup_id": adgroup_id,
+            "adgroup_name": adgroup_id,
+            "campaign_id": str(row.get("campaign_id") or "").strip(),
+            "campaign_name": str(row.get("campaign_id") or "").strip(),
+            "campaign_type": "SHOPPING",
+            "campaign_type_label": "쇼핑검색",
+        })
+    adgroup_ids = sorted(adgroup_meta)
+    if not adgroup_ids:
+        return [], []
+    cache_key = json.dumps([
+        "creative-report-adgroups-v2",
+        cid,
+        adgroup_ids,
+    ], ensure_ascii=False, separators=(",", ":"))
+    now = time.monotonic()
+    with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
+        cached = PERFORMANCE_CREATIVE_TARGET_CACHE.get(cache_key)
+        if cached and now - cached[0] <= PERFORMANCE_CREATIVE_TARGET_CACHE_TTL:
+            rows, cached_warnings = cached[1]
+            return copy.deepcopy(rows), list(cached_warnings)
+
+    campaign_name_by_id: Dict[str, str] = {}
+    try:
+        res_camp, campaign_rows = _fetch_campaigns(api_key, secret_key, cid)
+        if getattr(res_camp, "status_code", 0) == 200:
+            for campaign in campaign_rows or []:
+                campaign_id = _performance_target_id(campaign, "campaign")
+                if campaign_id:
+                    campaign_name_by_id[campaign_id] = str(campaign.get("name") or campaign_id)
+    except Exception:
+        campaign_name_by_id = {}
+
+    max_detail_workers = max(1, min(FAST_IO_WORKERS, len(adgroup_ids)))
+    with ThreadPoolExecutor(max_workers=max_detail_workers) as ex:
+        future_map = {
+            ex.submit(_fetch_adgroup_detail, api_key, secret_key, cid, adgroup_id): adgroup_id
+            for adgroup_id in adgroup_ids
+        }
+        for fut in as_completed(future_map):
+            adgroup_id = future_map[fut]
+            meta = adgroup_meta.get(adgroup_id)
+            if not meta:
+                continue
+            try:
+                res_adg, adgroup_obj = fut.result()
+            except Exception:
+                continue
+            if getattr(res_adg, "status_code", 0) != 200 or not isinstance(adgroup_obj, dict):
+                continue
+            name = str(adgroup_obj.get("name") or "").strip()
+            campaign_id = str(adgroup_obj.get("nccCampaignId") or adgroup_obj.get("campaignId") or meta.get("campaign_id") or "").strip()
+            if name:
+                meta["adgroup_name"] = name
+            if campaign_id:
+                meta["campaign_id"] = campaign_id
+                meta["campaign_name"] = campaign_name_by_id.get(campaign_id) or meta.get("campaign_name") or campaign_id
+
+    creative_rows: List[Dict[str, Any]] = []
+    warnings: List[str] = []
+    seen_ad_ids: set[str] = set()
+    max_workers = max(1, min(FAST_IO_WORKERS, len(adgroup_ids)))
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        future_map = {
+            ex.submit(_fetch_ads, api_key, secret_key, cid, adgroup_id): adgroup_id
+            for adgroup_id in adgroup_ids
+        }
+        for fut in as_completed(future_map):
+            adgroup_id = future_map[fut]
+            adgroup = adgroup_meta.get(adgroup_id) or {"adgroup_id": adgroup_id}
+            try:
+                res_ads, ads = fut.result()
+            except Exception as exc:
+                warnings.append(f"[{adgroup_id}] 소재 조회 실패: {exc}")
+                continue
+            if getattr(res_ads, "status_code", 0) != 200:
+                warnings.append(f"[{adgroup_id}] 소재 조회 실패: {_short_log_text(getattr(res_ads, 'text', ''), 220)}")
+                continue
+            for ad in ads or []:
+                if not isinstance(ad, dict):
+                    continue
+                ad_id = _performance_target_id(ad, "ad")
+                if not ad_id:
+                    continue
+                dedupe_key = f"{adgroup_id}:{ad_id}"
+                if dedupe_key in seen_ad_ids:
+                    continue
+                seen_ad_ids.add(dedupe_key)
+                text_fields = _extract_lookup_ad_text_fields(ad)
+                ad_type = _creative_ad_type(ad)
+                creative_rows.append({
+                    "id": ad_id,
+                    "ad_id": ad_id,
+                    "adgroup_id": adgroup_id,
+                    "adgroup_name": str(adgroup.get("adgroup_name") or adgroup_id),
+                    "campaign_id": str(adgroup.get("campaign_id") or ""),
+                    "campaign_name": str(adgroup.get("campaign_name") or ""),
+                    "campaign_type": "SHOPPING",
+                    "campaign_type_label": "쇼핑검색",
+                    "ad_type": ad_type,
+                    "ad_type_label": label_ad_type(ad_type, default=ad_type or "-"),
+                    "status": _creative_status_label(ad),
+                    "headline": str(text_fields.get("headline") or ""),
+                    "description": str(text_fields.get("description") or ""),
+                    "productName": str(text_fields.get("productName") or ""),
+                    "pcFinalUrl": str(text_fields.get("pcFinalUrl") or ""),
+                    "mobileFinalUrl": str(text_fields.get("mobileFinalUrl") or ""),
+                    "referenceKey": str(text_fields.get("referenceKey") or ""),
+                    "summary": _summarize_lookup_ad(ad),
+                    "metrics": _build_empty_perf_metric(),
+                })
+    if not warnings:
+        with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
+            if len(PERFORMANCE_CREATIVE_TARGET_CACHE) >= 100:
+                PERFORMANCE_CREATIVE_TARGET_CACHE.pop(min(PERFORMANCE_CREATIVE_TARGET_CACHE, key=lambda key: PERFORMANCE_CREATIVE_TARGET_CACHE[key][0]), None)
+            PERFORMANCE_CREATIVE_TARGET_CACHE[cache_key] = (time.monotonic(), (copy.deepcopy(creative_rows), []))
+    return creative_rows, warnings
+
+def _get_creative_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dict[str, Any]):
+    scope = _normalize_performance_scope(payload.get("target_scope") or payload.get("scope"))
+    type_filter = _normalize_performance_type_filter(payload.get("campaign_type") or payload.get("type_filter"))
+    since, until, date_label = _performance_date_range(
+        payload.get("date_preset"),
+        payload.get("since"),
+        payload.get("until"),
+        exclude_today=_boolish(payload.get("exclude_today"), False),
+    )
+    campaign_ids = [str(x or "").strip() for x in (payload.get("campaign_ids") or []) if str(x or "").strip()]
+    adgroup_ids = [str(x or "").strip() for x in (payload.get("adgroup_ids") or []) if str(x or "").strip()]
+    metric_mode = str(payload.get("metric_mode") or "purchase").strip().lower()
+    if metric_mode not in {"purchase", "conversion"}:
+        metric_mode = "purchase"
+
+    creative_rows, warnings = _collect_creative_performance_targets(
+        api_key,
+        secret_key,
+        cid,
+        scope,
+        type_filter,
+        campaign_ids,
+        adgroup_ids,
+    )
+    ad_ids = [str(row.get("ad_id") or "").strip() for row in creative_rows if str(row.get("ad_id") or "").strip()]
+    stats_rows: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    if ad_ids:
+        stats_rows, errors = _fetch_stats_rows(
+            api_key,
+            secret_key,
+            cid,
+            ad_ids,
+            PERFORMANCE_STAT_FIELDS,
+            since,
+            until,
+            id_kind="ad",
+            parallel_workers=FAST_IO_WORKERS,
+        )
+    metric_by_id: Dict[str, Dict[str, Any]] = defaultdict(_build_empty_perf_metric)
+    for stat_row in stats_rows:
+        stat_id = _stat_row_id(stat_row)
+        if stat_id:
+            _add_stat_to_metric(metric_by_id[stat_id], stat_row)
+
+    summary = _build_empty_perf_metric()
+    for row in creative_rows:
+        metric = _finalize_perf_metric(metric_by_id.get(str(row.get("ad_id") or ""), _build_empty_perf_metric()))
+        row["metrics"] = metric
+        for key in ("impCnt", "clkCnt", "salesAmt", "ccnt", "convAmt", "purchaseCcnt", "purchaseConvAmt"):
+            summary[key] += _performance_number(metric.get(key))
+    summary = _finalize_perf_metric(summary)
+
+    by_group: Dict[str, Dict[str, Any]] = {}
+    rows_by_group: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for row in creative_rows:
+        group_id = str(row.get("adgroup_id") or "")
+        group = by_group.setdefault(group_id, {
+            "adgroup_id": group_id,
+            "adgroup_name": row.get("adgroup_name"),
+            "campaign_id": row.get("campaign_id"),
+            "campaign_name": row.get("campaign_name"),
+            "campaign_type": row.get("campaign_type"),
+            "campaign_type_label": row.get("campaign_type_label"),
+            "ad_count": 0,
+            "metrics": _build_empty_perf_metric(),
+            "best_ad_id": "",
+            "best_headline": "",
+        })
+        group["ad_count"] += 1
+        rows_by_group[group_id].append(row)
+        metrics = row.get("metrics") or {}
+        for key in ("impCnt", "clkCnt", "salesAmt", "ccnt", "convAmt", "purchaseCcnt", "purchaseConvAmt"):
+            group["metrics"][key] += _performance_number(metrics.get(key))
+
+    for group_id, items in rows_by_group.items():
+        ranked = sorted(items, key=lambda item: _creative_score_tuple(item, metric_mode), reverse=True)
+        for index, item in enumerate(ranked, start=1):
+            item["rank_in_group"] = index
+        if ranked:
+            best = ranked[0]
+            by_group[group_id]["best_ad_id"] = best.get("ad_id") or ""
+            by_group[group_id]["best_headline"] = best.get("headline") or best.get("productName") or best.get("summary") or best.get("ad_id") or ""
+
+    groups = []
+    for group in by_group.values():
+        group["metrics"] = _finalize_perf_metric(group["metrics"])
+        groups.append(group)
+    groups.sort(key=lambda row: (str(row.get("campaign_name") or "").casefold(), str(row.get("adgroup_name") or "").casefold()))
+    creative_rows.sort(key=lambda row: (
+        str(row.get("campaign_name") or "").casefold(),
+        str(row.get("adgroup_name") or "").casefold(),
+        int(row.get("rank_in_group") or 999999),
+        str(row.get("headline") or row.get("productName") or row.get("ad_id") or "").casefold(),
+    ))
+    type_label = "전체 유형" if type_filter == "ALL" else _performance_campaign_type_label(type_filter)
+    return {
+        "message": f"{date_label} {type_label} 소재별 성과 조회 완료 · 광고그룹 {len(groups)}개 / 소재 {len(creative_rows)}개",
+        "rows": creative_rows,
+        "groups": groups,
+        "summary": summary,
+        "warnings": warnings[:30],
+        "errors": errors[:30],
+        "scope": scope,
+        "campaign_type": type_filter,
+        "since": since,
+        "until": until,
+        "date_label": date_label,
+        "metric_mode": metric_mode,
     }
 
 def _format_performance_report_number(value: Any, digits: int = 0) -> str:
@@ -3943,6 +5885,7 @@ def _performance_report_metric_lines(
     keyword_text: str = "",
     general_conversion_keyword_text: str = "",
     purchase_conversion_keyword_text: str = "",
+    shopping_inflow_query_text: str = "",
     shopping_general_conversion_query_text: str = "",
     shopping_purchase_conversion_query_text: str = "",
 ) -> List[str]:
@@ -3971,6 +5914,8 @@ def _performance_report_metric_lines(
         lines.append(_performance_report_line("주요 일반 전환 키워드", general_conversion_keyword_text))
     if purchase_conversion_keyword_text:
         lines.append(_performance_report_line("주요 구매완료 전환 키워드", purchase_conversion_keyword_text))
+    if shopping_inflow_query_text:
+        lines.append(_performance_report_line("주요 쇼핑검색 유입 검색어", shopping_inflow_query_text))
     if shopping_general_conversion_query_text:
         lines.append(_performance_report_line("주요 쇼핑검색 일반 전환 검색어", shopping_general_conversion_query_text))
     if shopping_purchase_conversion_query_text:
@@ -4004,6 +5949,7 @@ def _build_performance_row_report_section(
     keyword_text_by_id: Dict[str, str] | None = None,
     general_conversion_keyword_text_by_id: Dict[str, str] | None = None,
     purchase_conversion_keyword_text_by_id: Dict[str, str] | None = None,
+    shopping_inflow_query_text_by_id: Dict[str, str] | None = None,
     shopping_general_conversion_query_text_by_id: Dict[str, str] | None = None,
     shopping_purchase_conversion_query_text_by_id: Dict[str, str] | None = None,
 ) -> str:
@@ -4011,6 +5957,7 @@ def _build_performance_row_report_section(
     keyword_text_by_id = keyword_text_by_id or {}
     general_conversion_keyword_text_by_id = general_conversion_keyword_text_by_id or {}
     purchase_conversion_keyword_text_by_id = purchase_conversion_keyword_text_by_id or {}
+    shopping_inflow_query_text_by_id = shopping_inflow_query_text_by_id or {}
     shopping_general_conversion_query_text_by_id = shopping_general_conversion_query_text_by_id or {}
     shopping_purchase_conversion_query_text_by_id = shopping_purchase_conversion_query_text_by_id or {}
     for row in rows or []:
@@ -4025,6 +5972,7 @@ def _build_performance_row_report_section(
             keyword_text=keyword_text_by_id.get(row_id, ""),
             general_conversion_keyword_text=general_conversion_keyword_text_by_id.get(row_id, ""),
             purchase_conversion_keyword_text=purchase_conversion_keyword_text_by_id.get(row_id, ""),
+            shopping_inflow_query_text=shopping_inflow_query_text_by_id.get(row_id, ""),
             shopping_general_conversion_query_text=shopping_general_conversion_query_text_by_id.get(row_id, ""),
             shopping_purchase_conversion_query_text=shopping_purchase_conversion_query_text_by_id.get(row_id, ""),
         ))
@@ -4032,6 +5980,58 @@ def _build_performance_row_report_section(
     if not sections:
         return ""
     return "\n\n".join([title, *sections])
+
+def _performance_media_summary_title(row: Dict[str, Any]) -> str:
+    bucket = _performance_campaign_bucket((row or {}).get("campaign_type") or (row or {}).get("id"))
+    if bucket == "WEB_SITE":
+        return "■ 네이버 SA (파워링크)"
+    if bucket == "SHOPPING":
+        return "■ 네이버 SSA (쇼핑검색광고)"
+    label = str((row or {}).get("campaign_type_label") or (row or {}).get("name") or bucket or "기타").strip()
+    return f"■ 네이버 {label}"
+
+def _performance_media_summary_sort_key(row: Dict[str, Any]) -> Tuple[int, str]:
+    bucket = _performance_campaign_bucket((row or {}).get("campaign_type") or (row or {}).get("id"))
+    return _performance_campaign_type_sort_order(bucket), str((row or {}).get("name") or bucket or "").casefold()
+
+def _performance_non_negative_diff(total: Any, part: Any) -> float:
+    return max(0.0, _performance_number(total) - _performance_number(part))
+
+def _build_performance_media_summary_report(
+    rows: List[Dict[str, Any]],
+    *,
+    include_cart_count: bool = True,
+    include_cart_amount: bool = True,
+) -> str:
+    sections: List[str] = []
+    for row in sorted(rows or [], key=_performance_media_summary_sort_key):
+        metrics = (row or {}).get("metrics") or {}
+        spend = _performance_number(metrics.get("salesAmt"))
+        cart_count = _performance_number(metrics.get("cartCcnt"))
+        if cart_count <= 0:
+            cart_count = _performance_non_negative_diff(metrics.get("ccnt"), metrics.get("purchaseCcnt"))
+        cart_amount = _performance_number(metrics.get("cartConvAmt"))
+        if cart_amount <= 0:
+            cart_amount = _performance_non_negative_diff(metrics.get("convAmt"), metrics.get("purchaseConvAmt"))
+        lines = [
+            _performance_media_summary_title(row),
+            _performance_report_line("노출수", _format_performance_report_number(metrics.get("impCnt"))),
+            _performance_report_line("클릭수", _format_performance_report_number(metrics.get("clkCnt"))),
+            _performance_report_line("클릭률", _format_performance_report_percent(metrics.get("ctr"), 1)),
+            _performance_report_line("평균 클릭 비용(CPC)", _format_performance_report_won(metrics.get("cpc"))),
+            _performance_report_line("광고 소진비용", _format_performance_report_won(spend)),
+            _performance_report_line("전환수", f"{_format_performance_report_count(metrics.get('ccnt'))}건"),
+            _performance_report_line("구매완료 전환 수", f"{_format_performance_report_count(metrics.get('purchaseCcnt'))}건"),
+            _performance_report_line("총 전환 매출액", _format_performance_report_won(metrics.get("convAmt"))),
+            _performance_report_line("구매완료 전환 매출액", _format_performance_report_won(metrics.get("purchaseConvAmt"))),
+            _performance_report_line("구매완료 기준 광고수익률(ROAS)", _format_performance_report_percent(metrics.get("purchaseRor"), 2)),
+        ]
+        if include_cart_count:
+            lines.insert(8, _performance_report_line("장바구니 전환 수", f"{_format_performance_report_count(cart_count)}건"))
+        if include_cart_amount:
+            lines.append(_performance_report_line("장바구니 전환 매출액", _format_performance_report_won(cart_amount)))
+        sections.append("\n".join(lines))
+    return "\n\n\n".join(sections)
 
 def _aggregate_performance_report_rows(rows: List[Dict[str, Any]], group_kind: str) -> List[Dict[str, Any]]:
     grouped: Dict[str, Dict[str, Any]] = {}
@@ -4060,7 +6060,13 @@ def _aggregate_performance_report_rows(rows: List[Dict[str, Any]], group_kind: s
     for group in grouped.values():
         group["metrics"] = _finalize_perf_metric(group["metrics"])
         out.append(group)
-    out.sort(key=lambda row: (-_performance_number((row.get("metrics") or {}).get("salesAmt")), str(row.get("name") or "").casefold()))
+    if group_kind == "type":
+        out.sort(key=lambda row: (
+            _performance_campaign_type_sort_order(row.get("campaign_type") or row.get("id") or row.get("name")),
+            str(row.get("name") or "").casefold(),
+        ))
+    else:
+        out.sort(key=lambda row: (-_performance_number((row.get("metrics") or {}).get("salesAmt")), str(row.get("name") or "").casefold()))
     return out
 
 def _performance_keyword_text(row: Dict[str, Any] | None) -> str:
@@ -4306,20 +6312,67 @@ def _shopping_query_best_prefixed_index(sample_rows: List[Any], prefix: str, pre
             best_index, best_score, best_hits = index, score, hits
     return best_index if best_hits else -1
 
-def _shopping_query_text_index(sample_rows: List[Any], adgroup_index: int) -> int:
-    candidate = adgroup_index + 1 if adgroup_index >= 0 else -1
+def _shopping_query_is_non_query_text(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return True
+    compact = text.lower().replace("_", "").replace("-", "").replace(" ", "")
+    if compact in {
+        "m", "mo", "mobile", "mobileonly", "mob", "모바일", "m영역",
+        "p", "pc", "desktop", "pconly", "피씨", "데스크톱", "데스크탑",
+        "all", "전체", "통합", "검색", "쇼핑", "쇼핑검색", "shopping",
+        "on", "off", "true", "false",
+    }:
+        return True
+    if re.fullmatch(r"[a-z]", compact):
+        return True
+    if re.fullmatch(r"\d{4}[-./]\d{1,2}[-./]\d{1,2}", text):
+        return True
+    return False
+
+def _shopping_query_text_index(sample_rows: List[Any], adgroup_index: int, ad_index: int = -1) -> int:
+    preferred_after = max(adgroup_index, ad_index)
     max_cols = max((len(row) for row in sample_rows), default=0)
-    if not 0 <= candidate < max_cols:
+    if preferred_after + 1 >= max_cols:
         return -1
-    for row in sample_rows:
-        if len(row) <= candidate:
-            continue
-        value = str(row.iloc[candidate]).strip()
-        if value == "-":
-            return candidate
-        if value and not value.lower().startswith(("cmp-", "grp-", "nkw-", "nad-", "bsn-")) and not re.fullmatch(r"-?\d+(?:\.\d+)?", value.replace(",", "")):
-            return candidate
-    return -1
+    best_index, best_score = -1, -1.0
+    fallback_index, fallback_score = -1, -1.0
+    for candidate in range(preferred_after + 1, max_cols):
+        text_hits = 0
+        placeholder_hits = 0
+        distinct_values: set[str] = set()
+        total_len = 0
+        for row in sample_rows:
+            if len(row) <= candidate:
+                continue
+            value = str(row.iloc[candidate]).strip()
+            normalized = value.lower()
+            if not value:
+                continue
+            if normalized.startswith(("cmp-", "grp-", "nkw-", "nad-", "bsn-")):
+                continue
+            if value == "-":
+                placeholder_hits += 1
+                continue
+            if _shopping_query_is_non_query_text(value):
+                continue
+            if _shopping_query_conversion_type(value) != (False, False, False):
+                continue
+            if re.fullmatch(r"-?\d+(?:\.\d+)?", value.replace(",", "")):
+                continue
+            text_hits += 1
+            distinct_values.add(value.casefold())
+            total_len += len(value)
+        if text_hits:
+            avg_len = total_len / max(1, text_hits)
+            score = (text_hits * 5) + (min(len(distinct_values), 12) * 3) + min(avg_len, 20)
+            if score > best_score:
+                best_index, best_score = candidate, score
+        elif placeholder_hits:
+            score = placeholder_hits
+            if score > fallback_score:
+                fallback_index, fallback_score = candidate, score
+    return best_index if best_index >= 0 else fallback_index
 
 def _shopping_query_conversion_type(value: Any) -> Tuple[bool, bool, bool]:
     normalized = str(value or "").strip().lower().replace("_", "").replace("-", "").replace(" ", "")
@@ -4327,6 +6380,51 @@ def _shopping_query_conversion_type(value: Any) -> Tuple[bool, bool, bool]:
     cart = "장바구니" in normalized or normalized in {"3", "cart", "addtocart", "addtocarts"}
     wishlist = "위시리스트" in normalized or "상품찜" in normalized or normalized in {"wishlist", "addtowishlist", "wishlistadd", "wish"}
     return purchase, cart, wishlist
+
+def _shopping_query_conversion_label(purchase: bool, cart: bool, wishlist: bool) -> str:
+    if purchase:
+        return "purchase"
+    if cart:
+        return "cart"
+    if wishlist:
+        return "wishlist"
+    return "other"
+
+def _shopping_query_numeric_count(value: Any) -> Optional[float]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if re.fullmatch(r"\d{4}[-./]?\d{1,2}[-./]?\d{1,2}", text):
+        return None
+    cleaned = text.replace(",", "")
+    if re.fullmatch(r"-?\d+(?:\.\d+)?", cleaned):
+        amount = _performance_number(cleaned)
+        return amount if amount > 0 else None
+    matches = re.findall(r"(?<![A-Za-z0-9-])\d+(?:\.\d+)?(?![A-Za-z0-9-])", cleaned)
+    if len(matches) == 1:
+        amount = _performance_number(matches[0])
+        return amount if amount > 0 else None
+    return None
+
+def _shopping_query_conversion_count_from_values(values: List[str], type_index: int, query_index: int) -> float:
+    type_value = str(values[type_index]).strip() if 0 <= type_index < len(values) else ""
+    same_cell = None if type_value in {"1", "2", "3"} else _shopping_query_numeric_count(type_value)
+    if same_cell is not None:
+        return same_cell
+    blocked_indexes = {index for index in (type_index, query_index) if index >= 0}
+    preferred_indexes = list(range(type_index + 1, min(type_index + 7, len(values)))) if type_index >= 0 else []
+    fallback_indexes = list(range(max(0, query_index + 1), len(values))) if query_index >= 0 else list(range(len(values)))
+    for indexes in (preferred_indexes, fallback_indexes):
+        for index in indexes:
+            if index in blocked_indexes:
+                continue
+            value = values[index]
+            if _shopping_query_conversion_type(value) != (False, False, False):
+                continue
+            count = _shopping_query_numeric_count(value)
+            if count is not None:
+                return count
+    return 0.0
 
 def _parse_shopping_query_conversion_report(text: str) -> List[Dict[str, Any]]:
     text = str(text or "").strip()
@@ -4338,7 +6436,8 @@ def _parse_shopping_query_conversion_report(text: str) -> List[Dict[str, Any]]:
     sample_rows = [frame.iloc[index].fillna("") for index in range(min(20, len(frame)))]
     campaign_index = _shopping_query_best_prefixed_index(sample_rows, "cmp-")
     adgroup_index = _shopping_query_best_prefixed_index(sample_rows, "grp-", campaign_index)
-    query_index = _shopping_query_text_index(sample_rows, adgroup_index)
+    ad_index = _shopping_query_best_prefixed_index(sample_rows, "nad-", adgroup_index)
+    query_index = _shopping_query_text_index(sample_rows, adgroup_index, ad_index)
     parsed: List[Dict[str, Any]] = []
     for _, raw_row in frame.iterrows():
         values = ["" if pd.isna(value) else str(value).strip() for value in raw_row.tolist()]
@@ -4357,129 +6456,2088 @@ def _parse_shopping_query_conversion_report(text: str) -> List[Dict[str, Any]]:
         hits = type_hits or numeric_hits
         if not hits:
             continue
-        type_index, purchase, _, _ = hits[-1]
-        counts = [
-            _performance_number(values[index].replace(",", ""))
-            for index in range(type_index + 1, min(type_index + 4, len(values)))
-            if re.fullmatch(r"-?\d+(?:\.\d+)?", values[index].replace(",", ""))
-        ]
+        type_index, purchase, cart, wishlist = hits[-1]
+        count = _shopping_query_conversion_count_from_values(values, type_index, query_index)
         query_text = values[query_index].strip() if 0 <= query_index < len(values) else ""
-        if counts and query_text and query_text != "-":
+        ad_id = values[ad_index].strip() if 0 <= ad_index < len(values) else ""
+        if ad_id and not ad_id.lower().startswith("nad-"):
+            ad_id = ""
+        if count > 0 and query_text:
             parsed.append({
                 "campaign_id": values[campaign_index].strip() if 0 <= campaign_index < len(values) else "",
                 "adgroup_id": values[adgroup_index].strip() if 0 <= adgroup_index < len(values) else "",
+                "ad_id": ad_id,
                 "query_text": query_text,
-                "conversion_count": counts[0],
+                "conversion_count": count,
                 "is_purchase": purchase,
+                "is_cart": cart,
+                "conversion_type": _shopping_query_conversion_label(purchase, cart, wishlist),
             })
     return parsed
 
-def _performance_fast_naver_request(method: str, api_key: str, secret_key: str, cid: str, uri: str, json_body: Dict[str, Any] | None = None):
-    return request_naver_api(method, api_key, secret_key, cid, uri, json_body=json_body, max_retries=1, session=HTTP_SESSION, base_url=OPENAPI_BASE_URL, timeout=(2, 4))
+def _shopping_query_parse_report_date(value: Any) -> str:
+    text = str(value or "").strip()
+    if re.fullmatch(r"\d{8}", text):
+        try:
+            return date(int(text[:4]), int(text[4:6]), int(text[6:8])).isoformat()
+        except Exception:
+            return ""
+    parsed = _shopping_query_parse_raw_ssa_date(text)
+    if parsed:
+        return parsed
+    return text if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text) else ""
 
-def _download_shopping_query_report(api_key: str, secret_key: str, cid: str, job_id: str, download_url: str) -> Tuple[List[Dict[str, Any]], str]:
+def _shopping_query_conversion_type_from_code(value: Any) -> Tuple[str, bool, bool]:
+    code = str(value or "").strip()
+    if re.fullmatch(r"\d+\.0+", code):
+        code = code.split(".", 1)[0]
+    normalized = re.sub(r"[\s_-]+", "", code.casefold())
+    if code == "1" or normalized in {"purchase", "buy", "order", "구매", "구매완료"}:
+        return "purchase", True, False
+    if code == "3" or normalized in {"addtocart", "cart", "shoppingcart", "basket", "장바구니", "장바구니넣기"}:
+        return "cart", False, True
+    if code in {"2", "4", "5"} or normalized in {"signup", "join", "lead", "application", "reservation", "other", "etc", "가입", "신청", "예약", "기타"}:
+        return "other", False, False
+    return "", False, False
+
+def _performance_media_bool(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    return text.casefold() in {"1", "y", "yes", "true", "o", "○", "포함", "네", "naver", "partner"} or text == "1.0"
+
+def _performance_media_code(value: Any) -> str:
+    text = str(value or "").strip()
+    if re.fullmatch(r"\d+\.0+", text):
+        text = text.split(".", 1)[0]
+    return re.sub(r"\D+", "", text)
+
+def _performance_media_name_area_key(name: Any) -> str:
+    text = str(name or "").strip()
+    if not text:
+        return ""
+    compact = re.sub(r"\s+", "", text).upper()
+    if not compact:
+        return ""
+    if "통합검색" in compact or "검색탭" in compact:
+        return "search"
+    if compact.startswith(("BING-", "다음-", "ZUM-")):
+        return "search"
+    if re.fullmatch(r"네이버쇼핑-(PC|모바일|MOBILE)", compact):
+        return "search"
+    if re.fullmatch(r"네이버플러스스토어-(PC|모바일|MOBILE)", compact):
+        return "search"
+    contents_tokens = (
+        "검색창",
+        "메인",
+        "홈피드",
+        "마이",
+        "부동산",
+        "블로그",
+        "카페",
+        "페이",
+        "스포츠뉴스",
+        "스마트스토어추천",
+        "쇼핑추천",
+        "카탈로그추천",
+        "탭추천",
+    )
+    if any(token.upper() in compact for token in contents_tokens):
+        return "contents"
+    return ""
+
+def _fallback_media_catalog() -> Dict[str, Dict[str, Any]]:
+    rows = [
+        ("27758", "네이버 통합검색 - PC", True, False),
+        ("8753", "네이버 통합검색 - 모바일", True, False),
+        ("122876", "네이버 검색탭", True, False),
+        ("122875", "네이버 통합검색 광고더보기", True, False),
+        ("11068", "네이버 쇼핑 - PC", True, False),
+        ("33421", "네이버 쇼핑 - 모바일", True, False),
+        ("1525", "네이버 지식iN - PC", False, True),
+        ("36010", "네이버 지식iN - 모바일", False, True),
+        ("96499", "네이버 카페 - PC", False, True),
+        ("96500", "네이버 카페 - 모바일", False, True),
+        ("118495", "ZUM - PC", True, False),
+        ("118496", "ZUM - 모바일", True, False),
+    ]
+    out: Dict[str, Dict[str, Any]] = {}
+    for media_id, name, search_area, contents_area in rows + PERFORMANCE_SUPPLEMENTAL_MEDIA_CATALOG_ROWS:
+        out[media_id] = {
+            "id": media_id,
+            "name": name,
+            "url": "",
+            "is_naver": name.startswith("네이버"),
+            "is_partner": not name.startswith("네이버"),
+            "search_portal": search_area,
+            "search_area": search_area,
+            "contents_area": contents_area,
+            "pc_area": "PC" in name.upper(),
+            "mobile_area": "모바일" in name,
+        }
+    return out
+
+def _parse_media_master_report_text(text: str) -> Dict[str, Dict[str, Any]]:
+    raw_text = str(text or "").strip()
+    if not raw_text:
+        return {}
+    delimiter = "\t" if "\t" in raw_text else ","
+    try:
+        rows = list(csv.reader(io.StringIO(raw_text), delimiter=delimiter))
+    except Exception:
+        rows = []
+    if delimiter == "\t" and rows and all(len(row) <= 1 for row in rows[:10]):
+        try:
+            rows = list(csv.reader(io.StringIO(raw_text), delimiter=","))
+        except Exception:
+            rows = []
+    if not rows:
+        return {}
+
+    header_row = -1
+    normalized_rows = [[_normalize_table_header_key(cell) for cell in row] for row in rows[:12]]
+    for idx, normalized in enumerate(normalized_rows):
+        has_id = any(value in {"id", "mediaid", "매체id"} for value in normalized)
+        has_name = any(value in {"name", "medianame", "매체명", "매체이름"} for value in normalized)
+        if has_id and has_name:
+            header_row = idx
+            break
+
+    def header_col(headers: List[str], *names: str) -> int:
+        normalized_names = {_normalize_table_header_key(name) for name in names}
+        for col_idx, header in enumerate(headers):
+            if header in normalized_names:
+                return col_idx
+        return -1
+
+    if header_row >= 0:
+        headers = normalized_rows[header_row]
+        body = rows[header_row + 1:]
+        idx_id = header_col(headers, "ID", "Media ID", "매체ID")
+        idx_name = header_col(headers, "Name", "Media Name", "매체명", "매체이름")
+        idx_url = header_col(headers, "URL", "Media URL", "매체URL")
+        idx_naver = header_col(headers, "Naver", "네이버")
+        idx_partner = header_col(headers, "Partner", "파트너")
+        idx_portal = header_col(headers, "Search Portal", "검색포탈")
+        idx_search = header_col(headers, "Search", "Search Area", "검색영역포함")
+        idx_contents = header_col(headers, "Contents", "Contents Area", "콘텐츠영역포함")
+        idx_pc = header_col(headers, "PC", "PC Area", "PC영역포함")
+        idx_mobile = header_col(headers, "Mobile", "Mobile Area", "모바일영역포함")
+    else:
+        body = rows
+        sample = next((row for row in body if row), [])
+        starts_with_id = bool(sample and _performance_media_code(sample[0]))
+        offset = 0 if starts_with_id else 1
+        idx_id, idx_name, idx_url = offset, offset + 1, offset + 2
+        idx_naver, idx_partner, idx_portal = offset + 3, offset + 4, offset + 5
+        idx_search, idx_contents, idx_pc, idx_mobile = offset + 6, offset + 7, offset + 8, offset + 9
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for row in body:
+        if not row:
+            continue
+
+        def cell(index: int) -> str:
+            return str(row[index] if 0 <= index < len(row) else "").strip()
+
+        media_id = _performance_media_code(cell(idx_id))
+        media_name = cell(idx_name)
+        if not media_id or not media_name or media_name.lower().startswith("last update"):
+            continue
+        out[media_id] = {
+            "id": media_id,
+            "name": media_name,
+            "url": cell(idx_url),
+            "is_naver": _performance_media_bool(cell(idx_naver)) or media_name.startswith("네이버"),
+            "is_partner": _performance_media_bool(cell(idx_partner)),
+            "search_portal": _performance_media_bool(cell(idx_portal)),
+            "search_area": _performance_media_bool(cell(idx_search)),
+            "contents_area": _performance_media_bool(cell(idx_contents)),
+            "pc_area": _performance_media_bool(cell(idx_pc)) or "PC" in media_name.upper(),
+            "mobile_area": _performance_media_bool(cell(idx_mobile)) or "모바일" in media_name,
+        }
+    return out
+
+def _download_media_master_report_catalog(api_key: str, secret_key: str, cid: str, download_url: str, timeout_value: Any) -> Dict[str, Dict[str, Any]]:
+    url = str(download_url or "").strip()
+    if not url:
+        return {}
+    response = _download_performance_report_response(api_key, secret_key, cid, url, timeout_value)
+    response.raise_for_status()
+    return _parse_media_master_report_text(_decode_uploaded_text(response.content))
+
+def _fetch_media_master_report_catalog(api_key: str, secret_key: str, cid: str, timeout_seconds: float = 6.0) -> Tuple[Dict[str, Dict[str, Any]], str]:
+    if not api_key or not secret_key or not cid:
+        return {}, ""
+    deadline = time.monotonic() + max(2.0, float(timeout_seconds or 6.0))
+    last_error = ""
+    for item in PERFORMANCE_MEDIA_MASTER_REPORT_ITEMS:
+        if time.monotonic() >= deadline:
+            break
+        job_id = ""
+        try:
+            response = _shopping_query_report_request(
+                "POST",
+                api_key,
+                secret_key,
+                cid,
+                "/master-reports",
+                {"item": item},
+                _shopping_query_remaining_request_timeout(deadline),
+            )
+            data = _response_json_value(response)
+            job_id = _shopping_query_report_job_id(data) or _shopping_query_report_value(data, "id", "masterReportId", "masterReportJobId")
+            download_url = _shopping_query_report_download_url(data)
+            if response.status_code in {200, 201, 202} and download_url:
+                catalog = _download_media_master_report_catalog(
+                    api_key,
+                    secret_key,
+                    cid,
+                    download_url,
+                    _shopping_query_remaining_request_timeout(deadline, connect_cap=0.5, read_cap=2.0),
+                )
+                if catalog:
+                    return catalog, ""
+                last_error = "Media Master Report에 파싱 가능한 매체 행이 없습니다."
+                continue
+            if response.status_code not in {200, 201, 202} or not job_id:
+                last_error = _short_log_text(getattr(response, "text", ""), 180) or f"HTTP {getattr(response, 'status_code', '')}"
+                continue
+        except Exception as exc:
+            last_error = _short_log_text(str(exc), 180)
+            continue
+
+        try:
+            while time.monotonic() < deadline:
+                status_response = _shopping_query_report_request(
+                    "GET",
+                    api_key,
+                    secret_key,
+                    cid,
+                    f"/master-reports/{job_id}",
+                    None,
+                    _shopping_query_remaining_request_timeout(deadline, connect_cap=0.5, read_cap=1.0),
+                )
+                status_data = _response_json_value(status_response)
+                status = _shopping_query_report_status(status_data)
+                download_url = _shopping_query_report_download_url(status_data)
+                if download_url and status in {"", "BUILT", "DONE", "COMPLETE", "COMPLETED", "READY", "FINISHED", "SUCCESS"}:
+                    catalog = _download_media_master_report_catalog(
+                        api_key,
+                        secret_key,
+                        cid,
+                        download_url,
+                        _shopping_query_remaining_request_timeout(deadline, connect_cap=0.5, read_cap=2.0),
+                    )
+                    if catalog:
+                        return catalog, ""
+                    last_error = "Media Master Report에 파싱 가능한 매체 행이 없습니다."
+                    break
+                if status in {"ERROR", "FAIL", "FAILED", "CANCEL", "CANCELED", "CANCELLED"}:
+                    last_error = f"Media Master Report 생성 오류({status})"
+                    break
+                time.sleep(0.25)
+        except Exception as exc:
+            last_error = _short_log_text(str(exc), 180)
+        finally:
+            if job_id:
+                try:
+                    _shopping_query_report_request(
+                        "DELETE",
+                        api_key,
+                        secret_key,
+                        cid,
+                        f"/master-reports/{job_id}",
+                        None,
+                        timeout=(1, 2),
+                    )
+                except Exception:
+                    pass
+    return {}, last_error
+
+def _load_performance_media_catalog(api_key: str = "", secret_key: str = "", cid: str = "", force: bool = False) -> Tuple[Dict[str, Dict[str, Any]], str]:
+    now = time.monotonic()
+    cache_key = f"naver_media:{str(cid or '').strip() or 'public'}:{'master' if api_key and secret_key and cid else 'static'}"
+    with PERFORMANCE_MEDIA_CATALOG_LOCK:
+        cached = PERFORMANCE_MEDIA_CATALOG_CACHE.get(cache_key)
+        if cached and not force and now - cached[0] <= PERFORMANCE_MEDIA_CATALOG_CACHE_TTL:
+            return copy.deepcopy(cached[1]), ""
+    warning = ""
+    catalog: Dict[str, Dict[str, Any]] = {}
+    try:
+        response = HTTP_SESSION.get(PERFORMANCE_MEDIA_CATALOG_URL, timeout=(3, 10), allow_redirects=True)
+        response.raise_for_status()
+        df = pd.read_excel(io.BytesIO(response.content), dtype=str, keep_default_na=False, header=None)
+        header_row = -1
+        for idx, values in df.head(12).iterrows():
+            normalized = [_normalize_table_header_key(value) for value in values.tolist()]
+            if "매체id" in normalized and "매체이름" in normalized:
+                header_row = int(idx)
+                break
+
+        def col(*names: str) -> int:
+            normalized_names = {_normalize_table_header_key(name) for name in names}
+            for col_idx, header in enumerate(headers):
+                if header in normalized_names:
+                    return col_idx
+            return -1
+
+        if header_row >= 0:
+            headers = [_normalize_table_header_key(value) for value in df.iloc[header_row].tolist()]
+            body = df.iloc[header_row + 1:].copy()
+            idx_id = col("매체ID")
+            idx_name = col("매체이름")
+            idx_url = col("매체URL")
+            idx_naver = col("네이버")
+            idx_partner = col("파트너")
+            idx_portal = col("검색포탈")
+            idx_search = col("검색영역포함")
+            idx_contents = col("콘텐츠영역포함")
+            idx_pc = col("PC영역포함")
+            idx_mobile = col("모바일영역포함")
+        else:
+            body = df.copy()
+            idx_id, idx_name, idx_url = 0, 1, 2
+            idx_naver, idx_partner, idx_portal = 3, 4, 5
+            idx_search, idx_contents, idx_pc, idx_mobile = 6, 7, 8, 9
+        for _, values in body.iterrows():
+            cells = values.tolist()
+            def cell(index: int) -> str:
+                return str(cells[index] if 0 <= index < len(cells) else "").strip()
+            if idx_id < 0 or idx_name < 0:
+                continue
+            media_id = _performance_media_code(cell(idx_id))
+            media_name = cell(idx_name)
+            if not media_id or not media_name or media_name.lower().startswith("last update"):
+                continue
+            catalog[media_id] = {
+                "id": media_id,
+                "name": media_name or f"매체 {media_id}",
+                "url": cell(idx_url),
+                "is_naver": _performance_media_bool(cell(idx_naver)),
+                "is_partner": _performance_media_bool(cell(idx_partner)),
+                "search_portal": _performance_media_bool(cell(idx_portal)),
+                "search_area": _performance_media_bool(cell(idx_search)),
+                "contents_area": _performance_media_bool(cell(idx_contents)),
+                "pc_area": _performance_media_bool(cell(idx_pc)),
+                "mobile_area": _performance_media_bool(cell(idx_mobile)),
+            }
+    except Exception as exc:
+        warning = f"네이버 매체 목록을 불러오지 못해 기본 매체명으로 표시합니다: {_short_log_text(str(exc), 160)}"
+    fallback = _fallback_media_catalog()
+    fallback.update(catalog)
+    master_catalog, master_warning = _fetch_media_master_report_catalog(api_key, secret_key, cid)
+    if master_catalog:
+        fallback.update(master_catalog)
+    elif warning and master_warning and api_key and secret_key and cid:
+        warning = "; ".join([item for item in [warning, f"최신 매체 Master Report를 불러오지 못했습니다: {_short_log_text(master_warning, 160)}"] if item])
+    with PERFORMANCE_MEDIA_CATALOG_LOCK:
+        PERFORMANCE_MEDIA_CATALOG_CACHE[cache_key] = (now, copy.deepcopy(fallback))
+    return fallback, warning
+
+def _performance_media_area_info(media_code: Any, media_catalog: Dict[str, Dict[str, Any]], source: Any = "") -> Dict[str, Any]:
+    media_id = _performance_media_code(media_code)
+    media = (media_catalog or {}).get(media_id) or {}
+    search_area = _boolish(media.get("search_area"), False)
+    contents_area = _boolish(media.get("contents_area"), False)
+    name = str(media.get("name") or f"매체 {media_id or '미확인'}").strip()
+    source_text = str(source or "").strip().lower()
+    name_area = _performance_media_name_area_key(name)
+    if source_text.startswith("stat_") and name_area == "search":
+        return {"key": "search", "label": "검색 영역", "sort": 1, "media_id": media_id, "media_name": name}
+    if source_text.startswith("stat_") and name_area == "contents":
+        return {"key": "contents", "label": "콘텐츠 영역", "sort": 2, "media_id": media_id, "media_name": name}
+    if search_area and contents_area:
+        return {"key": "search_contents", "label": "검색+콘텐츠 공통", "sort": 3, "media_id": media_id, "media_name": name}
+    if search_area:
+        return {"key": "search", "label": "검색 영역", "sort": 1, "media_id": media_id, "media_name": name}
+    if contents_area:
+        return {"key": "contents", "label": "콘텐츠 영역", "sort": 2, "media_id": media_id, "media_name": name}
+    if media_id and (media_id in PERFORMANCE_SUPPLEMENTAL_SEARCH_MEDIA_IDS or (source_text.startswith("stat_") and media_id.startswith("341"))):
+        return {"key": "search", "label": "검색 영역", "sort": 1, "media_id": media_id, "media_name": name}
+    if media_id and (media_id in PERFORMANCE_SUPPLEMENTAL_CONTENTS_MEDIA_IDS or source_text.startswith("stat_")):
+        return {"key": "contents", "label": "콘텐츠 영역", "sort": 2, "media_id": media_id, "media_name": name}
+    return {"key": "unknown", "label": "영역 미분류", "sort": 9, "media_id": media_id, "media_name": name}
+
+def _performance_region_raw(value: Any) -> str:
+    text = str(value or "").strip()
+    if re.fullmatch(r"\d+\.0+", text):
+        text = text.split(".", 1)[0]
+    return text
+
+def _performance_region_code(value: Any) -> str:
+    text = _performance_region_raw(value)
+    digits = re.sub(r"\D+", "", text)
+    if not digits:
+        return "unknown"
+    candidates: List[str] = []
+    if len(digits) == 1:
+        candidates.append(digits.zfill(2))
+    elif len(digits) == 2:
+        candidates.append(digits)
+    else:
+        candidates.extend([digits, digits[-2:]])
+    for candidate in candidates:
+        if candidate in PERFORMANCE_REGION_CODES:
+            return candidate
+    return "unknown"
+
+def _performance_report_hour_code(value: Any) -> str:
+    text = str(value or "").strip()
+    if re.fullmatch(r"\d+\.0+", text):
+        text = text.split(".", 1)[0]
+    digits = re.sub(r"\D+", "", text)
+    if not digits:
+        return ""
+    try:
+        hour = int(digits)
+    except Exception:
+        return ""
+    return f"{hour:02d}" if 0 <= hour <= 23 else ""
+
+def _report_dimension_token_count_from_dims(dims: List[str]) -> int:
+    if len(dims) >= 4 and _performance_report_hour_code(dims[-4]) and _performance_region_code(dims[-3]) != "unknown":
+        return 4
+    if len(dims) >= 2:
+        return 2
+    if len(dims) == 1 and _performance_media_code(dims[-1]):
+        return 1
+    return 0
+
+def _report_dimension_token_count(tokens: List[str], metric_count: int) -> int:
+    metric_count = max(0, int(metric_count or 0))
+    dims = tokens[:-metric_count] if metric_count and len(tokens) >= metric_count else tokens
+    return _report_dimension_token_count_from_dims(dims)
+
+def _extract_report_dimension_fields(tail: List[str], metric_count: int) -> Dict[str, str]:
+    tokens = [str(value or "").strip() for value in (tail or [])]
+    metric_count = max(0, int(metric_count or 0))
+    dims = tokens[:-metric_count] if metric_count and len(tokens) >= metric_count else tokens
+    dim_count = _report_dimension_token_count_from_dims(dims)
+    dims = dims[-dim_count:] if dim_count else []
+    hour = region_raw = media = pc_mobile = ""
+    if len(dims) == 1:
+        media = dims[-1]
+    if len(dims) >= 2:
+        media, pc_mobile = dims[-2], dims[-1]
+    if len(dims) >= 4:
+        hour, region_raw, media, pc_mobile = dims[-4], dims[-3], dims[-2], dims[-1]
+    if len(dims) >= 4 and _performance_region_code(region_raw) == "unknown":
+        best_index = -1
+        best_score = -1
+        for index, token in enumerate(dims):
+            if _performance_region_code(token) == "unknown":
+                continue
+            score = 0
+            if index > 0 and _performance_report_hour_code(dims[index - 1]):
+                score += 3
+            if index + 1 < len(dims) and _performance_media_code(dims[index + 1]):
+                score += 1
+            if index + 2 < len(dims):
+                score += 1
+            if score > best_score:
+                best_index = index
+                best_score = score
+        if best_index >= 0:
+            region_raw = dims[best_index]
+            if best_index > 0:
+                hour = dims[best_index - 1]
+            if best_index + 1 < len(dims):
+                media = dims[best_index + 1]
+            if best_index + 2 < len(dims):
+                pc_mobile = dims[best_index + 2]
+    return {
+        "hour": _performance_report_hour_code(hour) or str(hour or "").strip(),
+        "region_code": str(region_raw or "").strip(),
+        "media": str(media or "").strip(),
+        "pc_mobile_type": str(pc_mobile or "").strip(),
+    }
+
+def _report_pc_mobile_score(value: Any) -> int:
+    text = str(value or "").strip()
+    if not text:
+        return 0
+    compact = re.sub(r"\s+", "", text).upper()
+    digits = re.sub(r"\D+", "", compact)
+    if compact in {"PC", "P"} or "모바일" in compact or compact in {"MO", "MOBILE", "MOB", "M"}:
+        return 2
+    if digits in {"1", "2"}:
+        return 2
+    if digits:
+        return 1
+    return 0
+
+def _report_dimension_score(tokens: List[str], metric_count: int) -> int:
+    fields = _extract_report_dimension_fields(tokens, metric_count)
+    media = str(fields.get("media") or "")
+    pc_mobile = str(fields.get("pc_mobile_type") or "")
+    score = 0
+    if _performance_media_code(media):
+        score += 4
+    score += _report_pc_mobile_score(pc_mobile)
+    if fields.get("hour"):
+        score += 1
+    if _performance_region_code(fields.get("region_code")) != "unknown":
+        score += 1
+    if media and pc_mobile and _performance_media_code(media) == _performance_media_code(pc_mobile):
+        score -= 3
+    return score
+
+def _select_ad_activity_metric_count(tokens: List[str]) -> int:
+    best_metric_count = 4
+    best_score = -10**9
+    for metric_count in (4, 5):
+        if len(tokens) < metric_count + 1:
+            continue
+        if metric_count == 5:
+            impressions = _shopping_query_raw_ssa_number(tokens[-5])
+            clicks = _shopping_query_raw_ssa_number(tokens[-4])
+            cost = _shopping_query_raw_ssa_number(tokens[-3])
+            rank = _shopping_query_raw_ssa_number(tokens[-2])
+        else:
+            impressions = _shopping_query_raw_ssa_number(tokens[-4])
+            clicks = _shopping_query_raw_ssa_number(tokens[-3])
+            cost = _shopping_query_raw_ssa_number(tokens[-2])
+            rank = _shopping_query_raw_ssa_number(tokens[-1])
+        score = _report_dimension_score(tokens, metric_count)
+        if impressions > 0 or clicks > 0 or cost > 0:
+            score += 2
+        if impressions >= clicks:
+            score += 3
+        else:
+            score -= 6
+        if clicks <= 0 and cost > 0:
+            score -= 2
+        if rank > 0:
+            score += 1
+        if metric_count == 5:
+            score -= 1
+        if score > best_score:
+            best_score = score
+            best_metric_count = metric_count
+    return best_metric_count
+
+def _report_optional_entity_fields(tokens: List[str], metric_count: int) -> Tuple[str, str, str]:
+    metric_count = max(0, int(metric_count or 0))
+    dims = tokens[:-metric_count] if metric_count and len(tokens) >= metric_count else tokens
+    dim_count = _report_dimension_token_count_from_dims(dims)
+    prefix = dims[:-dim_count] if dim_count else dims
+    keyword_id = str(prefix[0] if len(prefix) >= 1 else "").strip()
+    ad_id = str(prefix[1] if len(prefix) >= 2 else "").strip()
+    business_channel_id = str(prefix[2] if len(prefix) >= 3 else "").strip()
+    return keyword_id, ad_id, business_channel_id
+
+def _parse_ad_detail_report(text: str, source_path: str = "") -> List[Dict[str, Any]]:
+    parsed: List[Dict[str, Any]] = []
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = re.split(r"\s+", line)
+        if len(parts) < 9:
+            continue
+        date_text, customer_id, campaign_id, adgroup_id = parts[0], parts[1], parts[2], parts[3]
+        if not re.fullmatch(r"\d{8}|\d{4}-\d{2}-\d{2}", date_text):
+            continue
+        if not customer_id.isdigit() or not campaign_id.lower().startswith("cmp-") or not adgroup_id.lower().startswith("grp-"):
+            continue
+        tail = parts[4:]
+        if len(tail) < 5:
+            continue
+        metric_count = _select_ad_activity_metric_count(tail)
+        if metric_count == 5:
+            metric_count = 5
+            impressions = _shopping_query_raw_ssa_number(tail[-5])
+            clicks = _shopping_query_raw_ssa_number(tail[-4])
+            cost = _shopping_query_raw_ssa_number(tail[-3])
+            sum_ad_rank = _shopping_query_raw_ssa_number(tail[-2])
+            view_count = _shopping_query_raw_ssa_number(tail[-1])
+        else:
+            metric_count = 4
+            impressions = _shopping_query_raw_ssa_number(tail[-4])
+            clicks = _shopping_query_raw_ssa_number(tail[-3])
+            cost = _shopping_query_raw_ssa_number(tail[-2])
+            sum_ad_rank = _shopping_query_raw_ssa_number(tail[-1])
+            view_count = 0
+        if impressions <= 0 and clicks <= 0 and cost <= 0:
+            continue
+        dim_fields = _extract_report_dimension_fields(tail, metric_count)
+        keyword_id, ad_id, business_channel_id = _report_optional_entity_fields(tail, metric_count)
+        parsed.append({
+            "campaign_id": campaign_id,
+            "adgroup_id": adgroup_id,
+            "keyword_id": keyword_id,
+            "ad_id": ad_id,
+            "business_channel_id": business_channel_id,
+            "date": _shopping_query_parse_report_date(date_text),
+            "hour": dim_fields.get("hour") or "",
+            "region_code": dim_fields.get("region_code") or "",
+            "media": dim_fields.get("media") or "",
+            "pc_mobile_type": dim_fields.get("pc_mobile_type") or "",
+            "impCnt": impressions,
+            "clkCnt": clicks,
+            "salesAmt": cost,
+            "sum_ad_rank": sum_ad_rank,
+            "viewCnt": view_count,
+            "source": "stat_ad_detail",
+            "source_path": source_path,
+        })
+    return parsed
+
+def _parse_ad_conversion_detail_report(text: str, source_path: str = "") -> List[Dict[str, Any]]:
+    parsed: List[Dict[str, Any]] = []
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = re.split(r"\s+", line)
+        if len(parts) < 9:
+            continue
+        date_text, customer_id, campaign_id, adgroup_id = parts[0], parts[1], parts[2], parts[3]
+        if not re.fullmatch(r"\d{8}|\d{4}-\d{2}-\d{2}", date_text):
+            continue
+        if not customer_id.isdigit() or not campaign_id.lower().startswith("cmp-") or not adgroup_id.lower().startswith("grp-"):
+            continue
+        tail = parts[4:]
+        if len(tail) < 5:
+            continue
+        method_code = tail[-4].split(".", 1)[0] if re.fullmatch(r"\d+\.0+", tail[-4]) else tail[-4]
+        type_code = tail[-3].split(".", 1)[0] if re.fullmatch(r"\d+\.0+", tail[-3]) else tail[-3]
+        conversion_type, is_purchase, is_cart = _shopping_query_conversion_type_from_code(type_code)
+        conversion_count = _shopping_query_raw_ssa_number(tail[-2])
+        sales_by_conversion = _shopping_query_raw_ssa_number(tail[-1])
+        if conversion_count <= 0:
+            continue
+        dim_fields = _extract_report_dimension_fields(tail, 4)
+        keyword_id, ad_id, business_channel_id = _report_optional_entity_fields(tail, 4)
+        parsed.append({
+            "campaign_id": campaign_id,
+            "adgroup_id": adgroup_id,
+            "keyword_id": keyword_id,
+            "ad_id": ad_id,
+            "business_channel_id": business_channel_id,
+            "date": _shopping_query_parse_report_date(date_text),
+            "hour": dim_fields.get("hour") or "",
+            "region_code": dim_fields.get("region_code") or "",
+            "media": dim_fields.get("media") or "",
+            "pc_mobile_type": dim_fields.get("pc_mobile_type") or "",
+            "conversion_method": method_code,
+            "conversion_type_code": type_code,
+            "sales_by_conversion": sales_by_conversion,
+            "conversion_count": conversion_count,
+            "is_purchase": is_purchase,
+            "is_cart": is_cart,
+            "conversion_type": conversion_type or "other",
+            "source": "stat_ad_conversion_detail",
+            "source_path": source_path,
+        })
+    return parsed
+
+def _parse_shopping_keyword_conversion_detail_report(text: str, source_path: str = "") -> List[Dict[str, Any]]:
+    parsed: List[Dict[str, Any]] = []
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = re.split(r"\s+", line)
+        if len(parts) < 15:
+            continue
+        date_text = parts[0]
+        customer_id = parts[1]
+        campaign_id = parts[2]
+        adgroup_id = parts[3]
+        if not re.fullmatch(r"\d{8}|\d{4}-\d{2}-\d{2}", date_text):
+            continue
+        if not customer_id.isdigit() or not campaign_id.lower().startswith("cmp-") or not adgroup_id.lower().startswith("grp-"):
+            continue
+        ad_index = -1
+        for index in range(4, len(parts)):
+            if parts[index].lower().startswith("nad-"):
+                ad_index = index
+                break
+        if ad_index <= 4:
+            continue
+        query_text = " ".join(parts[4:ad_index]).strip()
+        if not query_text:
+            continue
+        business_index = -1
+        for index in range(ad_index + 1, len(parts)):
+            if parts[index].lower().startswith("bsn-"):
+                business_index = index
+                break
+        if business_index < 0:
+            continue
+        tail = parts[business_index + 1:]
+        if len(tail) < 8:
+            continue
+        conversion_method = tail[-4]
+        conversion_type_code = tail[-3]
+        conversion_count = _shopping_query_raw_ssa_number(tail[-2])
+        sales_by_conversion = _shopping_query_raw_ssa_number(tail[-1])
+        method_code = conversion_method.split(".", 1)[0] if re.fullmatch(r"\d+\.0+", conversion_method) else conversion_method
+        type_code = conversion_type_code.split(".", 1)[0] if re.fullmatch(r"\d+\.0+", conversion_type_code) else conversion_type_code
+        conversion_type, is_purchase, is_cart = _shopping_query_conversion_type_from_code(type_code)
+        if method_code not in {"1", "2"} or not conversion_type:
+            continue
+        if conversion_count <= 0:
+            continue
+        dim_fields = _extract_report_dimension_fields(tail, 4)
+        parsed.append({
+            "campaign_id": campaign_id,
+            "adgroup_id": adgroup_id,
+            "ad_id": parts[ad_index],
+            "business_channel_id": parts[business_index],
+            "query_text": query_text,
+            "date": _shopping_query_parse_report_date(date_text),
+            "hour": dim_fields.get("hour") or (tail[-8] if len(tail) >= 8 else ""),
+            "region_code": dim_fields.get("region_code") or (tail[-7] if len(tail) >= 8 else ""),
+            "media": dim_fields.get("media") or (tail[-6] if len(tail) >= 8 else ""),
+            "pc_mobile_type": dim_fields.get("pc_mobile_type") or (tail[-5] if len(tail) >= 8 else ""),
+            "conversion_method": method_code,
+            "conversion_type_code": type_code,
+            "sales_by_conversion": sales_by_conversion,
+            "conversion_count": conversion_count,
+            "is_purchase": is_purchase,
+            "is_cart": is_cart,
+            "conversion_type": conversion_type,
+            "source": "stat_conversion_detail",
+            "source_path": source_path,
+        })
+    return parsed
+
+def _parse_shopping_keyword_detail_report(text: str, source_path: str = "") -> List[Dict[str, Any]]:
+    parsed: List[Dict[str, Any]] = []
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = re.split(r"\s+", line)
+        if len(parts) < 15:
+            continue
+        date_text = parts[0]
+        customer_id = parts[1]
+        campaign_id = parts[2]
+        adgroup_id = parts[3]
+        if not re.fullmatch(r"\d{8}|\d{4}-\d{2}-\d{2}", date_text):
+            continue
+        if not customer_id.isdigit() or not campaign_id.lower().startswith("cmp-") or not adgroup_id.lower().startswith("grp-"):
+            continue
+        ad_index = -1
+        for index in range(4, len(parts)):
+            if parts[index].lower().startswith("nad-"):
+                ad_index = index
+                break
+        if ad_index <= 4:
+            continue
+        query_text = " ".join(parts[4:ad_index]).strip()
+        if not query_text:
+            continue
+        business_index = -1
+        for index in range(ad_index + 1, len(parts)):
+            if parts[index].lower().startswith("bsn-"):
+                business_index = index
+                break
+        if business_index < 0:
+            continue
+        tail = parts[business_index + 1:]
+        if len(tail) < 8:
+            continue
+        if len(tail) >= 9:
+            impressions = _shopping_query_raw_ssa_number(tail[-5])
+            clicks = _shopping_query_raw_ssa_number(tail[-4])
+            cost = _shopping_query_raw_ssa_number(tail[-3])
+            sum_ad_rank = _shopping_query_raw_ssa_number(tail[-2])
+            view_count = _shopping_query_raw_ssa_number(tail[-1])
+            metric_count = 5
+        else:
+            metric_1 = _shopping_query_raw_ssa_number(tail[-4])
+            metric_2 = _shopping_query_raw_ssa_number(tail[-3])
+            metric_3 = _shopping_query_raw_ssa_number(tail[-2])
+            metric_4 = _shopping_query_raw_ssa_number(tail[-1])
+            clicks = metric_1
+            cost = metric_2
+            impressions = metric_3
+            sum_ad_rank = metric_4
+            view_count = 0
+            metric_count = 4
+            observed_order_ok = impressions > 0 and clicks <= impressions
+            pdf_order_ok = metric_1 > 0 and metric_2 <= metric_1
+            if not observed_order_ok and pdf_order_ok:
+                impressions = metric_1
+                clicks = metric_2
+                cost = metric_3
+                sum_ad_rank = metric_4
+        if impressions <= 0 and clicks <= 0:
+            continue
+        dim_fields = _extract_report_dimension_fields(tail, metric_count)
+        parsed.append({
+            "campaign_id": campaign_id,
+            "adgroup_id": adgroup_id,
+            "ad_id": parts[ad_index],
+            "business_channel_id": parts[business_index],
+            "query_text": query_text,
+            "date": _shopping_query_parse_report_date(date_text),
+            "hour": dim_fields.get("hour") or (tail[-9] if metric_count == 5 and len(tail) >= 9 else tail[-8]),
+            "region_code": dim_fields.get("region_code") or (tail[-8] if metric_count == 5 and len(tail) >= 9 else tail[-7]),
+            "media": dim_fields.get("media") or (tail[-7] if metric_count == 5 and len(tail) >= 9 else tail[-6]),
+            "pc_mobile_type": dim_fields.get("pc_mobile_type") or (tail[-6] if metric_count == 5 and len(tail) >= 9 else tail[-5]),
+            "impCnt": impressions,
+            "clkCnt": clicks,
+            "salesAmt": cost,
+            "sum_ad_rank": sum_ad_rank,
+            "viewCnt": view_count,
+            "source": "stat_keyword_detail",
+            "source_path": source_path,
+        })
+    return parsed
+
+def _performance_fast_naver_request(method: str, api_key: str, secret_key: str, cid: str, uri: str, json_body: Dict[str, Any] | None = None, timeout: Any = (5, 15)):
+    return request_naver_api(method, api_key, secret_key, cid, uri, json_body=json_body, max_retries=1, session=HTTP_SESSION, base_url=OPENAPI_BASE_URL, timeout=timeout)
+
+def _shopping_query_report_request(method: str, api_key: str, secret_key: str, cid: str, uri: str, json_body: Dict[str, Any] | None = None, timeout: Any = None):
+    return _performance_fast_naver_request(method, api_key, secret_key, cid, uri, json_body=json_body, timeout=timeout or (5, 15))
+
+def _delete_shopping_query_report_jobs_async(api_key: str, secret_key: str, cid: str, job_ids: Iterable[str]) -> None:
+    ids = [str(job_id or "").strip() for job_id in job_ids if str(job_id or "").strip()]
+    if not ids:
+        return
+    def _worker():
+        for job_id in ids:
+            try:
+                _shopping_query_report_request("DELETE", api_key, secret_key, cid, f"/stat-reports/{job_id}")
+            except Exception:
+                pass
+    threading.Thread(target=_worker, daemon=True).start()
+
+def _shopping_query_report_value(data: Any, *keys: str) -> str:
+    value = _performance_deep_value(data if isinstance(data, (dict, list)) else {}, keys)
+    return str(value or "").strip()
+
+def _shopping_query_report_job_id(data: Any) -> str:
+    return _shopping_query_report_value(data, "reportJobId", "report_job_id", "jobId", "job_id")
+
+def _shopping_query_report_status(data: Any) -> str:
+    return _shopping_query_report_value(data, "status", "reportStatus", "report_status", "jobStatus", "job_status").strip().upper()
+
+def _shopping_query_report_download_url(data: Any) -> str:
+    return _shopping_query_report_value(data, "downloadUrl", "downloadURL", "download_url", "url")
+
+def _shopping_query_parse_raw_ssa_date(value: Any) -> str:
+    text = str(value or "").strip()
+    match = re.search(r"(\d{4})[.-](\d{1,2})[.-](\d{1,2})", text)
+    if not match:
+        return ""
+    y, m, d = match.groups()
+    try:
+        return date(int(y), int(m), int(d)).isoformat()
+    except Exception:
+        return ""
+
+def _shopping_query_raw_ssa_title_range(text: str) -> Tuple[str, str]:
+    first_line = str(text or "").splitlines()[0] if str(text or "").splitlines() else ""
+    matches = re.findall(r"(\d{4})[.-](\d{1,2})[.-](\d{1,2})", first_line)
+    dates = []
+    for y, m, d in matches[:2]:
+        try:
+            dates.append(date(int(y), int(m), int(d)).isoformat())
+        except Exception:
+            continue
+    if not dates:
+        return "", ""
+    if len(dates) == 1:
+        return dates[0], dates[0]
+    return dates[0], dates[1]
+
+def _shopping_query_raw_ssa_number(value: Any) -> float:
+    return _performance_number(str(value or "").replace(",", "").strip())
+
+def _shopping_query_raw_ssa_header_index(headers: List[Any], *aliases: str) -> int:
+    normalized_aliases = {_normalize_table_header_key(alias) for alias in aliases}
+    for idx, header in enumerate(headers or []):
+        if _normalize_table_header_key(header) in normalized_aliases:
+            return idx
+    return -1
+
+def _shopping_query_raw_ssa_header_score(headers: List[Any]) -> int:
+    checks = [
+        ("검색어", "searchQuery", "query"),
+        ("총 전환수", "전환수", "totalConversionCount"),
+        ("구매완료 전환수", "purchaseConversionCount"),
+        ("캠페인", "campaign"),
+        ("광고그룹", "adgroup"),
+    ]
+    return sum(1 for aliases in checks if _shopping_query_raw_ssa_header_index(headers, *aliases) >= 0)
+
+def _parse_raw_ssa_shopping_query_report(text: str, source_path: str = "", source_kind: str = "raw_ssa") -> List[Dict[str, Any]]:
+    text = str(text or "")
+    if not text.strip():
+        return []
+    sample = text[:4096]
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",\t;")
+        sep = dialect.delimiter
+    except Exception:
+        sep = "\t" if "\t" in sample else ","
+    matrix = list(csv.reader(io.StringIO(text), delimiter=sep))
+    if not matrix:
+        return []
+    header_row = -1
+    for idx, row in enumerate(matrix[:20]):
+        if _shopping_query_raw_ssa_header_score(row) >= 4:
+            header_row = idx
+            break
+    if header_row < 0:
+        return []
+    headers = matrix[header_row]
+    idx_date = _shopping_query_raw_ssa_header_index(headers, "일별", "날짜", "date", "statDate")
+    idx_media = _shopping_query_raw_ssa_header_index(headers, "PC/모바일 매체", "매체", "device", "media")
+    idx_type = _shopping_query_raw_ssa_header_index(headers, "캠페인유형", "campaignType", "campaignTp")
+    idx_campaign = _shopping_query_raw_ssa_header_index(headers, "캠페인", "캠페인명", "campaign", "campaignName")
+    idx_adgroup = _shopping_query_raw_ssa_header_index(headers, "광고그룹", "광고그룹명", "adgroup", "adgroupName")
+    idx_query = _shopping_query_raw_ssa_header_index(headers, "검색어", "검색어명", "query", "searchQuery", "keyword")
+    idx_total = _shopping_query_raw_ssa_header_index(headers, "총 전환수", "전체 전환수", "전환수", "totalConversionCount", "ccnt")
+    idx_purchase = _shopping_query_raw_ssa_header_index(headers, "구매완료 전환수", "구매완료수", "purchaseConversionCount", "purchaseCcnt")
+    parsed: List[Dict[str, Any]] = []
+    for values in matrix[header_row + 1:]:
+        if not any(str(v or "").strip() for v in values):
+            continue
+        def cell(index: int) -> str:
+            return str(values[index] if 0 <= index < len(values) else "").strip()
+        campaign_type = cell(idx_type)
+        if campaign_type and not _is_shopping_campaign_type(campaign_type):
+            continue
+        query_text = cell(idx_query)
+        if not query_text:
+            continue
+        total_count = _shopping_query_raw_ssa_number(cell(idx_total))
+        purchase_count = _shopping_query_raw_ssa_number(cell(idx_purchase))
+        if total_count <= 0 and purchase_count <= 0:
+            continue
+        if total_count <= 0 and purchase_count > 0:
+            total_count = purchase_count
+        cart_count = max(0.0, total_count - purchase_count)
+        common = {
+            "campaign_id": "",
+            "adgroup_id": "",
+            "ad_id": "",
+            "campaign_name": cell(idx_campaign),
+            "adgroup_name": cell(idx_adgroup),
+            "query_text": query_text,
+            "date": _shopping_query_parse_raw_ssa_date(cell(idx_date)),
+            "media": cell(idx_media),
+            "source": source_kind or "raw_ssa",
+            "source_path": source_path,
+        }
+        if purchase_count > 0:
+            parsed.append({
+                **common,
+                "conversion_count": purchase_count,
+                "is_purchase": True,
+                "is_cart": False,
+                "conversion_type": "purchase",
+            })
+        if cart_count > 0:
+            parsed.append({
+                **common,
+                "conversion_count": cart_count,
+                "is_purchase": False,
+                "is_cart": True,
+                "conversion_type": "cart",
+            })
+    return parsed
+
+def _download_shopping_query_report(api_key: str, secret_key: str, cid: str, job_id: str, download_url: str, stat_date: str = "", request_timeout: Any = None) -> Tuple[List[Dict[str, Any]], str]:
     url = str(download_url or "").strip()
     if not url:
         return [], "쇼핑검색어 리포트 다운로드 주소가 없습니다."
-    if url.startswith("/"):
-        url = f"{OPENAPI_BASE_URL}{url}"
-    elif not url.startswith(("http://", "https://")):
-        url = f"{OPENAPI_BASE_URL}/{url.lstrip('/')}"
+    timeout_value = request_timeout or (3, 10)
     try:
-        response = HTTP_SESSION.get(url, timeout=(2, 4), allow_redirects=True)
-        if response.status_code != 200 and url.startswith(OPENAPI_BASE_URL):
-            parsed_url = urlparse(url)
-            response = HTTP_SESSION.get(url, headers=_open_headers(api_key, secret_key, cid, "GET", parsed_url.path or "/"), timeout=(2, 4), allow_redirects=True)
+        response = _download_performance_report_response(api_key, secret_key, cid, url, timeout_value)
         if response.status_code != 200:
             return [], f"쇼핑검색어 리포트 다운로드 실패: HTTP {response.status_code}"
-        return _parse_shopping_query_conversion_report(response.content.decode("utf-8-sig", errors="replace")), ""
+        text = _decode_uploaded_text(response.content)
+        parsed = _parse_raw_ssa_shopping_query_report(text, f"stat-report:{job_id}", source_kind="stat_report")
+        if not parsed:
+            parsed = _parse_shopping_keyword_conversion_detail_report(text, f"stat-report:{job_id}")
+        if not parsed:
+            parsed = _parse_shopping_query_conversion_report(text)
+        if not parsed:
+            preview_lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+            preview = " / ".join(preview_lines[:3])
+            return [], f"쇼핑검색어 리포트 파싱 결과 0건: {_short_log_text(preview or '내용 없음', 300)}"
+        if stat_date:
+            for item in parsed:
+                item["date"] = stat_date
+        return parsed, ""
     except Exception as exc:
         return [], f"쇼핑검색어 리포트 다운로드 실패: {exc}"
 
-def _fetch_shopping_query_conversion_rows(api_key: str, secret_key: str, cid: str, since: str, until: str, timeout_seconds: float = 8.0) -> Tuple[List[Dict[str, Any]], List[str]]:
+def _download_shopping_keyword_detail_report(api_key: str, secret_key: str, cid: str, job_id: str, download_url: str, stat_date: str = "", request_timeout: Any = None) -> Tuple[List[Dict[str, Any]], str]:
+    url = str(download_url or "").strip()
+    if not url:
+        return [], "쇼핑검색어 발생 리포트 다운로드 주소가 없습니다."
+    timeout_value = request_timeout or (3, 10)
+    try:
+        response = _download_performance_report_response(api_key, secret_key, cid, url, timeout_value)
+        if response.status_code != 200:
+            return [], f"쇼핑검색어 발생 리포트 다운로드 실패: HTTP {response.status_code}"
+        text = _decode_uploaded_text(response.content)
+        parsed = _parse_shopping_keyword_detail_report(text, f"stat-report:{job_id}")
+        if not parsed:
+            preview_lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+            preview = " / ".join(preview_lines[:3])
+            return [], f"쇼핑검색어 발생 리포트 파싱 결과 0건: {_short_log_text(preview or '내용 없음', 300)}"
+        if stat_date:
+            for item in parsed:
+                item["date"] = stat_date
+        return parsed, ""
+    except Exception as exc:
+        return [], f"쇼핑검색어 발생 리포트 다운로드 실패: {exc}"
+
+def _shopping_query_report_row_cache_key(cid: str, stat_date: date, report_type: str = "SHOPPINGKEYWORD_CONVERSION_DETAIL") -> str:
+    return json.dumps([
+        PERFORMANCE_SHOPPING_QUERY_PARSE_VERSION,
+        "shopping-query-report-row",
+        str(cid or "").strip(),
+        str(report_type or "").strip().upper(),
+        stat_date.isoformat(),
+    ], ensure_ascii=False, separators=(",", ":"))
+
+def _shopping_query_timeout_budget(timeout_seconds: float = 0.0) -> float:
+    requested = float(timeout_seconds or 0.0)
+    if requested > 0:
+        return min(
+            PERFORMANCE_SHOPPING_QUERY_REPORT_MAX_TIMEOUT_SECONDS,
+            max(PERFORMANCE_SHOPPING_QUERY_REPORT_MIN_TIMEOUT_SECONDS, requested),
+        )
+    return PERFORMANCE_SHOPPING_QUERY_REPORT_MIN_TIMEOUT_SECONDS
+
+def _wait_for_warming_shopping_query_cache(cid: str, warming_dates: List[date], report_type: str, deadline: float) -> Tuple[List[Dict[str, Any]], List[date]]:
+    rows: List[Dict[str, Any]] = []
+    remaining = [target for target in (warming_dates or []) if isinstance(target, date)]
+    while remaining and time.monotonic() < float(deadline or 0):
+        now = time.monotonic()
+        still_waiting: List[date] = []
+        for target in remaining:
+            cached_rows = _get_cached_shopping_query_report_rows(cid, target, now, report_type)
+            if cached_rows is None:
+                still_waiting.append(target)
+            else:
+                rows.extend(cached_rows)
+        if not still_waiting:
+            return rows, []
+        remaining = still_waiting
+        sleep_for = min(0.5, max(0.05, float(deadline or 0) - time.monotonic()))
+        if sleep_for <= 0:
+            break
+        time.sleep(sleep_for)
+    return rows, remaining
+
+def _shopping_query_remaining_request_timeout(deadline: float, connect_cap: float = 0.7, read_cap: float = 1.1) -> Tuple[float, float]:
+    remaining = max(0.05, float(deadline or 0.0) - time.monotonic())
+    connect_timeout = max(0.15, min(connect_cap, remaining * 0.35))
+    read_timeout = max(0.2, min(read_cap, remaining * 0.75))
+    return round(connect_timeout, 2), round(read_timeout, 2)
+
+def _performance_retry_after_seconds(response: Any, attempt: int) -> float:
+    retry_after = ""
+    try:
+        retry_after = str((getattr(response, "headers", {}) or {}).get("Retry-After") or "").strip()
+    except Exception:
+        retry_after = ""
+    try:
+        if retry_after:
+            return max(0.5, min(8.0, float(retry_after)))
+    except Exception:
+        pass
+    return min(4.0, 0.75 * (attempt + 1))
+
+def _download_performance_report_response(
+    api_key: str,
+    secret_key: str,
+    cid: str,
+    download_url: str,
+    timeout_value: Any,
+    *,
+    max_attempts: int = 4,
+) -> Any:
+    url = str(download_url or "").strip()
+    if url.startswith("/"):
+        url = f"{OPENAPI_BASE_URL}{url}"
+    elif url and not url.startswith(("http://", "https://")):
+        url = f"{OPENAPI_BASE_URL}/{url.lstrip('/')}"
+    last_response = None
+    for attempt in range(max(1, int(max_attempts or 1))):
+        response = HTTP_SESSION.get(url, timeout=timeout_value, allow_redirects=True)
+        if response.status_code != 200 and url.startswith(OPENAPI_BASE_URL):
+            parsed_url = urlparse(url)
+            response = HTTP_SESSION.get(
+                url,
+                headers=_open_headers(api_key, secret_key, cid, "GET", parsed_url.path or "/"),
+                timeout=timeout_value,
+                allow_redirects=True,
+            )
+        last_response = response
+        if response.status_code != 429 or attempt >= max_attempts - 1:
+            return response
+        time.sleep(_performance_retry_after_seconds(response, attempt))
+    return last_response
+
+def _performance_report_download_error_retryable(error: Any) -> bool:
+    text = str(error or "").lower()
+    return "http 429" in text or " 429" in text or "rate limit" in text or "too many" in text
+
+def _shopping_query_report_is_warming(cid: str, stat_date: date, report_type: str = "SHOPPINGKEYWORD_CONVERSION_DETAIL") -> bool:
+    cache_key = _shopping_query_report_row_cache_key(cid, stat_date, report_type)
+    with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
+        started_at = PERFORMANCE_SHOPPING_QUERY_REPORT_WARMING.get(cache_key)
+        if not started_at:
+            return False
+        if time.monotonic() - started_at > PERFORMANCE_SHOPPING_QUERY_REPORT_WARMING_TTL_SECONDS:
+            PERFORMANCE_SHOPPING_QUERY_REPORT_WARMING.pop(cache_key, None)
+            return False
+        return True
+
+def _shopping_query_report_mark_warming(cid: str, stat_date: date, report_type: str = "SHOPPINGKEYWORD_CONVERSION_DETAIL", warming: bool = True) -> None:
+    cache_key = _shopping_query_report_row_cache_key(cid, stat_date, report_type)
+    with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
+        if warming:
+            PERFORMANCE_SHOPPING_QUERY_REPORT_WARMING[cache_key] = time.monotonic()
+        else:
+            PERFORMANCE_SHOPPING_QUERY_REPORT_WARMING.pop(cache_key, None)
+
+def _get_cached_shopping_query_report_rows(cid: str, stat_date: date, now: float, report_type: str = "SHOPPINGKEYWORD_CONVERSION_DETAIL") -> List[Dict[str, Any]] | None:
+    cache_key = _shopping_query_report_row_cache_key(cid, stat_date, report_type)
+    with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
+        cached = PERFORMANCE_SHOPPING_QUERY_REPORT_ROW_CACHE.get(cache_key)
+        if cached and now - cached[0] <= PERFORMANCE_SHOPPING_QUERY_REPORT_ROW_CACHE_TTL:
+            return copy.deepcopy(cached[1])
+    return None
+
+def _set_cached_shopping_query_report_rows(cid: str, stat_date: date, rows: List[Dict[str, Any]], report_type: str = "SHOPPINGKEYWORD_CONVERSION_DETAIL") -> None:
+    cache_key = _shopping_query_report_row_cache_key(cid, stat_date, report_type)
+    with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
+        if len(PERFORMANCE_SHOPPING_QUERY_REPORT_ROW_CACHE) >= 250:
+            oldest_key = min(PERFORMANCE_SHOPPING_QUERY_REPORT_ROW_CACHE, key=lambda key: PERFORMANCE_SHOPPING_QUERY_REPORT_ROW_CACHE[key][0])
+            PERFORMANCE_SHOPPING_QUERY_REPORT_ROW_CACHE.pop(oldest_key, None)
+        PERFORMANCE_SHOPPING_QUERY_REPORT_ROW_CACHE[cache_key] = (time.monotonic(), copy.deepcopy(rows or []))
+        PERFORMANCE_SHOPPING_QUERY_REPORT_WARMING.pop(cache_key, None)
+
+def _download_shopping_query_report_by_type(api_key: str, secret_key: str, cid: str, job_id: str, download_url: str, stat_date: str, report_type: str, request_timeout: Any = None) -> Tuple[List[Dict[str, Any]], str]:
+    report_type_norm = str(report_type or "").strip().upper()
+    if report_type_norm == "SHOPPINGKEYWORD_DETAIL":
+        return _download_shopping_keyword_detail_report(api_key, secret_key, cid, job_id, download_url, stat_date, request_timeout)
+    if report_type_norm == "SHOPPINGKEYWORD_CONVERSION_DETAIL":
+        return _download_shopping_query_report(api_key, secret_key, cid, job_id, download_url, stat_date, request_timeout)
+    url = str(download_url or "").strip()
+    if not url:
+        return [], f"{report_type_norm or '상세'} 리포트 다운로드 주소가 없습니다."
+    timeout_value = request_timeout or (3, 10)
+    try:
+        response = _download_performance_report_response(api_key, secret_key, cid, url, timeout_value)
+        if response.status_code != 200:
+            return [], f"{report_type_norm} 리포트 다운로드 실패: HTTP {response.status_code}"
+        text = _decode_uploaded_text(response.content)
+        if report_type_norm in {"AD", "AD_DETAIL"}:
+            parsed = _parse_ad_detail_report(text, f"stat-report:{job_id}")
+        elif report_type_norm in {"AD_CONVERSION", "AD_CONVERSION_DETAIL"}:
+            parsed = _parse_ad_conversion_detail_report(text, f"stat-report:{job_id}")
+        else:
+            parsed = []
+        if not parsed:
+            preview_lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+            preview = " / ".join(preview_lines[:3])
+            return [], f"{report_type_norm} 리포트 파싱 결과 0건: {_short_log_text(preview or '내용 없음', 300)}"
+        if stat_date:
+            for item in parsed:
+                item["date"] = stat_date
+        return parsed, ""
+    except Exception as exc:
+        return [], f"{report_type_norm} 리포트 다운로드 실패: {exc}"
+
+def _complete_shopping_query_report_jobs_async(
+    api_key: str,
+    secret_key: str,
+    cid: str,
+    pending_jobs: Dict[str, date],
+    report_type: str = "SHOPPINGKEYWORD_CONVERSION_DETAIL",
+) -> None:
+    jobs = {str(job_id or "").strip(): target for job_id, target in (pending_jobs or {}).items() if str(job_id or "").strip() and isinstance(target, date)}
+    if not jobs:
+        return
+    for target in jobs.values():
+        _shopping_query_report_mark_warming(cid, target, report_type, True)
+
+    def _worker():
+        pending = dict(jobs)
+        deadline = time.monotonic() + PERFORMANCE_SHOPPING_QUERY_BACKGROUND_TIMEOUT_SECONDS
+        try:
+            while pending and time.monotonic() < deadline:
+                built: List[Tuple[str, str]] = []
+                completed: List[str] = []
+                workers = max(1, min(len(pending), PERFORMANCE_SHOPPING_QUERY_REPORT_WORKERS))
+                with ThreadPoolExecutor(max_workers=workers) as executor:
+                    futures = {
+                        executor.submit(_shopping_query_report_request, "GET", api_key, secret_key, cid, f"/stat-reports/{job_id}"): (job_id, target)
+                        for job_id, target in pending.items()
+                    }
+                    for future in as_completed(futures):
+                        job_id, target = futures[future]
+                        try:
+                            data = _response_json_value(future.result())
+                        except Exception:
+                            continue
+                        status = _shopping_query_report_status(data)
+                        download_url = _shopping_query_report_download_url(data)
+                        if download_url and status in {"", "BUILT", "DONE", "COMPLETE", "COMPLETED", "READY", "FINISHED", "SUCCESS"}:
+                            built.append((job_id, download_url))
+                        elif status in {"ERROR", "FAIL", "FAILED", "CANCEL", "CANCELED", "CANCELLED"}:
+                            completed.append(job_id)
+                if built:
+                    with ThreadPoolExecutor(max_workers=max(1, min(len(built), PERFORMANCE_SHOPPING_QUERY_REPORT_WORKERS))) as executor:
+                        futures = {
+                            executor.submit(
+                                _download_shopping_query_report_by_type,
+                                api_key,
+                                secret_key,
+                                cid,
+                                job_id,
+                                url,
+                                pending.get(job_id).isoformat() if pending.get(job_id) else "",
+                                report_type,
+                            ): pending.get(job_id)
+                            for job_id, url in built
+                        }
+                        for future in as_completed(futures):
+                            stat_date = futures[future]
+                            try:
+                                downloaded, error = future.result()
+                            except Exception:
+                                downloaded, error = [], "download failed"
+                            if error and _performance_report_download_error_retryable(error):
+                                continue
+                            if stat_date and not error:
+                                _set_cached_shopping_query_report_rows(cid, stat_date, downloaded, report_type)
+                            job_id = next((candidate for candidate, target in pending.items() if target == stat_date), "")
+                            if job_id:
+                                completed.append(job_id)
+                for job_id in completed:
+                    target = pending.pop(job_id, None)
+                    if target:
+                        _shopping_query_report_mark_warming(cid, target, report_type, False)
+                if completed:
+                    _delete_shopping_query_report_jobs_async(api_key, secret_key, cid, completed)
+                if pending:
+                    time.sleep(0.5)
+        finally:
+            for target in pending.values():
+                _shopping_query_report_mark_warming(cid, target, report_type, False)
+            if pending:
+                _delete_shopping_query_report_jobs_async(api_key, secret_key, cid, list(pending))
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+def _warm_shopping_query_report_dates_async(
+    api_key: str,
+    secret_key: str,
+    cid: str,
+    dates: Iterable[date],
+    report_type: str = "SHOPPINGKEYWORD_CONVERSION_DETAIL",
+) -> int:
+    unique_dates: List[date] = []
+    seen_dates: set[date] = set()
+    now = time.monotonic()
+    for target in dates or []:
+        if not isinstance(target, date) or target in seen_dates:
+            continue
+        seen_dates.add(target)
+        if _get_cached_shopping_query_report_rows(cid, target, now, report_type) is not None:
+            continue
+        if _shopping_query_report_is_warming(cid, target, report_type):
+            continue
+        _shopping_query_report_mark_warming(cid, target, report_type, True)
+        unique_dates.append(target)
+    if not unique_dates:
+        return 0
+
+    def _worker():
+        pending: Dict[str, date] = {}
+        started_targets: set[date] = set()
+        try:
+            batch_size = max(1, PERFORMANCE_SHOPPING_QUERY_REPORT_WORKERS)
+            for batch_start in range(0, len(unique_dates), batch_size):
+                batch_dates = unique_dates[batch_start:batch_start + batch_size]
+                with ThreadPoolExecutor(max_workers=min(len(batch_dates) or 1, PERFORMANCE_SHOPPING_QUERY_REPORT_WORKERS)) as executor:
+                    futures = {
+                        executor.submit(
+                            _shopping_query_report_request,
+                            "POST",
+                            api_key,
+                            secret_key,
+                            cid,
+                            "/stat-reports",
+                            {"reportTp": report_type, "statDt": target.strftime("%Y%m%d")},
+                        ): target
+                        for target in batch_dates
+                    }
+                    for future in as_completed(futures):
+                        target = futures[future]
+                        try:
+                            response = future.result()
+                            data = _response_json_value(response)
+                            job_id = _shopping_query_report_job_id(data)
+                        except Exception:
+                            job_id = ""
+                        if job_id:
+                            pending[job_id] = target
+                            started_targets.add(target)
+                        else:
+                            _shopping_query_report_mark_warming(cid, target, report_type, False)
+            if pending:
+                _complete_shopping_query_report_jobs_async(api_key, secret_key, cid, pending, report_type)
+        finally:
+            for target in unique_dates:
+                if target not in started_targets:
+                    _shopping_query_report_mark_warming(cid, target, report_type, False)
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return len(unique_dates)
+
+def _fetch_shopping_query_conversion_rows(
+    api_key: str,
+    secret_key: str,
+    cid: str,
+    since: str,
+    until: str,
+    timeout_seconds: float = 8.0,
+    *,
+    background_on_timeout: bool = False,
+) -> Tuple[List[Dict[str, Any]], List[str], Dict[str, Any]]:
     start_date, end_date = date.fromisoformat(since), date.fromisoformat(until)
-    dates = [start_date + timedelta(days=offset) for offset in range((end_date - start_date).days + 1)]
+    requested_dates = [start_date + timedelta(days=offset) for offset in range((end_date - start_date).days + 1)]
     rows: List[Dict[str, Any]] = []
     errors: List[str] = []
-    deadline = time.monotonic() + max(2.0, float(timeout_seconds or 8.0))
-    for batch_start in range(0, len(dates), 3):
+    now = time.monotonic()
+    dates: List[date] = []
+    warming_dates: List[date] = []
+    cached_date_count = 0
+    for target in requested_dates:
+        cached_rows = _get_cached_shopping_query_report_rows(cid, target, now)
+        if cached_rows is None:
+            if _shopping_query_report_is_warming(cid, target):
+                warming_dates.append(target)
+            else:
+                dates.append(target)
+        else:
+            cached_date_count += 1
+            rows.extend(cached_rows)
+    meta: Dict[str, Any] = {
+        "requested_date_count": len(requested_dates),
+        "cached_date_count": cached_date_count,
+        "created_report_count": 0,
+        "downloaded_report_count": 0,
+        "pending_report_count": len(warming_dates),
+        "background_refresh": bool(warming_dates),
+    }
+    timeout_budget = _shopping_query_timeout_budget(timeout_seconds)
+    if not dates:
+        if warming_dates and timeout_budget > PERFORMANCE_SHOPPING_QUERY_REPORT_MIN_TIMEOUT_SECONDS:
+            warmed_rows, warming_dates = _wait_for_warming_shopping_query_cache(
+                cid, warming_dates, "SHOPPINGKEYWORD_CONVERSION_DETAIL", time.monotonic() + timeout_budget
+            )
+            rows.extend(warmed_rows)
+            cached_date_count += len({str(row.get("date") or "") for row in warmed_rows if str(row.get("date") or "").strip()})
+            meta["cached_date_count"] = cached_date_count
+            meta["pending_report_count"] = len(warming_dates)
+            meta["background_refresh"] = bool(warming_dates)
+        if warming_dates:
+            errors.append(f"네이버 쇼핑검색어 리포트 {len(warming_dates)}일치가 아직 파일 생성 중입니다. 준비된 날짜만 먼저 표시하고 완료되면 자동 갱신합니다.")
+        return rows, errors, meta
+    deadline = time.monotonic() + timeout_budget
+    batch_size = min(max(1, len(dates)), PERFORMANCE_SHOPPING_QUERY_REPORT_WORKERS)
+    pending: Dict[str, date] = {}
+    deferred_dates: List[date] = []
+    deferred_seen: set[date] = set()
+
+    def _defer_date(target: date) -> None:
+        if target in deferred_seen:
+            return
+        deferred_seen.add(target)
+        deferred_dates.append(target)
+
+    for batch_start in range(0, len(dates), batch_size):
         if time.monotonic() >= deadline:
+            for target in dates[batch_start:]:
+                _defer_date(target)
             errors.append("쇼핑검색어 리포트 조회가 제한 시간을 초과해 일부 기간만 반영됐습니다.")
             break
-        batch_dates = dates[batch_start:batch_start + 3]
-        jobs: Dict[str, date] = {}
-        with ThreadPoolExecutor(max_workers=len(batch_dates) or 1) as executor:
-            futures = {
-                executor.submit(_performance_fast_naver_request, "POST", api_key, secret_key, cid, "/stat-reports", {"reportTp": "SHOPPINGKEYWORD_CONVERSION_DETAIL", "statDt": target.strftime("%Y%m%d")}): target
-                for target in batch_dates
-            }
-            for future in as_completed(futures):
+        batch_dates = dates[batch_start:batch_start + batch_size]
+        executor = ThreadPoolExecutor(max_workers=min(len(batch_dates) or 1, PERFORMANCE_SHOPPING_QUERY_REPORT_WORKERS))
+        futures = {
+            executor.submit(
+                _shopping_query_report_request,
+                "POST",
+                api_key,
+                secret_key,
+                cid,
+                "/stat-reports",
+                {"reportTp": "SHOPPINGKEYWORD_CONVERSION_DETAIL", "statDt": target.strftime("%Y%m%d")},
+                _shopping_query_remaining_request_timeout(deadline),
+            ): target
+            for target in batch_dates
+        }
+        processed: set[Any] = set()
+        try:
+            for future in as_completed(futures, timeout=max(0.01, deadline - time.monotonic())):
+                processed.add(future)
                 target = futures[future]
-                response = future.result()
-                data = _response_json_value(response)
-                job_id = str((data or {}).get("reportJobId") or "").strip() if isinstance(data, dict) else ""
-                if response.status_code == 200 and job_id:
-                    jobs[job_id] = target
+                try:
+                    response = future.result()
+                    data = _response_json_value(response)
+                    job_id = _shopping_query_report_job_id(data)
+                except Exception as exc:
+                    if background_on_timeout:
+                        _defer_date(target)
+                    else:
+                        errors.append(f"{target.isoformat()} 쇼핑검색어 리포트 생성 실패: {exc}")
+                    continue
+                if response.status_code in {200, 201, 202} and job_id:
+                    pending[job_id] = target
+                    meta["created_report_count"] += 1
                 else:
                     errors.append(f"{target.isoformat()} 쇼핑검색어 리포트 생성 실패: {_short_log_text(response.text, 240)}")
-        pending = dict(jobs)
-        while pending and time.monotonic() < deadline:
-            built: List[Tuple[str, str]] = []
-            completed: List[str] = []
-            with ThreadPoolExecutor(max_workers=len(pending)) as executor:
-                futures = {
-                    executor.submit(_performance_fast_naver_request, "GET", api_key, secret_key, cid, f"/stat-reports/{job_id}"): (job_id, target)
-                    for job_id, target in pending.items()
-                }
-                for future in as_completed(futures):
-                    job_id, target = futures[future]
+        except FuturesTimeoutError:
+            pass
+        finally:
+            for future, target in futures.items():
+                if future not in processed:
+                    _defer_date(target)
+                    future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
+
+    background_deferred_count = 0
+    if deferred_dates and background_on_timeout:
+        background_deferred_count = _warm_shopping_query_report_dates_async(api_key, secret_key, cid, deferred_dates)
+
+    last_status_by_job: Dict[str, str] = {}
+    while pending and time.monotonic() < deadline:
+        built: List[Tuple[str, str]] = []
+        completed: List[str] = []
+        executor = ThreadPoolExecutor(max_workers=min(len(pending), PERFORMANCE_SHOPPING_QUERY_REPORT_WORKERS))
+        futures = {
+            executor.submit(
+                _shopping_query_report_request,
+                "GET",
+                api_key,
+                secret_key,
+                cid,
+                f"/stat-reports/{job_id}",
+                None,
+                _shopping_query_remaining_request_timeout(deadline, connect_cap=0.5, read_cap=0.8),
+            ): (job_id, target)
+            for job_id, target in pending.items()
+        }
+        processed_status: set[Any] = set()
+        try:
+            for future in as_completed(futures, timeout=max(0.01, deadline - time.monotonic())):
+                processed_status.add(future)
+                job_id, target = futures[future]
+                try:
                     data = _response_json_value(future.result())
-                    status = str((data or {}).get("status") or "").upper() if isinstance(data, dict) else ""
-                    if status == "BUILT":
-                        built.append((job_id, str((data or {}).get("downloadUrl") or "")))
-                        completed.append(job_id)
-                    elif status in {"NONE", "ERROR"}:
-                        if status == "ERROR":
-                            errors.append(f"{target.isoformat()} 쇼핑검색어 리포트 생성 오류")
-                        completed.append(job_id)
-            if built:
-                with ThreadPoolExecutor(max_workers=len(built)) as executor:
-                    futures = [executor.submit(_download_shopping_query_report, api_key, secret_key, cid, job_id, url) for job_id, url in built]
-                    for future in as_completed(futures):
+                except Exception:
+                    continue
+                status = _shopping_query_report_status(data)
+                download_url = _shopping_query_report_download_url(data)
+                if status:
+                    last_status_by_job[job_id] = status
+                if download_url and status in {"", "BUILT", "DONE", "COMPLETE", "COMPLETED", "READY", "FINISHED", "SUCCESS"}:
+                    built.append((job_id, download_url))
+                elif status in {"ERROR", "FAIL", "FAILED", "CANCEL", "CANCELED", "CANCELLED"}:
+                    errors.append(f"{target.isoformat()} 쇼핑검색어 리포트 생성 오류")
+                    completed.append(job_id)
+        except FuturesTimeoutError:
+            pass
+        finally:
+            for future in futures:
+                if future not in processed_status:
+                    future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
+        if built:
+            executor = ThreadPoolExecutor(max_workers=min(len(built), PERFORMANCE_SHOPPING_QUERY_REPORT_WORKERS))
+            futures = {
+                executor.submit(
+                    _download_shopping_query_report,
+                    api_key,
+                    secret_key,
+                    cid,
+                    job_id,
+                    url,
+                    pending.get(job_id).isoformat() if pending.get(job_id) else "",
+                    _shopping_query_remaining_request_timeout(deadline, connect_cap=0.5, read_cap=0.9),
+                ): (job_id, pending.get(job_id))
+                for job_id, url in built
+            }
+            processed_downloads: set[Any] = set()
+            try:
+                for future in as_completed(futures, timeout=max(0.01, deadline - time.monotonic())):
+                    processed_downloads.add(future)
+                    job_id, stat_date = futures[future]
+                    try:
                         downloaded, error = future.result()
+                    except Exception as exc:
+                        downloaded, error = [], f"쇼핑검색어 리포트 다운로드 실패: {exc}"
+                    if error:
+                        if _performance_report_download_error_retryable(error):
+                            last_status_by_job[job_id] = "DOWNLOAD_RETRY"
+                            continue
+                        errors.append(error)
+                    elif stat_date:
                         rows.extend(downloaded)
-                        if error:
-                            errors.append(error)
-            for job_id in completed:
-                pending.pop(job_id, None)
-            if completed:
-                with ThreadPoolExecutor(max_workers=len(completed)) as executor:
-                    list(executor.map(lambda job_id: _performance_fast_naver_request("DELETE", api_key, secret_key, cid, f"/stat-reports/{job_id}"), completed))
-            if pending:
-                time.sleep(0.2)
+                        meta["downloaded_report_count"] += 1
+                        _set_cached_shopping_query_report_rows(cid, stat_date, downloaded)
+                    else:
+                        rows.extend(downloaded)
+                    completed.append(job_id)
+            except FuturesTimeoutError:
+                pass
+            finally:
+                for future in futures:
+                    if future not in processed_downloads:
+                        future.cancel()
+                executor.shutdown(wait=False, cancel_futures=True)
+        for job_id in completed:
+            pending.pop(job_id, None)
+        if completed:
+            _delete_shopping_query_report_jobs_async(api_key, secret_key, cid, completed)
         if pending:
-            with ThreadPoolExecutor(max_workers=len(pending)) as executor:
-                list(executor.map(lambda job_id: _performance_fast_naver_request("DELETE", api_key, secret_key, cid, f"/stat-reports/{job_id}"), list(pending)))
-            errors.append("쇼핑검색어 리포트 생성 대기 시간이 초과됐습니다.")
+            time.sleep(0.2)
+    if pending:
+        status_bits = []
+        for job_id, target in pending.items():
+            status_bits.append(f"{target.isoformat()}={last_status_by_job.get(job_id, '대기중')}")
+        suffix = f" 마지막 상태: {', '.join(status_bits[:8])}" if status_bits else ""
+        meta["pending_report_count"] = len(pending) + len(warming_dates)
+        meta["background_refresh"] = bool(background_on_timeout)
+        if background_on_timeout:
+            _complete_shopping_query_report_jobs_async(api_key, secret_key, cid, dict(pending))
+            errors.append(f"쇼핑검색어 리포트 {len(pending)}일치가 아직 생성 중이라 먼저 준비된 데이터만 표시합니다. 나머지는 백그라운드에서 계속 준비합니다.{suffix}")
+        else:
+            _delete_shopping_query_report_jobs_async(api_key, secret_key, cid, list(pending))
+            errors.append(f"쇼핑검색어 리포트 생성 대기 시간이 초과됐습니다. ({int(timeout_budget)}초){suffix}")
+    elif warming_dates:
+        meta["pending_report_count"] = len(warming_dates)
+        meta["background_refresh"] = True
+        errors.append(f"네이버 쇼핑검색어 리포트 {len(warming_dates)}일치가 아직 파일 생성 중입니다. 준비된 날짜만 먼저 표시하고 완료되면 자동 갱신합니다.")
+    if background_deferred_count:
+        meta["pending_report_count"] = len(pending) + len(warming_dates) + background_deferred_count
+        meta["background_refresh"] = True
+        errors.append(f"네이버 쇼핑검색어 리포트 {background_deferred_count}일치를 추가 생성 중입니다. 준비되는 대로 자동 갱신합니다.")
+    return rows, errors, meta
+
+def _fetch_shopping_keyword_detail_rows(
+    api_key: str,
+    secret_key: str,
+    cid: str,
+    since: str,
+    until: str,
+    timeout_seconds: float = 8.0,
+    *,
+    background_on_timeout: bool = False,
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    report_type = "SHOPPINGKEYWORD_DETAIL"
+    start_date, end_date = date.fromisoformat(since), date.fromisoformat(until)
+    requested_dates = [start_date + timedelta(days=offset) for offset in range((end_date - start_date).days + 1)]
+    rows: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    now = time.monotonic()
+    dates: List[date] = []
+    warming_dates: List[date] = []
+    for target in requested_dates:
+        cached_rows = _get_cached_shopping_query_report_rows(cid, target, now, report_type)
+        if cached_rows is None:
+            if _shopping_query_report_is_warming(cid, target, report_type):
+                warming_dates.append(target)
+            else:
+                dates.append(target)
+        else:
+            rows.extend(cached_rows)
+    timeout_budget = _shopping_query_timeout_budget(timeout_seconds)
+    if not dates:
+        if warming_dates and timeout_budget > PERFORMANCE_SHOPPING_QUERY_REPORT_MIN_TIMEOUT_SECONDS:
+            warmed_rows, warming_dates = _wait_for_warming_shopping_query_cache(
+                cid, warming_dates, report_type, time.monotonic() + timeout_budget
+            )
+            rows.extend(warmed_rows)
+        if warming_dates:
+            errors.append(f"네이버 쇼핑검색어 발생 리포트 {len(warming_dates)}일치가 아직 파일 생성 중입니다. 준비된 날짜만 먼저 표시하고 완료되면 자동 갱신합니다.")
+        return rows, errors
+    deadline = time.monotonic() + timeout_budget
+    batch_size = min(max(1, len(dates)), PERFORMANCE_SHOPPING_QUERY_REPORT_WORKERS)
+    pending: Dict[str, date] = {}
+    deferred_dates: List[date] = []
+    deferred_seen: set[date] = set()
+
+    def _defer_date(target: date) -> None:
+        if target in deferred_seen:
+            return
+        deferred_seen.add(target)
+        deferred_dates.append(target)
+
+    for batch_start in range(0, len(dates), batch_size):
+        if time.monotonic() >= deadline:
+            for target in dates[batch_start:]:
+                _defer_date(target)
+            if not background_on_timeout:
+                errors.append("쇼핑검색어 발생 리포트 조회가 제한 시간을 초과해 일부 기간만 반영됐습니다.")
             break
+        batch_dates = dates[batch_start:batch_start + batch_size]
+        executor = ThreadPoolExecutor(max_workers=min(len(batch_dates) or 1, PERFORMANCE_SHOPPING_QUERY_REPORT_WORKERS))
+        futures = {
+            executor.submit(
+                _shopping_query_report_request,
+                "POST",
+                api_key,
+                secret_key,
+                cid,
+                "/stat-reports",
+                {"reportTp": report_type, "statDt": target.strftime("%Y%m%d")},
+                _shopping_query_remaining_request_timeout(deadline),
+            ): target
+            for target in batch_dates
+        }
+        processed: set[Any] = set()
+        try:
+            for future in as_completed(futures, timeout=max(0.01, deadline - time.monotonic())):
+                processed.add(future)
+                target = futures[future]
+                try:
+                    response = future.result()
+                    data = _response_json_value(response)
+                    job_id = _shopping_query_report_job_id(data)
+                except Exception as exc:
+                    if background_on_timeout:
+                        _defer_date(target)
+                    else:
+                        errors.append(f"{target.isoformat()} 쇼핑검색어 발생 리포트 생성 실패: {exc}")
+                    continue
+                if response.status_code in {200, 201, 202} and job_id:
+                    pending[job_id] = target
+                else:
+                    errors.append(f"{target.isoformat()} 쇼핑검색어 발생 리포트 생성 실패: {_short_log_text(response.text, 240)}")
+        except FuturesTimeoutError:
+            pass
+        finally:
+            for future, target in futures.items():
+                if future not in processed:
+                    _defer_date(target)
+                    future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
+
+    background_deferred_count = 0
+    if deferred_dates and background_on_timeout:
+        background_deferred_count = _warm_shopping_query_report_dates_async(api_key, secret_key, cid, deferred_dates, report_type)
+    elif deferred_dates:
+        errors.append(f"쇼핑검색어 발생 리포트 {len(deferred_dates)}일치가 제한 시간 안에 생성되지 않았습니다.")
+
+    last_status_by_job: Dict[str, str] = {}
+    while pending and time.monotonic() < deadline:
+        built: List[Tuple[str, str]] = []
+        completed: List[str] = []
+        executor = ThreadPoolExecutor(max_workers=min(len(pending), PERFORMANCE_SHOPPING_QUERY_REPORT_WORKERS))
+        futures = {
+            executor.submit(
+                _shopping_query_report_request,
+                "GET",
+                api_key,
+                secret_key,
+                cid,
+                f"/stat-reports/{job_id}",
+                None,
+                _shopping_query_remaining_request_timeout(deadline, connect_cap=0.5, read_cap=0.8),
+            ): (job_id, target)
+            for job_id, target in pending.items()
+        }
+        processed_status: set[Any] = set()
+        try:
+            for future in as_completed(futures, timeout=max(0.01, deadline - time.monotonic())):
+                processed_status.add(future)
+                job_id, target = futures[future]
+                try:
+                    data = _response_json_value(future.result())
+                except Exception:
+                    continue
+                status = _shopping_query_report_status(data)
+                download_url = _shopping_query_report_download_url(data)
+                if status:
+                    last_status_by_job[job_id] = status
+                if download_url and status in {"", "BUILT", "DONE", "COMPLETE", "COMPLETED", "READY", "FINISHED", "SUCCESS"}:
+                    built.append((job_id, download_url))
+                elif status in {"ERROR", "FAIL", "FAILED", "CANCEL", "CANCELED", "CANCELLED"}:
+                    errors.append(f"{target.isoformat()} 쇼핑검색어 발생 리포트 생성 오류")
+                    completed.append(job_id)
+        except FuturesTimeoutError:
+            pass
+        finally:
+            for future in futures:
+                if future not in processed_status:
+                    future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
+        if built:
+            executor = ThreadPoolExecutor(max_workers=min(len(built), PERFORMANCE_SHOPPING_QUERY_REPORT_WORKERS))
+            futures = {
+                executor.submit(
+                    _download_shopping_keyword_detail_report,
+                    api_key,
+                    secret_key,
+                    cid,
+                    job_id,
+                    url,
+                    pending.get(job_id).isoformat() if pending.get(job_id) else "",
+                    _shopping_query_remaining_request_timeout(deadline, connect_cap=0.5, read_cap=0.9),
+                ): (job_id, pending.get(job_id))
+                for job_id, url in built
+            }
+            processed_downloads: set[Any] = set()
+            try:
+                for future in as_completed(futures, timeout=max(0.01, deadline - time.monotonic())):
+                    processed_downloads.add(future)
+                    job_id, stat_date = futures[future]
+                    try:
+                        downloaded, error = future.result()
+                    except Exception as exc:
+                        downloaded, error = [], f"쇼핑검색어 발생 리포트 다운로드 실패: {exc}"
+                    if error:
+                        if _performance_report_download_error_retryable(error):
+                            last_status_by_job[job_id] = "DOWNLOAD_RETRY"
+                            continue
+                        errors.append(error)
+                    elif stat_date:
+                        rows.extend(downloaded)
+                        _set_cached_shopping_query_report_rows(cid, stat_date, downloaded, report_type)
+                    else:
+                        rows.extend(downloaded)
+                    completed.append(job_id)
+            except FuturesTimeoutError:
+                pass
+            finally:
+                for future in futures:
+                    if future not in processed_downloads:
+                        future.cancel()
+                executor.shutdown(wait=False, cancel_futures=True)
+        for job_id in completed:
+            pending.pop(job_id, None)
+        if completed:
+            _delete_shopping_query_report_jobs_async(api_key, secret_key, cid, completed)
+        if pending:
+            time.sleep(0.2)
+    if pending:
+        status_bits = []
+        for job_id, target in pending.items():
+            status_bits.append(f"{target.isoformat()}={last_status_by_job.get(job_id, '대기중')}")
+        suffix = f" 마지막 상태: {', '.join(status_bits[:8])}" if status_bits else ""
+        if background_on_timeout:
+            _complete_shopping_query_report_jobs_async(api_key, secret_key, cid, dict(pending), report_type)
+            errors.append(f"쇼핑검색어 발생 리포트 {len(pending)}일치가 아직 생성 중이라 먼저 준비된 데이터만 표시합니다. 나머지는 백그라운드에서 계속 준비합니다.{suffix}")
+        else:
+            _delete_shopping_query_report_jobs_async(api_key, secret_key, cid, list(pending))
+            errors.append(f"쇼핑검색어 발생 리포트 생성 대기 시간이 초과됐습니다. ({int(timeout_budget)}초){suffix}")
+    elif warming_dates:
+        errors.append(f"네이버 쇼핑검색어 발생 리포트 {len(warming_dates)}일치가 아직 파일 생성 중입니다. 준비된 날짜만 먼저 표시하고 완료되면 자동 갱신합니다.")
+    if background_deferred_count:
+        errors.append(f"네이버 쇼핑검색어 발생 리포트 {background_deferred_count}일치를 추가 생성 중입니다. 준비되는 대로 자동 갱신합니다.")
     return rows, errors
+
+def _fetch_dimension_detail_report_rows(
+    api_key: str,
+    secret_key: str,
+    cid: str,
+    since: str,
+    until: str,
+    report_type: str,
+    timeout_seconds: float = 8.0,
+    *,
+    background_on_timeout: bool = True,
+) -> Tuple[List[Dict[str, Any]], List[str], Dict[str, Any]]:
+    report_type_norm = str(report_type or "").strip().upper()
+    start_date, end_date = date.fromisoformat(since), date.fromisoformat(until)
+    requested_dates = [start_date + timedelta(days=offset) for offset in range((end_date - start_date).days + 1)]
+    rows: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    now = time.monotonic()
+    dates: List[date] = []
+    warming_dates: List[date] = []
+    cached_date_count = 0
+    for target in requested_dates:
+        cached_rows = _get_cached_shopping_query_report_rows(cid, target, now, report_type_norm)
+        if cached_rows is None:
+            if _shopping_query_report_is_warming(cid, target, report_type_norm):
+                warming_dates.append(target)
+            else:
+                dates.append(target)
+        else:
+            cached_date_count += 1
+            rows.extend(cached_rows)
+    meta: Dict[str, Any] = {
+        "report_type": report_type_norm,
+        "requested_date_count": len(requested_dates),
+        "cached_date_count": cached_date_count,
+        "created_report_count": 0,
+        "downloaded_report_count": 0,
+        "pending_report_count": len(warming_dates),
+        "background_refresh": bool(warming_dates),
+    }
+    if not dates:
+        if warming_dates:
+            errors.append(f"{report_type_norm} 리포트 {len(warming_dates)}일치가 아직 파일 생성 중입니다. 준비된 날짜만 먼저 표시하고 완료되면 자동 갱신합니다.")
+        return rows, errors, meta
+
+    timeout_budget = _shopping_query_timeout_budget(timeout_seconds)
+    deadline = time.monotonic() + timeout_budget
+    batch_size = min(max(1, len(dates)), PERFORMANCE_SHOPPING_QUERY_REPORT_WORKERS)
+    pending: Dict[str, date] = {}
+    deferred_dates: List[date] = []
+    deferred_seen: set[date] = set()
+
+    def _defer_date(target: date) -> None:
+        if target in deferred_seen:
+            return
+        deferred_seen.add(target)
+        deferred_dates.append(target)
+
+    for batch_start in range(0, len(dates), batch_size):
+        if time.monotonic() >= deadline:
+            for target in dates[batch_start:]:
+                _defer_date(target)
+            if not background_on_timeout:
+                errors.append(f"{report_type_norm} 리포트 조회가 제한 시간을 초과해 일부 기간만 반영됐습니다.")
+            break
+        batch_dates = dates[batch_start:batch_start + batch_size]
+        executor = ThreadPoolExecutor(max_workers=min(len(batch_dates) or 1, PERFORMANCE_SHOPPING_QUERY_REPORT_WORKERS))
+        futures = {
+            executor.submit(
+                _shopping_query_report_request,
+                "POST",
+                api_key,
+                secret_key,
+                cid,
+                "/stat-reports",
+                {"reportTp": report_type_norm, "statDt": target.strftime("%Y%m%d")},
+                _shopping_query_remaining_request_timeout(deadline),
+            ): target
+            for target in batch_dates
+        }
+        processed: set[Any] = set()
+        try:
+            for future in as_completed(futures, timeout=max(0.01, deadline - time.monotonic())):
+                processed.add(future)
+                target = futures[future]
+                try:
+                    response = future.result()
+                    data = _response_json_value(response)
+                    job_id = _shopping_query_report_job_id(data)
+                except Exception as exc:
+                    if background_on_timeout:
+                        _defer_date(target)
+                    else:
+                        errors.append(f"{target.isoformat()} {report_type_norm} 리포트 생성 실패: {exc}")
+                    continue
+                if response.status_code in {200, 201, 202} and job_id:
+                    pending[job_id] = target
+                    meta["created_report_count"] += 1
+                else:
+                    detail = _short_log_text(getattr(response, "text", ""), 240) or f"HTTP {getattr(response, 'status_code', '')}"
+                    errors.append(f"{target.isoformat()} {report_type_norm} 리포트 생성 실패: {detail}")
+        except FuturesTimeoutError:
+            pass
+        finally:
+            for future, target in futures.items():
+                if future not in processed:
+                    _defer_date(target)
+                    future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
+
+    background_deferred_count = 0
+    if deferred_dates and background_on_timeout:
+        background_deferred_count = _warm_shopping_query_report_dates_async(api_key, secret_key, cid, deferred_dates, report_type_norm)
+    elif deferred_dates:
+        errors.append(f"{report_type_norm} 리포트 {len(deferred_dates)}일치가 제한 시간 안에 생성되지 않았습니다.")
+
+    last_status_by_job: Dict[str, str] = {}
+    while pending and time.monotonic() < deadline:
+        built: List[Tuple[str, str]] = []
+        completed: List[str] = []
+        executor = ThreadPoolExecutor(max_workers=min(len(pending), PERFORMANCE_SHOPPING_QUERY_REPORT_WORKERS))
+        futures = {
+            executor.submit(
+                _shopping_query_report_request,
+                "GET",
+                api_key,
+                secret_key,
+                cid,
+                f"/stat-reports/{job_id}",
+                None,
+                _shopping_query_remaining_request_timeout(deadline, connect_cap=0.5, read_cap=0.8),
+            ): (job_id, target)
+            for job_id, target in pending.items()
+        }
+        processed_status: set[Any] = set()
+        try:
+            for future in as_completed(futures, timeout=max(0.01, deadline - time.monotonic())):
+                processed_status.add(future)
+                job_id, target = futures[future]
+                try:
+                    data = _response_json_value(future.result())
+                except Exception:
+                    continue
+                status = _shopping_query_report_status(data)
+                download_url = _shopping_query_report_download_url(data)
+                if status:
+                    last_status_by_job[job_id] = status
+                if download_url and status in {"", "BUILT", "DONE", "COMPLETE", "COMPLETED", "READY", "FINISHED", "SUCCESS"}:
+                    built.append((job_id, download_url))
+                elif status in {"ERROR", "FAIL", "FAILED", "CANCEL", "CANCELED", "CANCELLED"}:
+                    errors.append(f"{target.isoformat()} {report_type_norm} 리포트 생성 오류")
+                    completed.append(job_id)
+        except FuturesTimeoutError:
+            pass
+        finally:
+            for future in futures:
+                if future not in processed_status:
+                    future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
+        if built:
+            executor = ThreadPoolExecutor(max_workers=min(len(built), PERFORMANCE_SHOPPING_QUERY_REPORT_WORKERS))
+            futures = {
+                executor.submit(
+                    _download_shopping_query_report_by_type,
+                    api_key,
+                    secret_key,
+                    cid,
+                    job_id,
+                    url,
+                    pending.get(job_id).isoformat() if pending.get(job_id) else "",
+                    report_type_norm,
+                    _shopping_query_remaining_request_timeout(deadline, connect_cap=0.5, read_cap=0.9),
+                ): (job_id, pending.get(job_id))
+                for job_id, url in built
+            }
+            processed_downloads: set[Any] = set()
+            try:
+                for future in as_completed(futures, timeout=max(0.01, deadline - time.monotonic())):
+                    processed_downloads.add(future)
+                    job_id, stat_date = futures[future]
+                    try:
+                        downloaded, error = future.result()
+                    except Exception as exc:
+                        downloaded, error = [], f"{report_type_norm} 리포트 다운로드 실패: {exc}"
+                    if error:
+                        if _performance_report_download_error_retryable(error):
+                            last_status_by_job[job_id] = "DOWNLOAD_429"
+                            continue
+                        errors.append(error)
+                        completed.append(job_id)
+                    elif stat_date:
+                        rows.extend(downloaded)
+                        meta["downloaded_report_count"] += 1
+                        _set_cached_shopping_query_report_rows(cid, stat_date, downloaded, report_type_norm)
+                        completed.append(job_id)
+                    else:
+                        rows.extend(downloaded)
+                        completed.append(job_id)
+            except FuturesTimeoutError:
+                pass
+            finally:
+                for future in futures:
+                    if future not in processed_downloads:
+                        future.cancel()
+                executor.shutdown(wait=False, cancel_futures=True)
+        for job_id in completed:
+            pending.pop(job_id, None)
+        if completed:
+            _delete_shopping_query_report_jobs_async(api_key, secret_key, cid, completed)
+        if pending:
+            time.sleep(0.2)
+
+    if pending:
+        status_bits = [f"{target.isoformat()}={last_status_by_job.get(job_id, '대기중')}" for job_id, target in pending.items()]
+        suffix = f" 마지막 상태: {', '.join(status_bits[:8])}" if status_bits else ""
+        meta["pending_report_count"] = len(pending) + len(warming_dates)
+        meta["background_refresh"] = bool(background_on_timeout)
+        if background_on_timeout:
+            _complete_shopping_query_report_jobs_async(api_key, secret_key, cid, dict(pending), report_type_norm)
+            errors.append(f"{report_type_norm} 리포트 {len(pending)}일치가 아직 생성 중이라 준비된 데이터만 먼저 표시합니다. 나머지는 백그라운드에서 계속 준비합니다.{suffix}")
+        else:
+            _delete_shopping_query_report_jobs_async(api_key, secret_key, cid, list(pending))
+            errors.append(f"{report_type_norm} 리포트 생성 대기 시간이 초과됐습니다. ({int(timeout_budget)}초){suffix}")
+    elif warming_dates:
+        meta["pending_report_count"] = len(warming_dates)
+        meta["background_refresh"] = True
+        errors.append(f"{report_type_norm} 리포트 {len(warming_dates)}일치가 아직 파일 생성 중입니다. 준비된 날짜만 먼저 표시하고 완료되면 자동 갱신합니다.")
+    if background_deferred_count:
+        meta["pending_report_count"] = len(pending) + len(warming_dates) + background_deferred_count
+        meta["background_refresh"] = True
+        errors.append(f"{report_type_norm} 리포트 {background_deferred_count}일치를 추가 생성 중입니다. 준비되는 대로 자동 갱신합니다.")
+    return rows, errors, meta
 
 def _collect_performance_shopping_queries(api_key: str, secret_key: str, cid: str, payload: Dict[str, Any], since: str, until: str) -> Dict[str, Any]:
     scope = _normalize_performance_scope(payload.get("target_scope") or payload.get("scope"))
     campaign_ids = {str(value or "").strip() for value in (payload.get("campaign_ids") or []) if str(value or "").strip()}
     adgroup_ids = {str(value or "").strip() for value in (payload.get("adgroup_ids") or []) if str(value or "").strip()}
-    cache_key = json.dumps([cid, scope, sorted(campaign_ids), sorted(adgroup_ids), since, until], ensure_ascii=False, separators=(",", ":"))
+    cache_key = json.dumps([PERFORMANCE_SHOPPING_QUERY_PARSE_VERSION, cid, scope, sorted(campaign_ids), sorted(adgroup_ids), since, until], ensure_ascii=False, separators=(",", ":"))
     now = time.monotonic()
     with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
         cached = PERFORMANCE_SHOPPING_QUERY_CACHE.get(cache_key)
         if cached and now - cached[0] <= PERFORMANCE_SHOPPING_QUERY_CACHE_TTL:
             return dict(cached[1])
-    rows, warnings = _fetch_shopping_query_conversion_rows(api_key, secret_key, cid, since, until)
+    fast_timeout = _performance_number(payload.get("fast_timeout_seconds") or payload.get("timeout_seconds") or PERFORMANCE_SHOPPING_QUERY_FAST_TIMEOUT_SECONDS)
+    if fast_timeout <= 0:
+        fast_timeout = PERFORMANCE_SHOPPING_QUERY_FAST_TIMEOUT_SECONDS
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        conversion_future = executor.submit(
+            _fetch_shopping_query_conversion_rows,
+            api_key,
+            secret_key,
+            cid,
+            since,
+            until,
+            fast_timeout,
+            background_on_timeout=True,
+        )
+        inflow_future = executor.submit(
+            _fetch_shopping_keyword_detail_rows,
+            api_key,
+            secret_key,
+            cid,
+            since,
+            until,
+            fast_timeout,
+            background_on_timeout=True,
+        )
+        rows, conversion_warnings, _report_meta = conversion_future.result()
+        inflow_rows, inflow_warnings = inflow_future.result()
+    warnings = list(conversion_warnings or []) + list(inflow_warnings or [])
+    inflow: Dict[str, float] = defaultdict(float)
+    campaign_inflow: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
     general: Dict[str, float] = defaultdict(float)
     purchase: Dict[str, float] = defaultdict(float)
     campaign_general: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
     campaign_purchase: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
     matched = 0
+    inflow_matched = 0
+    for row in inflow_rows:
+        campaign_id, adgroup_id = str(row.get("campaign_id") or "").strip(), str(row.get("adgroup_id") or "").strip()
+        if scope == "selected_campaigns" and campaign_id not in campaign_ids:
+            continue
+        if scope == "selected_adgroups" and adgroup_id not in adgroup_ids:
+            continue
+        query = str(row.get("query_text") or "").strip()
+        clicks = _performance_number(row.get("clkCnt"))
+        if not query or clicks <= 0:
+            continue
+        inflow_matched += 1
+        inflow[query] += clicks
+        if campaign_id:
+            campaign_inflow[campaign_id][query] += clicks
     for row in rows:
         campaign_id, adgroup_id = str(row.get("campaign_id") or "").strip(), str(row.get("adgroup_id") or "").strip()
         if scope == "selected_campaigns" and campaign_id not in campaign_ids:
@@ -4497,14 +8555,21 @@ def _collect_performance_shopping_queries(api_key: str, secret_key: str, cid: st
             purchase[query] += count
             if campaign_id:
                 campaign_purchase[campaign_id][query] += count
+    inflow_text = _format_performance_top_keywords(inflow)
     general_text, purchase_text = _format_performance_top_keywords(general), _format_performance_top_keywords(purchase)
     result = {
-        "has_shopping": bool(matched),
+        "has_shopping": bool(matched or inflow_matched),
+        "inflow_text": inflow_text,
+        "inflow_type_text_by_id": {"SHOPPING": inflow_text} if inflow_matched else {},
+        "inflow_campaign_text_by_id": {
+            campaign_id: _format_performance_top_keywords(click_map)
+            for campaign_id, click_map in campaign_inflow.items()
+        },
         "general_conversion_text": general_text,
-        "general_conversion_type_text_by_id": {"SHOPPING": general_text},
+        "general_conversion_type_text_by_id": {"SHOPPING": general_text} if matched else {},
         "general_conversion_campaign_text_by_id": {key: _format_performance_top_keywords(value) for key, value in campaign_general.items()},
         "purchase_conversion_text": purchase_text,
-        "purchase_conversion_type_text_by_id": {"SHOPPING": purchase_text},
+        "purchase_conversion_type_text_by_id": {"SHOPPING": purchase_text} if matched else {},
         "purchase_conversion_campaign_text_by_id": {key: _format_performance_top_keywords(value) for key, value in campaign_purchase.items()},
         "warnings": warnings[:20],
         "errors": [],
@@ -4516,6 +8581,782 @@ def _collect_performance_shopping_queries(api_key: str, secret_key: str, cid: st
             PERFORMANCE_SHOPPING_QUERY_CACHE[cache_key] = (now, dict(result))
     return result
 
+def _shopping_query_metric_bucket() -> Dict[str, float]:
+    return {"total_count": 0.0, "purchase_count": 0.0, "cart_count": 0.0, "other_count": 0.0}
+
+def _add_shopping_query_metric(metric: Dict[str, float], conversion_type: str, count: float):
+    amount = _performance_number(count)
+    if amount <= 0:
+        return
+    metric["total_count"] = _performance_number(metric.get("total_count")) + amount
+    if conversion_type == "purchase":
+        metric["purchase_count"] = _performance_number(metric.get("purchase_count")) + amount
+    elif conversion_type == "cart":
+        metric["cart_count"] = _performance_number(metric.get("cart_count")) + amount
+    else:
+        metric["other_count"] = _performance_number(metric.get("other_count")) + amount
+
+def _shopping_query_creative_title(row: Dict[str, Any]) -> str:
+    return str(
+        row.get("productName")
+        or row.get("headline")
+        or row.get("summary")
+        or row.get("ad_id")
+        or "소재 미구분"
+    ).strip()
+
+def _build_unknown_shopping_query_creative(adgroup_id: str, campaign_id: str, group_meta: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    meta = group_meta or {}
+    return {
+        "id": f"unknown::{adgroup_id or campaign_id or 'shopping'}",
+        "ad_id": "",
+        "adgroup_id": adgroup_id,
+        "adgroup_name": str(meta.get("adgroup_name") or adgroup_id or "광고그룹 미확인"),
+        "campaign_id": campaign_id or str(meta.get("campaign_id") or ""),
+        "campaign_name": str(meta.get("campaign_name") or campaign_id or ""),
+        "campaign_type": "SHOPPING",
+        "campaign_type_label": "쇼핑검색",
+        "ad_type": "",
+        "ad_type_label": "소재 미구분",
+        "status": "-",
+        "headline": "",
+        "description": "검색어 전환 리포트에 소재 ID가 없어 광고그룹 단위로 묶었습니다.",
+        "productName": "소재 미구분",
+        "pcFinalUrl": "",
+        "mobileFinalUrl": "",
+        "referenceKey": "",
+        "summary": "소재 미구분",
+        "is_unattributed": True,
+    }
+
+def _shopping_query_name_key(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip()).casefold()
+
+def _shopping_query_payload_meta_rows(payload: Dict[str, Any], key: str) -> List[Dict[str, Any]]:
+    rows = payload.get(key) or []
+    return [row for row in rows if isinstance(row, dict)]
+
+def _raw_ssa_row_in_scope(item: Dict[str, Any], payload: Dict[str, Any], scope: str) -> bool:
+    if scope == "account":
+        return True
+    campaign_name = _shopping_query_name_key(item.get("campaign_name"))
+    adgroup_name = _shopping_query_name_key(item.get("adgroup_name"))
+    campaign_meta = _shopping_query_payload_meta_rows(payload, "campaign_meta")
+    adgroup_meta = _shopping_query_payload_meta_rows(payload, "adgroup_meta")
+    if scope == "selected_campaigns":
+        campaign_names = {_shopping_query_name_key(row.get("name") or row.get("campaign_name")) for row in campaign_meta}
+        campaign_names.discard("")
+        return not campaign_names or campaign_name in campaign_names
+    if scope == "selected_adgroups":
+        pairs = {
+            (_shopping_query_name_key(row.get("campaign_name")), _shopping_query_name_key(row.get("name") or row.get("adgroup_name")))
+            for row in adgroup_meta
+        }
+        pairs.discard(("", ""))
+        if pairs:
+            return (campaign_name, adgroup_name) in pairs or ("", adgroup_name) in pairs
+        adgroup_names = {_shopping_query_name_key(row.get("name") or row.get("adgroup_name")) for row in adgroup_meta}
+        adgroup_names.discard("")
+        return not adgroup_names or adgroup_name in adgroup_names
+    return True
+
+def _build_raw_ssa_shopping_query_conversion_insights(query_rows: List[Dict[str, Any]], payload: Dict[str, Any], scope: str, since: str, until: str, date_label: str, warnings: List[str]) -> Dict[str, Any]:
+    bucket_by_key: Dict[str, Dict[str, Any]] = {}
+    total_metric = _shopping_query_metric_bucket()
+    seen_queries: set[str] = set()
+    matched_report_rows = 0
+    source_values = {str(item.get("source") or "").strip().lower() for item in (query_rows or []) if isinstance(item, dict)}
+    from_stat_report = "stat_report" in source_values
+    source_label = "검색어 리포트" if from_stat_report else "RAW_SSA"
+    source_name = "stat_report" if from_stat_report else "raw_ssa"
+    for item in query_rows or []:
+        if not _raw_ssa_row_in_scope(item, payload, scope):
+            continue
+        query_text = str(item.get("query_text") or "").strip()
+        conversion_type = str(item.get("conversion_type") or "").strip().lower() or "other"
+        count = _performance_number(item.get("conversion_count"))
+        if not query_text or count <= 0:
+            continue
+        campaign_name = str(item.get("campaign_name") or "").strip()
+        adgroup_name = str(item.get("adgroup_name") or "").strip()
+        campaign_key = _shopping_query_name_key(campaign_name)
+        adgroup_key = _shopping_query_name_key(adgroup_name)
+        bucket_key = f"rawssa::{campaign_key or 'campaign'}::{adgroup_key or 'adgroup'}"
+        title = adgroup_name or campaign_name or "RAW_SSA 검색어"
+        bucket = bucket_by_key.setdefault(bucket_key, {
+            "id": bucket_key,
+            "ad_id": "",
+            "adgroup_id": "",
+            "adgroup_name": adgroup_name or "광고그룹 미확인",
+            "campaign_id": "",
+            "campaign_name": campaign_name,
+            "campaign_type": "SHOPPING",
+            "campaign_type_label": "쇼핑검색",
+            "ad_type": "SHOPPING_QUERY_REPORT" if from_stat_report else "RAW_SSA",
+            "ad_type_label": source_label,
+            "status": "-",
+            "headline": "",
+            "description": "네이버 쇼핑검색어 전환 리포트 기준입니다." if from_stat_report else "RAW_SSA 검색어 리포트 기준입니다.",
+            "productName": title,
+            "pcFinalUrl": "",
+            "mobileFinalUrl": "",
+            "referenceKey": "",
+            "summary": title,
+            "title": title,
+            "attribution": source_name,
+            "is_unattributed": True,
+            "metrics": _shopping_query_metric_bucket(),
+            "queries": {},
+        })
+        query_bucket = bucket["queries"].setdefault(query_text, {
+            "query_text": query_text,
+            "metrics": _shopping_query_metric_bucket(),
+            "dates": set(),
+        })
+        _add_shopping_query_metric(bucket["metrics"], conversion_type, count)
+        _add_shopping_query_metric(query_bucket["metrics"], conversion_type, count)
+        _add_shopping_query_metric(total_metric, conversion_type, count)
+        if item.get("date"):
+            query_bucket["dates"].add(str(item.get("date")))
+        seen_queries.add(query_text)
+        matched_report_rows += 1
+
+    rows: List[Dict[str, Any]] = []
+    for bucket in bucket_by_key.values():
+        query_items = []
+        for query_item in bucket.pop("queries", {}).values():
+            metrics = query_item["metrics"]
+            query_items.append({
+                "query_text": query_item["query_text"],
+                "total_count": round(_performance_number(metrics.get("total_count")), 2),
+                "purchase_count": round(_performance_number(metrics.get("purchase_count")), 2),
+                "cart_count": round(_performance_number(metrics.get("cart_count")), 2),
+                "other_count": round(_performance_number(metrics.get("other_count")), 2),
+                "dates": sorted(query_item.get("dates") or []),
+            })
+        query_items.sort(key=lambda row: (
+            -_performance_number(row.get("total_count")),
+            -_performance_number(row.get("purchase_count")),
+            -_performance_number(row.get("cart_count")),
+            str(row.get("query_text") or "").casefold(),
+        ))
+        metrics = bucket.get("metrics") or _shopping_query_metric_bucket()
+        bucket["total_count"] = round(_performance_number(metrics.get("total_count")), 2)
+        bucket["purchase_count"] = round(_performance_number(metrics.get("purchase_count")), 2)
+        bucket["cart_count"] = round(_performance_number(metrics.get("cart_count")), 2)
+        bucket["other_count"] = round(_performance_number(metrics.get("other_count")), 2)
+        bucket["query_count"] = len(query_items)
+        bucket["top_query"] = query_items[0]["query_text"] if query_items else ""
+        bucket["query_rows"] = query_items
+        rows.append(bucket)
+    rows.sort(key=lambda row: (
+        -_performance_number(row.get("total_count")),
+        -_performance_number(row.get("purchase_count")),
+        -_performance_number(row.get("cart_count")),
+        str(row.get("campaign_name") or "").casefold(),
+        str(row.get("adgroup_name") or "").casefold(),
+    ))
+    result_warnings = list(warnings or [])
+    if query_rows and not rows:
+        result_warnings.append("RAW_SSA 파일은 찾았지만 선택 범위에 맞는 전환 검색어가 없습니다.")
+    return {
+        "message": f"{date_label} 쇼핑검색 검색어 전환 조회 완료 · 소재 {len(rows)}개 / 검색어 {len(seen_queries)}개",
+        "rows": rows,
+        "summary": {
+            "creative_count": len(rows),
+            "matched_creative_count": len(rows),
+            "query_count": len(seen_queries),
+            "report_row_count": matched_report_rows,
+            "raw_report_row_count": len(query_rows or []),
+            "total_count": round(_performance_number(total_metric.get("total_count")), 2),
+            "purchase_count": round(_performance_number(total_metric.get("purchase_count")), 2),
+            "cart_count": round(_performance_number(total_metric.get("cart_count")), 2),
+            "other_count": round(_performance_number(total_metric.get("other_count")), 2),
+            "unattributed_report_rows": matched_report_rows,
+        },
+        "warnings": result_warnings[:30],
+        "errors": [],
+        "scope": scope,
+        "campaign_type": "SHOPPING",
+        "source": source_name,
+        "source_label": source_label,
+        "since": since,
+        "until": until,
+        "date_label": date_label,
+    }
+
+def _get_shopping_query_conversion_insights(api_key: str, secret_key: str, cid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    total_start = time.monotonic()
+    timings: Dict[str, int] = {}
+
+    def _finish(result: Dict[str, Any]) -> Dict[str, Any]:
+        timings["total_ms"] = int((time.monotonic() - total_start) * 1000)
+        result["debug_timing_ms"] = dict(timings)
+        return result
+
+    scope = _normalize_performance_scope(payload.get("target_scope") or payload.get("scope"))
+    since, until, date_label = _performance_date_range(
+        payload.get("date_preset") or "last7days",
+        payload.get("since"),
+        payload.get("until"),
+        exclude_today=True,
+    )
+    since_d, until_d = date.fromisoformat(since), date.fromisoformat(until)
+    day_count = (until_d - since_d).days + 1
+    if day_count > 90:
+        raise ValueError("쇼핑검색 전환 검색어 리포트는 최대 90일 범위로 조회해주세요.")
+
+    campaign_ids = [str(x or "").strip() for x in (payload.get("campaign_ids") or []) if str(x or "").strip()]
+    adgroup_ids = [str(x or "").strip() for x in (payload.get("adgroup_ids") or []) if str(x or "").strip()]
+    cache_key = json.dumps([PERFORMANCE_SHOPPING_QUERY_PARSE_VERSION, cid, scope, sorted(campaign_ids), sorted(adgroup_ids), since, until], ensure_ascii=False, separators=(",", ":"))
+    now = time.monotonic()
+    with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
+        cached = PERFORMANCE_SHOPPING_QUERY_INSIGHT_CACHE.get(cache_key)
+        if cached and now - cached[0] <= PERFORMANCE_SHOPPING_QUERY_INSIGHT_CACHE_TTL:
+            cached_result = dict(cached[1])
+            if int(cached_result.get("pending_report_count") or 0) > 0 or _boolish(cached_result.get("background_refresh"), False):
+                PERFORMANCE_SHOPPING_QUERY_INSIGHT_CACHE.pop(cache_key, None)
+            else:
+                timings["cache_hit_ms"] = int((time.monotonic() - total_start) * 1000)
+                return _finish(cached_result)
+        elif cached:
+            PERFORMANCE_SHOPPING_QUERY_INSIGHT_CACHE.pop(cache_key, None)
+
+    def _report_result_is_complete(result: Dict[str, Any]) -> bool:
+        return (
+            not report_warnings
+            and int((result or {}).get("pending_report_count") or 0) <= 0
+            and not _boolish((result or {}).get("background_refresh"), False)
+        )
+
+    report_start = time.monotonic()
+    fast_timeout = _performance_number(payload.get("fast_timeout_seconds") or payload.get("timeout_seconds") or PERFORMANCE_SHOPPING_QUERY_FAST_TIMEOUT_SECONDS)
+    if fast_timeout <= 0:
+        fast_timeout = PERFORMANCE_SHOPPING_QUERY_FAST_TIMEOUT_SECONDS
+    query_rows, report_warnings, report_meta = _fetch_shopping_query_conversion_rows(
+        api_key,
+        secret_key,
+        cid,
+        since,
+        until,
+        timeout_seconds=fast_timeout,
+        background_on_timeout=True,
+    )
+    timings["report_ms"] = int((time.monotonic() - report_start) * 1000)
+    warnings = list(report_warnings or [])
+
+    def _with_report_meta(result: Dict[str, Any]) -> Dict[str, Any]:
+        result["pending_report_count"] = int((report_meta or {}).get("pending_report_count") or 0)
+        result["background_refresh"] = bool((report_meta or {}).get("background_refresh"))
+        result["report_fetch_meta"] = dict(report_meta or {})
+        return result
+
+    if query_rows and any(str(item.get("source") or "").strip().lower() in {"stat_report", "raw_ssa"} for item in query_rows):
+        build_start = time.monotonic()
+        result = _build_raw_ssa_shopping_query_conversion_insights(query_rows, payload, scope, since, until, date_label, warnings)
+        _with_report_meta(result)
+        timings["build_ms"] = int((time.monotonic() - build_start) * 1000)
+        if _report_result_is_complete(result):
+            with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
+                if len(PERFORMANCE_SHOPPING_QUERY_INSIGHT_CACHE) >= 100:
+                    PERFORMANCE_SHOPPING_QUERY_INSIGHT_CACHE.pop(min(PERFORMANCE_SHOPPING_QUERY_INSIGHT_CACHE, key=lambda key: PERFORMANCE_SHOPPING_QUERY_INSIGHT_CACHE[key][0]), None)
+                PERFORMANCE_SHOPPING_QUERY_INSIGHT_CACHE[cache_key] = (now, dict(result))
+        return _finish(result)
+
+    if not query_rows:
+        empty_summary = _shopping_query_metric_bucket()
+        return _finish(_with_report_meta({
+            "message": f"{date_label} 쇼핑검색 검색어 전환 조회 완료 · 소재 0개 / 검색어 0개",
+            "rows": [],
+            "summary": {
+                "creative_count": 0,
+                "matched_creative_count": 0,
+                "query_count": 0,
+                "report_row_count": 0,
+                "raw_report_row_count": 0,
+                "total_count": round(_performance_number(empty_summary.get("total_count")), 2),
+                "purchase_count": round(_performance_number(empty_summary.get("purchase_count")), 2),
+                "cart_count": round(_performance_number(empty_summary.get("cart_count")), 2),
+                "other_count": round(_performance_number(empty_summary.get("other_count")), 2),
+                "unattributed_report_rows": 0,
+            },
+            "warnings": warnings[:30],
+            "errors": [],
+            "scope": scope,
+            "campaign_type": "SHOPPING",
+            "since": since,
+            "until": until,
+            "date_label": date_label,
+        }))
+
+    creative_start = time.monotonic()
+    creative_rows, warnings = _collect_creative_performance_targets(
+        api_key,
+        secret_key,
+        cid,
+        scope,
+        "SHOPPING",
+        campaign_ids,
+        adgroup_ids,
+    )
+    timings["creative_lookup_ms"] = int((time.monotonic() - creative_start) * 1000)
+    warnings.extend(report_warnings)
+    shopping_creatives = [
+        row for row in creative_rows
+        if _performance_campaign_bucket(row.get("campaign_type") or row.get("campaign_id")) == "SHOPPING"
+    ]
+    creative_by_ad_id = {
+        str(row.get("ad_id") or "").strip(): row
+        for row in shopping_creatives
+        if str(row.get("ad_id") or "").strip()
+    }
+    creatives_by_adgroup: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    group_meta_by_id: Dict[str, Dict[str, Any]] = {}
+    for row in shopping_creatives:
+        adgroup_id = str(row.get("adgroup_id") or "").strip()
+        if not adgroup_id:
+            continue
+        creatives_by_adgroup[adgroup_id].append(row)
+        group_meta_by_id.setdefault(adgroup_id, row)
+
+    allowed_adgroup_ids = set(creatives_by_adgroup.keys())
+    allowed_campaign_ids = {str(row.get("campaign_id") or "").strip() for row in shopping_creatives if str(row.get("campaign_id") or "").strip()}
+    if scope in {"selected_campaigns", "selected_adgroups"} and not shopping_creatives:
+        scope_label = "선택 캠페인" if scope == "selected_campaigns" else "선택 광고그룹"
+        empty_summary = _shopping_query_metric_bucket()
+        return _finish(_with_report_meta({
+            "message": f"{date_label} 쇼핑검색 검색어 전환 조회 완료 · 소재 0개 / 검색어 0개",
+            "rows": [],
+            "summary": {
+                "creative_count": 0,
+                "matched_creative_count": 0,
+                "query_count": 0,
+                "report_row_count": 0,
+                "raw_report_row_count": 0,
+                "total_count": round(_performance_number(empty_summary.get("total_count")), 2),
+                "purchase_count": round(_performance_number(empty_summary.get("purchase_count")), 2),
+                "cart_count": round(_performance_number(empty_summary.get("cart_count")), 2),
+                "other_count": round(_performance_number(empty_summary.get("other_count")), 2),
+                "unattributed_report_rows": 0,
+            },
+            "warnings": [*warnings[:20], f"{scope_label}에 쇼핑검색 소재가 없어 조회할 전환 검색어가 없습니다."],
+            "errors": [],
+            "scope": scope,
+            "campaign_type": "SHOPPING",
+            "since": since,
+            "until": until,
+            "date_label": date_label,
+        }))
+
+    bucket_by_key: Dict[str, Dict[str, Any]] = {}
+    total_metric = _shopping_query_metric_bucket()
+    seen_queries: set[str] = set()
+    matched_report_rows = 0
+    unattributed_report_rows = 0
+    unmatched_ad_rows = 0
+
+    for item in query_rows:
+        campaign_id = str(item.get("campaign_id") or "").strip()
+        adgroup_id = str(item.get("adgroup_id") or "").strip()
+        ad_id = str(item.get("ad_id") or "").strip()
+        query_text = str(item.get("query_text") or "").strip()
+        conversion_type = str(item.get("conversion_type") or ("purchase" if _boolish(item.get("is_purchase"), False) else ("cart" if _boolish(item.get("is_cart"), False) else "other"))).strip().lower()
+        count = _performance_number(item.get("conversion_count"))
+        if not query_text or count <= 0:
+            continue
+        if scope == "selected_adgroups":
+            if adgroup_id and adgroup_id not in allowed_adgroup_ids:
+                continue
+            if not adgroup_id and ad_id and ad_id not in creative_by_ad_id:
+                continue
+            if not adgroup_id and not ad_id:
+                continue
+        elif scope == "selected_campaigns":
+            if campaign_id and campaign_id not in allowed_campaign_ids:
+                continue
+            if not campaign_id and adgroup_id and adgroup_id not in allowed_adgroup_ids:
+                continue
+            if not campaign_id and not adgroup_id and ad_id and ad_id not in creative_by_ad_id:
+                continue
+            if not campaign_id and not adgroup_id and not ad_id:
+                continue
+
+        creative: Dict[str, Any] | None = None
+        attribution = "ad"
+        bucket_key = ad_id
+        if ad_id and ad_id in creative_by_ad_id:
+            creative = creative_by_ad_id[ad_id]
+        elif adgroup_id and len(creatives_by_adgroup.get(adgroup_id, [])) == 1:
+            creative = creatives_by_adgroup[adgroup_id][0]
+            bucket_key = str(creative.get("ad_id") or ad_id or adgroup_id)
+            attribution = "single_adgroup_creative"
+            if not ad_id:
+                unattributed_report_rows += 1
+        else:
+            if ad_id and ad_id not in creative_by_ad_id:
+                unmatched_ad_rows += 1
+            if not ad_id:
+                unattributed_report_rows += 1
+            bucket_key = f"unknown::{adgroup_id or campaign_id or 'shopping'}"
+            creative = _build_unknown_shopping_query_creative(adgroup_id, campaign_id, group_meta_by_id.get(adgroup_id))
+            attribution = "unattributed"
+
+        if not bucket_key:
+            continue
+        bucket = bucket_by_key.setdefault(bucket_key, {
+            **creative,
+            "title": _shopping_query_creative_title(creative),
+            "attribution": attribution,
+            "metrics": _shopping_query_metric_bucket(),
+            "queries": {},
+        })
+        query_bucket = bucket["queries"].setdefault(query_text, {
+            "query_text": query_text,
+            "metrics": _shopping_query_metric_bucket(),
+            "dates": set(),
+        })
+        _add_shopping_query_metric(bucket["metrics"], conversion_type, count)
+        _add_shopping_query_metric(query_bucket["metrics"], conversion_type, count)
+        _add_shopping_query_metric(total_metric, conversion_type, count)
+        if item.get("date"):
+            query_bucket["dates"].add(str(item.get("date")))
+        seen_queries.add(query_text)
+        matched_report_rows += 1
+
+    rows: List[Dict[str, Any]] = []
+    for bucket in bucket_by_key.values():
+        query_items = []
+        for query_item in bucket.pop("queries", {}).values():
+            metrics = query_item["metrics"]
+            query_items.append({
+                "query_text": query_item["query_text"],
+                "total_count": round(_performance_number(metrics.get("total_count")), 2),
+                "purchase_count": round(_performance_number(metrics.get("purchase_count")), 2),
+                "cart_count": round(_performance_number(metrics.get("cart_count")), 2),
+                "other_count": round(_performance_number(metrics.get("other_count")), 2),
+                "dates": sorted(query_item.get("dates") or []),
+            })
+        query_items.sort(key=lambda row: (
+            -_performance_number(row.get("total_count")),
+            -_performance_number(row.get("purchase_count")),
+            -_performance_number(row.get("cart_count")),
+            str(row.get("query_text") or "").casefold(),
+        ))
+        metrics = bucket.get("metrics") or _shopping_query_metric_bucket()
+        bucket["total_count"] = round(_performance_number(metrics.get("total_count")), 2)
+        bucket["purchase_count"] = round(_performance_number(metrics.get("purchase_count")), 2)
+        bucket["cart_count"] = round(_performance_number(metrics.get("cart_count")), 2)
+        bucket["other_count"] = round(_performance_number(metrics.get("other_count")), 2)
+        bucket["query_count"] = len(query_items)
+        bucket["top_query"] = query_items[0]["query_text"] if query_items else ""
+        bucket["query_rows"] = query_items
+        rows.append(bucket)
+
+    rows.sort(key=lambda row: (
+        -_performance_number(row.get("total_count")),
+        -_performance_number(row.get("purchase_count")),
+        -_performance_number(row.get("cart_count")),
+        str(row.get("campaign_name") or "").casefold(),
+        str(row.get("adgroup_name") or "").casefold(),
+        str(row.get("title") or "").casefold(),
+    ))
+    if unattributed_report_rows:
+        warnings.append(f"소재 ID가 없는 검색어 전환 {unattributed_report_rows}건은 단일 소재 광고그룹이 아니면 '소재 미구분'으로 묶었습니다.")
+    if unmatched_ad_rows:
+        warnings.append(f"조회 범위의 소재 목록과 매칭되지 않은 소재 ID 전환 {unmatched_ad_rows}건은 '소재 미구분'에 포함했습니다.")
+    if query_rows and not matched_report_rows:
+        warnings.append("쇼핑검색어 리포트는 생성됐지만 선택 범위와 매칭되는 전환 검색어가 없습니다.")
+
+    aggregate_start = time.monotonic()
+    result = {
+        "message": f"{date_label} 쇼핑검색 검색어 전환 조회 완료 · 소재 {len(rows)}개 / 검색어 {len(seen_queries)}개",
+        "rows": rows,
+        "summary": {
+            "creative_count": len(shopping_creatives),
+            "matched_creative_count": len(rows),
+            "query_count": len(seen_queries),
+            "report_row_count": matched_report_rows,
+            "raw_report_row_count": len(query_rows),
+            "total_count": round(_performance_number(total_metric.get("total_count")), 2),
+            "purchase_count": round(_performance_number(total_metric.get("purchase_count")), 2),
+            "cart_count": round(_performance_number(total_metric.get("cart_count")), 2),
+            "other_count": round(_performance_number(total_metric.get("other_count")), 2),
+            "unattributed_report_rows": unattributed_report_rows,
+        },
+        "warnings": warnings[:30],
+        "errors": [],
+        "scope": scope,
+        "campaign_type": "SHOPPING",
+        "since": since,
+        "until": until,
+        "date_label": date_label,
+    }
+    _with_report_meta(result)
+    timings["aggregate_ms"] = int((time.monotonic() - aggregate_start) * 1000)
+    if _report_result_is_complete(result):
+        with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
+            if len(PERFORMANCE_SHOPPING_QUERY_INSIGHT_CACHE) >= 100:
+                PERFORMANCE_SHOPPING_QUERY_INSIGHT_CACHE.pop(min(PERFORMANCE_SHOPPING_QUERY_INSIGHT_CACHE, key=lambda key: PERFORMANCE_SHOPPING_QUERY_INSIGHT_CACHE[key][0]), None)
+            PERFORMANCE_SHOPPING_QUERY_INSIGHT_CACHE[cache_key] = (now, dict(result))
+    return _finish(result)
+
+
+def _shopping_query_norm_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip()).casefold()
+
+def _shopping_query_activity_bucket() -> Dict[str, float]:
+    return {"impCnt": 0.0, "clkCnt": 0.0, "salesAmt": 0.0, "sum_ad_rank": 0.0}
+
+def _add_shopping_query_activity(metric: Dict[str, float], row: Dict[str, Any]) -> None:
+    metric["impCnt"] = _performance_number(metric.get("impCnt")) + _performance_number(row.get("impCnt"))
+    metric["clkCnt"] = _performance_number(metric.get("clkCnt")) + _performance_number(row.get("clkCnt"))
+    metric["salesAmt"] = _performance_number(metric.get("salesAmt")) + _performance_number(row.get("salesAmt"))
+    metric["sum_ad_rank"] = _performance_number(metric.get("sum_ad_rank")) + _performance_number(row.get("sum_ad_rank"))
+
+def _finish_shopping_query_activity_metric(metric: Dict[str, float]) -> Dict[str, Any]:
+    impressions = _performance_number(metric.get("impCnt"))
+    clicks = _performance_number(metric.get("clkCnt"))
+    cost = _performance_number(metric.get("salesAmt"))
+    sum_ad_rank = _performance_number(metric.get("sum_ad_rank"))
+    return {
+        "impCnt": round(impressions, 2),
+        "clkCnt": round(clicks, 2),
+        "salesAmt": round(cost, 2),
+        "sum_ad_rank": round(sum_ad_rank, 2),
+        "avg_rank": round(sum_ad_rank / impressions, 2) if impressions > 0 else 0,
+        "ctr": round((clicks / impressions) * 100, 2) if impressions > 0 else 0,
+        "cpc": round(cost / clicks, 2) if clicks > 0 else 0,
+    }
+
+def _get_shopping_query_non_conversion_insights(api_key: str, secret_key: str, cid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    total_start = time.monotonic()
+    timings: Dict[str, int] = {}
+
+    def _finish(result: Dict[str, Any]) -> Dict[str, Any]:
+        timings["total_ms"] = int((time.monotonic() - total_start) * 1000)
+        result["debug_timing_ms"] = dict(timings)
+        return result
+
+    scope = _normalize_performance_scope(payload.get("target_scope") or payload.get("scope"))
+    since, until, date_label = _performance_date_range(
+        payload.get("date_preset") or "last7days",
+        payload.get("since"),
+        payload.get("until"),
+        exclude_today=True,
+    )
+    since_d, until_d = date.fromisoformat(since), date.fromisoformat(until)
+    day_count = (until_d - since_d).days + 1
+    if day_count > 90:
+        raise ValueError("쇼핑검색 전환 없음 검색어는 최대 90일 범위로 조회해주세요.")
+
+    campaign_ids = [str(x or "").strip() for x in (payload.get("campaign_ids") or []) if str(x or "").strip()]
+    adgroup_ids = [str(x or "").strip() for x in (payload.get("adgroup_ids") or []) if str(x or "").strip()]
+    cache_key = json.dumps([PERFORMANCE_SHOPPING_QUERY_PARSE_VERSION, "non-conversion", cid, scope, sorted(campaign_ids), sorted(adgroup_ids), since, until], ensure_ascii=False, separators=(",", ":"))
+    now = time.monotonic()
+    with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
+        cached = PERFORMANCE_SHOPPING_QUERY_NON_CONVERSION_CACHE.get(cache_key)
+        if cached and now - cached[0] <= PERFORMANCE_SHOPPING_QUERY_NON_CONVERSION_CACHE_TTL:
+            timings["cache_hit_ms"] = int((time.monotonic() - total_start) * 1000)
+            return _finish(dict(cached[1]))
+
+    def _fetch_activity_report():
+        started = time.monotonic()
+        rows, report_warnings = _fetch_shopping_keyword_detail_rows(api_key, secret_key, cid, since, until, timeout_seconds=18.0)
+        return rows, report_warnings, int((time.monotonic() - started) * 1000)
+
+    def _fetch_conversion_report():
+        started = time.monotonic()
+        rows, report_warnings, _report_meta = _fetch_shopping_query_conversion_rows(api_key, secret_key, cid, since, until, timeout_seconds=18.0)
+        return rows, report_warnings, int((time.monotonic() - started) * 1000)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        activity_future = executor.submit(_fetch_activity_report)
+        conversion_future = executor.submit(_fetch_conversion_report)
+        activity_rows, activity_warnings, timings["activity_report_ms"] = activity_future.result()
+        conversion_rows, conversion_warnings, timings["conversion_report_ms"] = conversion_future.result()
+
+    warnings = list(activity_warnings or []) + list(conversion_warnings or [])
+    converted_ad_query: set[Tuple[str, str]] = set()
+    converted_adgroup_query: set[Tuple[str, str]] = set()
+    converted_campaign_query: set[Tuple[str, str]] = set()
+    converted_query: set[str] = set()
+    for item in conversion_rows or []:
+        query_key = _shopping_query_norm_text(item.get("query_text"))
+        if not query_key or _performance_number(item.get("conversion_count")) <= 0:
+            continue
+        ad_id = str(item.get("ad_id") or "").strip()
+        adgroup_id = str(item.get("adgroup_id") or "").strip()
+        campaign_id = str(item.get("campaign_id") or "").strip()
+        converted_query.add(query_key)
+        if ad_id:
+            converted_ad_query.add((ad_id, query_key))
+        if adgroup_id:
+            converted_adgroup_query.add((adgroup_id, query_key))
+        if campaign_id:
+            converted_campaign_query.add((campaign_id, query_key))
+
+    bucket_by_key: Dict[str, Dict[str, Any]] = {}
+    total_metric = _shopping_query_activity_bucket()
+    seen_query_keys: set[str] = set()
+    raw_activity_rows = 0
+    skipped_converted_rows = 0
+    skipped_out_of_scope_rows = 0
+    selected_adgroup_ids = set(adgroup_ids)
+    selected_campaign_ids = set(campaign_ids)
+    candidate_activity_rows: List[Dict[str, Any]] = []
+
+    for item in activity_rows or []:
+        query_text = str(item.get("query_text") or "").strip()
+        query_key = _shopping_query_norm_text(query_text)
+        if not query_key:
+            continue
+        campaign_id = str(item.get("campaign_id") or "").strip()
+        adgroup_id = str(item.get("adgroup_id") or "").strip()
+        ad_id = str(item.get("ad_id") or "").strip()
+        if scope == "selected_adgroups" and selected_adgroup_ids and adgroup_id not in selected_adgroup_ids:
+            skipped_out_of_scope_rows += 1
+            continue
+        if scope == "selected_campaigns" and selected_campaign_ids and campaign_id not in selected_campaign_ids:
+            skipped_out_of_scope_rows += 1
+            continue
+        has_conversion = (
+            (ad_id and (ad_id, query_key) in converted_ad_query)
+            or (adgroup_id and (adgroup_id, query_key) in converted_adgroup_query)
+            or (campaign_id and (campaign_id, query_key) in converted_campaign_query)
+            or (not ad_id and not adgroup_id and not campaign_id and query_key in converted_query)
+        )
+        if has_conversion:
+            skipped_converted_rows += 1
+            continue
+        if _performance_number(item.get("clkCnt")) <= 0:
+            continue
+        candidate_activity_rows.append(item)
+
+    creative_start = time.monotonic()
+    creative_rows, creative_warnings = _collect_creatives_for_report_adgroups(
+        api_key,
+        secret_key,
+        cid,
+        candidate_activity_rows,
+    )
+    timings["creative_lookup_ms"] = int((time.monotonic() - creative_start) * 1000)
+    warnings.extend(creative_warnings or [])
+    shopping_creatives = [
+        row for row in creative_rows
+        if _performance_campaign_bucket(row.get("campaign_type") or row.get("campaign_id")) == "SHOPPING"
+    ]
+    creative_by_ad_id = {
+        str(row.get("ad_id") or "").strip(): row
+        for row in shopping_creatives
+        if str(row.get("ad_id") or "").strip()
+    }
+    group_meta_by_id: Dict[str, Dict[str, Any]] = {}
+    for row in shopping_creatives:
+        adgroup_id = str(row.get("adgroup_id") or "").strip()
+        if adgroup_id:
+            group_meta_by_id.setdefault(adgroup_id, row)
+
+    for item in candidate_activity_rows:
+        query_text = str(item.get("query_text") or "").strip()
+        query_key = _shopping_query_norm_text(query_text)
+        campaign_id = str(item.get("campaign_id") or "").strip()
+        adgroup_id = str(item.get("adgroup_id") or "").strip()
+        ad_id = str(item.get("ad_id") or "").strip()
+        raw_activity_rows += 1
+        creative = creative_by_ad_id.get(ad_id)
+        if creative:
+            bucket_key = ad_id
+            attribution = "ad"
+        else:
+            bucket_key = f"unknown::{ad_id or adgroup_id or campaign_id or 'shopping'}"
+            creative = _build_unknown_shopping_query_creative(adgroup_id, campaign_id, group_meta_by_id.get(adgroup_id))
+            title = ad_id or adgroup_id or campaign_id or "소재 미구분"
+            creative["productName"] = title
+            creative["summary"] = title
+            creative["ad_id"] = ad_id
+            attribution = "unattributed"
+        bucket = bucket_by_key.setdefault(bucket_key, {
+            **creative,
+            "title": _shopping_query_creative_title(creative),
+            "attribution": attribution,
+            "metrics": _shopping_query_activity_bucket(),
+            "queries": {},
+        })
+        query_bucket = bucket["queries"].setdefault(query_key, {
+            "query_text": query_text,
+            "metrics": _shopping_query_activity_bucket(),
+            "dates": set(),
+        })
+        _add_shopping_query_activity(bucket["metrics"], item)
+        _add_shopping_query_activity(query_bucket["metrics"], item)
+        _add_shopping_query_activity(total_metric, item)
+        if item.get("date"):
+            query_bucket["dates"].add(str(item.get("date")))
+        seen_query_keys.add(query_key)
+
+    rows: List[Dict[str, Any]] = []
+    for bucket in bucket_by_key.values():
+        query_items = []
+        for query_item in bucket.pop("queries", {}).values():
+            metrics = _finish_shopping_query_activity_metric(query_item["metrics"])
+            query_items.append({
+                "query_text": query_item["query_text"],
+                **metrics,
+                "dates": sorted(query_item.get("dates") or []),
+            })
+        query_items.sort(key=lambda row: (
+            -_performance_number(row.get("clkCnt")),
+            -_performance_number(row.get("impCnt")),
+            -_performance_number(row.get("salesAmt")),
+            str(row.get("query_text") or "").casefold(),
+        ))
+        metrics = _finish_shopping_query_activity_metric(bucket.get("metrics") or _shopping_query_activity_bucket())
+        bucket.update(metrics)
+        bucket["query_count"] = len(query_items)
+        bucket["top_query"] = query_items[0]["query_text"] if query_items else ""
+        bucket["query_rows"] = query_items
+        rows.append(bucket)
+    rows.sort(key=lambda row: (
+        -_performance_number(row.get("clkCnt")),
+        -_performance_number(row.get("impCnt")),
+        -_performance_number(row.get("salesAmt")),
+        str(row.get("campaign_name") or "").casefold(),
+        str(row.get("adgroup_name") or "").casefold(),
+        str(row.get("title") or "").casefold(),
+    ))
+    if skipped_converted_rows:
+        warnings.append(f"같은 기간 전환이 확인된 검색어 발생 행 {skipped_converted_rows}건은 제외했습니다.")
+    if skipped_out_of_scope_rows:
+        warnings.append(f"선택 범위 밖 검색어 발생 행 {skipped_out_of_scope_rows}건은 제외했습니다.")
+
+    total = _finish_shopping_query_activity_metric(total_metric)
+    result = {
+        "message": f"{date_label} 전환 없는 쇼핑검색어 조회 완료 · 소재 {len(rows)}개 / 검색어 {len(seen_query_keys)}개",
+        "rows": rows,
+        "summary": {
+            "creative_count": len(rows),
+            "query_count": len(seen_query_keys),
+            "report_row_count": raw_activity_rows,
+            "raw_report_row_count": len(activity_rows or []),
+            "converted_excluded_row_count": skipped_converted_rows,
+            **total,
+        },
+        "warnings": warnings[:30],
+        "errors": [],
+        "scope": scope,
+        "campaign_type": "SHOPPING",
+        "since": since,
+        "until": until,
+        "date_label": date_label,
+        "source": "stat_keyword_detail",
+        "source_label": "쇼핑검색어 발생 리포트",
+    }
+    with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
+        if len(PERFORMANCE_SHOPPING_QUERY_NON_CONVERSION_CACHE) >= 100:
+            PERFORMANCE_SHOPPING_QUERY_NON_CONVERSION_CACHE.pop(min(PERFORMANCE_SHOPPING_QUERY_NON_CONVERSION_CACHE, key=lambda key: PERFORMANCE_SHOPPING_QUERY_NON_CONVERSION_CACHE[key][0]), None)
+        PERFORMANCE_SHOPPING_QUERY_NON_CONVERSION_CACHE[cache_key] = (now, dict(result))
+    return _finish(result)
+
 def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     include_type = _boolish((payload or {}).get("include_type_breakdown"), True)
     include_campaign = _boolish((payload or {}).get("include_campaign_breakdown"), False)
@@ -4523,6 +9364,8 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
     include_purchase_conversion_keywords = _boolish((payload or {}).get("include_purchase_conversion_keywords"), False)
     metric_mode = str((payload or {}).get("report_metric_mode") or "").strip().lower()
     report_uses_purchase = metric_mode in {"purchase", "purchase_only", "구매완료", "구매완료 데이터"}
+    report_format = str((payload or {}).get("report_format") or "media_summary").strip().lower()
+    media_summary_format = report_format in {"media_summary", "sa_ssa", "summary_media", "매체별", "매체별 요약"}
 
     base_payload = dict(payload or {})
     base_payload["exclude_today"] = True
@@ -4530,6 +9373,17 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
     base_payload["skip_bid_snapshots"] = True
     base_payload["skip_ad_counts"] = True
     base_payload["include_daily_metrics"] = False
+    requested_enrichment_timeout = _performance_number(
+        base_payload.get("report_enrichment_timeout_seconds") or base_payload.get("timeout_seconds")
+    )
+    if requested_enrichment_timeout <= 0:
+        requested_enrichment_timeout = PERFORMANCE_TEXT_REPORT_ENRICHMENT_TIMEOUT_SECONDS
+    requested_enrichment_timeout = min(
+        PERFORMANCE_TEXT_REPORT_ENRICHMENT_TIMEOUT_SECONDS,
+        max(PERFORMANCE_SHOPPING_QUERY_REPORT_MIN_TIMEOUT_SECONDS, requested_enrichment_timeout),
+    )
+    base_payload.pop("fast_timeout_seconds", None)
+    base_payload["timeout_seconds"] = requested_enrichment_timeout
     scope = _normalize_performance_scope(base_payload.get("target_scope") or base_payload.get("scope"))
     base_payload["result_level"] = "adgroup" if scope == "selected_adgroups" else ("campaign" if include_campaign else "type")
     since, until, _ = _performance_date_range(base_payload.get("date_preset"), base_payload.get("since"), base_payload.get("until"), exclude_today=True)
@@ -4543,19 +9397,42 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
     }
     shopping_query_result = {
         "has_shopping": False,
+        "inflow_text": "", "inflow_type_text_by_id": {}, "inflow_campaign_text_by_id": {},
         "general_conversion_text": "", "general_conversion_type_text_by_id": {}, "general_conversion_campaign_text_by_id": {},
         "purchase_conversion_text": "", "purchase_conversion_type_text_by_id": {}, "purchase_conversion_campaign_text_by_id": {},
         "warnings": [], "errors": [],
     }
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    fast_enrichment_timeout = _performance_number(base_payload.get("timeout_seconds") or PERFORMANCE_TEXT_REPORT_ENRICHMENT_TIMEOUT_SECONDS)
+    if fast_enrichment_timeout <= 0:
+        fast_enrichment_timeout = PERFORMANCE_SHOPPING_QUERY_FAST_TIMEOUT_SECONDS
+    enrichment_deadline = time.monotonic() + max(PERFORMANCE_SHOPPING_QUERY_REPORT_MIN_TIMEOUT_SECONDS, fast_enrichment_timeout)
+    executor = ThreadPoolExecutor(max_workers=3)
+    powerlink_future = None
+    shopping_future = None
+    try:
         base_future = executor.submit(_get_performance_stats, api_key, secret_key, cid, base_payload)
-        powerlink_future = executor.submit(_collect_performance_powerlink_keywords, api_key, secret_key, cid, base_payload, since, until) if type_filter != "SHOPPING" else None
-        shopping_future = executor.submit(_collect_performance_shopping_queries, api_key, secret_key, cid, base_payload, since, until) if type_filter != "WEB_SITE" and (include_general_conversion_keywords or include_purchase_conversion_keywords) else None
+        powerlink_future = executor.submit(_collect_performance_powerlink_keywords, api_key, secret_key, cid, base_payload, since, until) if type_filter != "SHOPPING" and not media_summary_format else None
+        shopping_future = executor.submit(_collect_performance_shopping_queries, api_key, secret_key, cid, base_payload, since, until) if type_filter != "WEB_SITE" and not media_summary_format else None
         base_result = base_future.result()
         if powerlink_future:
-            keyword_result = powerlink_future.result()
+            try:
+                keyword_result = powerlink_future.result(timeout=max(0.01, enrichment_deadline - time.monotonic()))
+            except FuturesTimeoutError:
+                keyword_result["warnings"].append("파워링크 주요 키워드 집계가 빠른 생성 시간 안에 완료되지 않아 이번 보고서에서는 준비된 값만 반영했습니다. 집계는 백그라운드에서 계속 진행됩니다.")
+            except Exception as exc:
+                keyword_result["errors"].append(f"파워링크 주요 키워드 집계 실패: {exc}")
         if shopping_future:
-            shopping_query_result = shopping_future.result()
+            try:
+                shopping_query_result = shopping_future.result(timeout=max(0.01, enrichment_deadline - time.monotonic()))
+            except FuturesTimeoutError:
+                shopping_query_result["warnings"].append("쇼핑검색어 집계가 빠른 생성 시간 안에 완료되지 않아 이번 보고서에서는 준비된 값만 반영했습니다. 집계는 백그라운드에서 계속 진행됩니다.")
+            except Exception as exc:
+                shopping_query_result["errors"].append(f"쇼핑검색어 집계 실패: {exc}")
+    finally:
+        for future in (powerlink_future, shopping_future):
+            if future is not None and not future.done():
+                future.cancel()
+        executor.shutdown(wait=False, cancel_futures=True)
     type_rows = (
         _aggregate_performance_report_rows(base_result.get("rows") or [], "type")
         if base_result.get("result_level") != "type"
@@ -4568,6 +9445,30 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
     if base_result.get("until") and base_result.get("until") != base_result.get("since"):
         date_range = f"{base_result.get('since')} ~ {base_result.get('until')}"
     account_name = str((payload or {}).get("account_name") or (payload or {}).get("accountName") or cid or "").strip()
+    if media_summary_format:
+        media_text = _build_performance_media_summary_report(
+            type_rows,
+            include_cart_count=_boolish((payload or {}).get("include_cart_count"), True),
+            include_cart_amount=_boolish((payload or {}).get("include_cart_amount"), True),
+        )
+        filename = (
+            f"SA_SSA_성과보고서_{_safe_performance_report_filename_part(account_name or cid)}_"
+            f"{str(base_result.get('since') or '').replace('-', '')}_{str(base_result.get('until') or '').replace('-', '')}.txt"
+        )
+        return {
+            "message": "SA/SSA 매체별 요약 보고서 생성 완료",
+            "report_text": media_text or "표시할 SA/SSA 성과 데이터가 없습니다.",
+            "filename": filename,
+            "warnings": list(base_result.get("warnings") or [])[:30],
+            "errors": list(base_result.get("errors") or [])[:30],
+            "scope": base_result.get("scope"),
+            "campaign_type": base_result.get("campaign_type"),
+            "since": base_result.get("since"),
+            "until": base_result.get("until"),
+            "date_label": base_result.get("date_label"),
+            "metric_mode": "media_summary",
+            "report_format": "media_summary",
+        }
     base_has_shopping = any(_performance_campaign_bucket((row or {}).get("campaign_type") or (row or {}).get("id")) == "SHOPPING" for row in (base_result.get("rows") or []))
     main_keyword_text = keyword_result.get("total_text") if keyword_result.get("has_powerlink") else ""
     main_general_conversion_keyword_text = (
@@ -4580,6 +9481,7 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
         if keyword_result.get("has_powerlink") and include_purchase_conversion_keywords
         else ""
     )
+    main_shopping_inflow_query_text = shopping_query_result.get("inflow_text") if base_has_shopping else ""
     main_shopping_general_conversion_query_text = shopping_query_result.get("general_conversion_text") if base_has_shopping and include_general_conversion_keywords else ""
     main_shopping_purchase_conversion_query_text = shopping_query_result.get("purchase_conversion_text") if base_has_shopping and include_purchase_conversion_keywords else ""
 
@@ -4593,11 +9495,12 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
         *_performance_report_metric_lines(
             base_result.get("summary") or {},
             report_uses_purchase=report_uses_purchase,
-            keyword_text=str(main_keyword_text or ""),
-            general_conversion_keyword_text=str(main_general_conversion_keyword_text or ""),
-            purchase_conversion_keyword_text=str(main_purchase_conversion_keyword_text or ""),
-            shopping_general_conversion_query_text=str(main_shopping_general_conversion_query_text or ""),
-            shopping_purchase_conversion_query_text=str(main_shopping_purchase_conversion_query_text or ""),
+            keyword_text=str(main_keyword_text or ("없음" if type_filter != "SHOPPING" else "")),
+            general_conversion_keyword_text=str(main_general_conversion_keyword_text or ("없음" if include_general_conversion_keywords and type_filter != "SHOPPING" else "")),
+            purchase_conversion_keyword_text=str(main_purchase_conversion_keyword_text or ("없음" if include_purchase_conversion_keywords and type_filter != "SHOPPING" else "")),
+            shopping_inflow_query_text=str(main_shopping_inflow_query_text or ("없음" if base_has_shopping else "")),
+            shopping_general_conversion_query_text=str(main_shopping_general_conversion_query_text or ("없음" if base_has_shopping and include_general_conversion_keywords else "")),
+            shopping_purchase_conversion_query_text=str(main_shopping_purchase_conversion_query_text or ("없음" if base_has_shopping and include_purchase_conversion_keywords else "")),
         ),
     ]
     report_parts.append("\n".join(main_lines))
@@ -4610,6 +9513,7 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
             keyword_text_by_id=keyword_result.get("type_text_by_id") or {},
             general_conversion_keyword_text_by_id=keyword_result.get("general_conversion_type_text_by_id") or {},
             purchase_conversion_keyword_text_by_id=keyword_result.get("purchase_conversion_type_text_by_id") or {},
+            shopping_inflow_query_text_by_id=shopping_query_result.get("inflow_type_text_by_id") or {},
             shopping_general_conversion_query_text_by_id=shopping_query_result.get("general_conversion_type_text_by_id") or {},
             shopping_purchase_conversion_query_text_by_id=shopping_query_result.get("purchase_conversion_type_text_by_id") or {},
         )
@@ -4633,6 +9537,7 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
             keyword_text_by_id=keyword_result.get("campaign_text_by_id") or {},
             general_conversion_keyword_text_by_id=keyword_result.get("general_conversion_campaign_text_by_id") or {},
             purchase_conversion_keyword_text_by_id=keyword_result.get("purchase_conversion_campaign_text_by_id") or {},
+            shopping_inflow_query_text_by_id=shopping_query_result.get("inflow_campaign_text_by_id") or {},
             shopping_general_conversion_query_text_by_id=shopping_query_result.get("general_conversion_campaign_text_by_id") or {},
             shopping_purchase_conversion_query_text_by_id=shopping_query_result.get("purchase_conversion_campaign_text_by_id") or {},
         )
@@ -6832,7 +11737,10 @@ def _lookup_ad_bid_fields(ad_item: Dict[str, Any] | None, adgroup_bid: Any = Non
 
 def _summarize_lookup_extension(ext_item: Dict[str, Any] | None) -> str:
     ext_item = ext_item or {}
-    ad_ext = ext_item.get("adExtension") if isinstance(ext_item.get("adExtension"), dict) else {}
+    ad_ext = ext_item.get("adExtension") if isinstance(ext_item.get("adExtension"), dict) else _parse_json_obj_if_needed(ext_item.get("adExtension"))
+    promo_basic, promo_additional = _lookup_extension_promo_texts(ext_item)
+    if promo_basic or promo_additional:
+        return " / ".join([value for value in [promo_basic, promo_additional] if value])
     candidates = [
         str(ad_ext.get("headline") or "").strip(),
         str(ad_ext.get("description") or "").strip(),
@@ -6856,6 +11764,36 @@ def _summarize_lookup_extension(ext_item: Dict[str, Any] | None) -> str:
         if titles:
             return " / ".join(titles)
     return json.dumps(ext_item, ensure_ascii=False)[:120]
+
+def _lookup_extension_promo_texts(ext_item: Dict[str, Any] | None) -> Tuple[str, str]:
+    ext_item = ext_item or {}
+    ad_ext = ext_item.get("adExtension") if isinstance(ext_item.get("adExtension"), dict) else _parse_json_obj_if_needed(ext_item.get("adExtension"))
+    basic_text = str(_first_non_empty(
+        ad_ext.get("basicText"),
+        ad_ext.get("basic_text"),
+        ad_ext.get("text1"),
+        ad_ext.get("promotionText1"),
+        ad_ext.get("promoText1"),
+        ext_item.get("basicText"),
+        ext_item.get("basic_text"),
+        ext_item.get("text1"),
+        ext_item.get("promotionText1"),
+        ext_item.get("promoText1"),
+    ) or "").strip()
+    additional_text = str(_first_non_empty(
+        ad_ext.get("additionalText"),
+        ad_ext.get("additional_text"),
+        ad_ext.get("text2"),
+        ad_ext.get("promotionText2"),
+        ad_ext.get("promoText2"),
+        ext_item.get("additionalText"),
+        ext_item.get("additional_text"),
+        ext_item.get("text2"),
+        ext_item.get("promotionText2"),
+        ext_item.get("promoText2"),
+    ) or "").strip()
+    return basic_text, additional_text
+
 def _collect_lookup_ads_for_contexts(api_key: str, secret_key: str, cid: str, contexts: List[Dict[str, Any]], include_issue_detail: bool = False):
     rows: List[Dict[str, Any]] = []
     warnings: List[str] = []
@@ -7035,6 +11973,7 @@ def _collect_lookup_extensions_for_contexts(api_key: str, secret_key: str, cid: 
                 ext = ext if isinstance(ext, dict) else {}
                 link_fields = _flatten_image_sublink_export_fields(ext)
                 image_id_value = link_fields.get("imageId") or _extract_extension_image_ids(ext)
+                promo_basic_text, promo_additional_text = _lookup_extension_promo_texts(ext)
                 rows.append({
                     "campaignId": str(ctx.get("campaign_id") or ""),
                     "campaignName": str(ctx.get("campaign_name") or ""),
@@ -7049,6 +11988,11 @@ def _collect_lookup_extensions_for_contexts(api_key: str, secret_key: str, cid: 
                     "type": str(ext.get("type") or ext.get("adExtensionType") or ""),
                     "status": "ON" if _extract_enabled_from_entity(ext) is not False else "OFF",
                     "summary": _summarize_lookup_extension(ext),
+                    "basicText": promo_basic_text,
+                    "additionalText": promo_additional_text,
+                    "promotionText1": promo_basic_text,
+                    "promotionText2": promo_additional_text,
+                    "extensionContent": " / ".join([value for value in [promo_basic_text, promo_additional_text] if value]),
                     **link_fields,
                 })
     rows.sort(key=lambda x: (x.get("campaignName") or "", x.get("adgroupName") or "", x.get("ownerScope") or "", x.get("type") or "", x.get("summary") or ""))
@@ -8273,6 +13217,31 @@ PROFILE_CRITERION_CATEGORY_TYPES: Dict[str, List[str]] = {
     "segment": ["AD"],
 }
 
+AGE_CRITERION_OPTIONS: List[Dict[str, str]] = [
+    {"code": "AG0013", "label": "14세 미만"},
+    {"code": "AG1418", "label": "14세 ~ 18세"},
+    {"code": "AG1924", "label": "19세 ~ 24세"},
+    {"code": "AG2529", "label": "25세 ~ 29세"},
+    {"code": "AG3034", "label": "30세 ~ 34세"},
+    {"code": "AG3539", "label": "35세 ~ 39세"},
+    {"code": "AG4044", "label": "40세 ~ 44세"},
+    {"code": "AG4549", "label": "45세 ~ 49세"},
+    {"code": "AG5054", "label": "50세 ~ 54세"},
+    {"code": "AG5559", "label": "55세 ~ 59세"},
+    {"code": "AG6099", "label": "60세 이상"},
+    {"code": "AGXXXX", "label": "연령 알 수 없음"},
+]
+AGE_CRITERION_LABELS: Dict[str, str] = {item["code"]: item["label"] for item in AGE_CRITERION_OPTIONS}
+AGE_CRITERION_CODE_ALIASES: Dict[str, List[str]] = {item["code"]: [item["code"]] for item in AGE_CRITERION_OPTIONS}
+AGE_CRITERION_CODE_ALIASES["AG6099"].append("AG60XX")
+AGE_CRITERION_CANONICAL_BY_ALIAS: Dict[str, str] = {
+    alias: canonical
+    for canonical, aliases in AGE_CRITERION_CODE_ALIASES.items()
+    for alias in aliases
+}
+AGE_CRITERION_LABELS["AG60XX"] = "60세 이상"
+AGE_NON_EXPOSABLE_CANONICAL_CODES = {"AG0013"}
+
 def _normalize_profile_criterion_types(types: Any = None) -> List[str]:
     """Return valid profile Criterion type codes in the supported order."""
     all_types = [tp for tp, _ in PROFILE_CRITERION_TYPE_CANDIDATES]
@@ -8341,6 +13310,86 @@ def _fetch_criterion_entries(api_key: str, secret_key: str, cid: str, owner_id: 
     except Exception:
         pass
     return fallback, []
+
+
+def _fetch_criterion_dictionary_entries(api_key: str, secret_key: str, cid: str, criterion_type: str):
+    criterion_type = str(criterion_type or "").strip().upper()
+    if not criterion_type:
+        return _make_fake_response(400, "criterion type이 없습니다."), []
+    res = _do_req("GET", api_key, secret_key, cid, f"/ncc/criterion-dictionary/{criterion_type}")
+    if res.status_code != 200:
+        return res, []
+    try:
+        data = res.json() or []
+    except Exception:
+        data = []
+    if isinstance(data, dict):
+        for list_key in ("data", "items", "rows", "contents"):
+            if isinstance(data.get(list_key), list):
+                data = data.get(list_key)
+                break
+        else:
+            data = [data]
+    return res, [item for item in data if isinstance(item, dict)]
+
+
+def _age_label_key(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    text = text.replace("만", "")
+    return re.sub(r"[\s~\-–—_()/]+", "", text)
+
+
+def _canonical_age_code_for_dictionary_row(code: str, label: str) -> Optional[str]:
+    code = str(code or "").strip().upper()
+    label_key = _age_label_key(label)
+    if code in AGE_CRITERION_CANONICAL_BY_ALIAS:
+        return AGE_CRITERION_CANONICAL_BY_ALIAS[code]
+    for item in AGE_CRITERION_OPTIONS:
+        if label_key and label_key == _age_label_key(item.get("label")):
+            return item["code"]
+    if "60" in label_key and ("이상" in label_key or "세이상" in label_key):
+        return "AG6099"
+    if "알" in label_key and ("없" in label_key or "수없" in label_key):
+        return "AGXXXX"
+    return None
+
+
+def _resolve_age_criterion_options(api_key: str, secret_key: str, cid: str) -> Tuple[List[Dict[str, str]], str]:
+    res, rows = _fetch_criterion_dictionary_entries(api_key, secret_key, cid, "AG")
+    if res.status_code != 200 or not rows:
+        return [dict(item, canonical_code=item["code"]) for item in AGE_CRITERION_OPTIONS], (
+            f"연령대 사전 조회 실패로 기본 코드를 사용했습니다: {_response_detail_text(res)}"
+        )
+
+    actual_by_canonical: Dict[str, str] = {}
+    for row in rows:
+        code = str(_row_first_present(row, ["dictionaryCode", "code", "criterionCode", "targetCode"], "") or "").strip().upper()
+        label = str(_row_first_present(row, ["codeName", "name", "label", "description", "text"], "") or "").strip()
+        if not code.startswith("AG"):
+            continue
+        canonical = _canonical_age_code_for_dictionary_row(code, label)
+        if canonical and canonical not in actual_by_canonical:
+            actual_by_canonical[canonical] = code
+
+    resolved: List[Dict[str, str]] = []
+    missing: List[str] = []
+    for item in AGE_CRITERION_OPTIONS:
+        canonical = item["code"]
+        actual_code = actual_by_canonical.get(canonical)
+        if not actual_code:
+            for alias in AGE_CRITERION_CODE_ALIASES.get(canonical, [canonical]):
+                if alias in actual_by_canonical.values():
+                    actual_code = alias
+                    break
+        if actual_code:
+            resolved.append({"code": actual_code, "label": item["label"], "canonical_code": canonical})
+        else:
+            resolved.append({"code": canonical, "label": item["label"], "canonical_code": canonical})
+            missing.append(item["label"])
+    warning = ""
+    if missing:
+        warning = "연령대 사전에서 일부 코드를 찾지 못해 기본 코드를 사용했습니다: " + ", ".join(missing[:4])
+    return resolved, warning
 
 def _extract_criterion_codes_from_payload(payload: Any, prefixes: List[str]) -> Dict[str, List[str]]:
     """Extract criterion dictionary codes from adgroup detail/attr JSON fallbacks.
@@ -8459,21 +13508,45 @@ def _put_criterion_state_map(api_key: str, secret_key: str, cid: str, owner_id: 
     states = [v for _, v in sorted((final_map or {}).items()) if isinstance(v, dict) and str(v.get("dictionaryCode") or "").strip()]
     if not states:
         return False, "criterion_empty", "적용할 criterion code가 없습니다."
-    body = []
-    for state in states:
-        item = {
-            "customerId": int(cid),
-            "ownerId": owner_id,
-            "dictionaryCode": str(state.get("dictionaryCode") or "").strip().upper(),
-            "type": criterion_type,
-        }
-        if "negative" in state:
-            item["negative"] = int(state.get("negative") or 0)
-        if "onOff" in state:
-            item["onOff"] = int(state.get("onOff") or 1)
-        if state.get("additionalInfo") not in (None, ""):
-            item["additionalInfo"] = state.get("additionalInfo")
-        body.append(item)
+
+    def _state_int(value: Any, default: int = 0) -> int:
+        if isinstance(value, bool):
+            return 1 if value else 0
+        if value in (None, ""):
+            return default
+        try:
+            return int(value)
+        except Exception:
+            return 1 if _boolish(value, bool(default)) else 0
+
+    def _build_body(use_official_keys: bool = False) -> List[Dict[str, Any]]:
+        body: List[Dict[str, Any]] = []
+        for state in states:
+            item = {
+                "customerId": int(cid),
+                "ownerId": owner_id,
+                "dictionaryCode": str(state.get("dictionaryCode") or "").strip().upper(),
+                "type": criterion_type,
+            }
+            if use_official_keys:
+                item["value"] = state.get("value") if state.get("value") not in (None, "") else None
+            if "negative" in state:
+                negative_value = _state_int(state.get("negative"), 0)
+                item["negative"] = bool(negative_value) if use_official_keys else negative_value
+            enabled_value = _row_first_present(state, ["onOff", "enable", "enabled"], None)
+            if enabled_value is not None:
+                enabled_int = _state_int(enabled_value, 1)
+                if use_official_keys:
+                    item["enable"] = bool(enabled_int)
+                else:
+                    item["onOff"] = enabled_int
+            if state.get("additionalInfo") not in (None, ""):
+                if use_official_keys:
+                    item["value"] = state.get("additionalInfo")
+                else:
+                    item["additionalInfo"] = state.get("additionalInfo")
+            body.append(item)
+        return body
 
     put_variants = [
         (f"/ncc/criterion/{owner_id}/{criterion_type}", None),
@@ -8483,17 +13556,28 @@ def _put_criterion_state_map(api_key: str, secret_key: str, cid: str, owner_id: 
         ("/ncc/criteria", {"ownerId": owner_id, "type": criterion_type}),
     ]
     attempts: List[str] = []
+    response_snippets: List[str] = []
     put_ok = False
     last_text = ""
-    for uri, params in put_variants:
-        put_res = _do_req("PUT", api_key, secret_key, cid, uri, params=params, json_body=body)
-        attempts.append(f"PUT {uri}{'?' + urlencode(params) if params else ''} -> {put_res.status_code}")
-        last_text = str(put_res.text or "")[:220]
-        if put_res.status_code in {200, 201, 204}:
-            put_ok = True
+    for body_label, body in [("official", _build_body(True)), ("legacy", _build_body(False))]:
+        for uri, params in put_variants:
+            put_res = _do_req("PUT", api_key, secret_key, cid, uri, params=params, json_body=body)
+            attempts.append(f"PUT {uri}{'?' + urlencode(params) if params else ''} [{body_label}] -> {put_res.status_code}")
+            last_text = str(put_res.text or "").strip()[:260]
+            if last_text:
+                response_snippets.append(f"{put_res.status_code}: {last_text}")
+            if put_res.status_code in {200, 201, 204}:
+                put_ok = True
+                break
+        if put_ok:
             break
     if not put_ok:
-        return False, "criterion_put", (" / ".join(attempts[:5]) + (f" | {last_text}" if last_text else ""))
+        shown_attempts = attempts[:3] + (["..."] if len(attempts) > 6 else []) + attempts[-3:]
+        snippets = _unique_keep_order(response_snippets[:2] + response_snippets[-2:])
+        detail = " / ".join(shown_attempts)
+        if snippets:
+            detail += " | 응답 " + " / ".join(snippets)
+        return False, "criterion_put", detail
 
     weight_map: Dict[int, List[str]] = {}
     for state in states:
@@ -9346,8 +14430,9 @@ def _extension_matches(ext_item: Dict[str, Any], ext_type: str, data: Dict[str, 
     if target_type == "DESCRIPTION":
         if str((ext or {}).get("description") or "").strip() != str(data.get("description") or "").strip():
             return False
-        requested_heading = str(data.get("heading") or "").strip()
-        return not requested_heading or str((ext or {}).get("heading") or "").strip() == requested_heading
+        requested_heading = _normalize_description_heading(data.get("heading"))
+        current_heading = _normalize_description_heading((ext or {}).get("heading"))
+        return current_heading == requested_heading
     if target_type == "PROMOTION":
         ext = ext or {}
         return (
@@ -9383,6 +14468,14 @@ def _find_existing_extension(api_key: str, secret_key: str, cid: str, owner_id: 
         if _extension_matches(item, ext_type, data):
             return item
     return None
+
+def _normalize_description_heading(value: Any) -> str:
+    heading = str(value or "").strip()
+    compact = re.sub(r"\s+", "", heading).lower()
+    if compact in {"", "선택안함", "미선택", "없음", "none", "null", "no", "noheading", "notselected"}:
+        return ""
+    return heading
+
 def _build_extension_payload(owner_id: str, ext_type: str, data: Dict[str, Any], customer_id: int, position: int | None = None) -> Dict[str, Any]:
     ext_type = _normalize_extension_type(ext_type)
     payload: Dict[str, Any] = {"ownerId": owner_id, "customerId": customer_id, "type": ext_type}
@@ -9397,7 +14490,7 @@ def _build_extension_payload(owner_id: str, ext_type: str, data: Dict[str, Any],
         payload["adExtension"] = {"description": str(data.get("description") or "").strip()}
     elif ext_type == "DESCRIPTION":
         ad_ext = {"description": str(data.get("description") or "").strip()}
-        heading = str(data.get("heading") or data.get("promoType") or data.get("promo_type") or "").strip()
+        heading = _normalize_description_heading(_first_non_empty(data.get("heading"), data.get("promoType"), data.get("promo_type")))
         if heading:
             ad_ext["heading"] = heading
         payload["adExtension"] = ad_ext
@@ -10966,6 +16059,13 @@ def index():
         "customer_id": os.getenv("NAVER_CUSTOMER_ID", ""),
     }
     return render_template("index.html", accounts=accounts, favicon_version=favicon_version, auth_defaults=auth_defaults)
+
+@app.route("/creative_performance")
+def creative_performance_page():
+    favicon_path = os.path.join(app.static_folder or os.path.join(BASE_DIR, "static"), "favicon", "favicon.ico")
+    favicon_version = int(os.path.getmtime(favicon_path)) if os.path.exists(favicon_path) else 0
+    return render_template("creative_performance.html", favicon_version=favicon_version)
+
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({
@@ -11000,6 +16100,23 @@ _PURCHASE_REPORT_SERVICE = PurchaseReportService(
     xlsx_mime=XLSX_MIME,
 )
 app.register_blueprint(create_purchase_report_blueprint(_PURCHASE_REPORT_SERVICE))
+
+_AI_ANALYSIS_SERVICE = AIAnalysisService(
+    performance_stats_func=_get_performance_stats,
+    age_stats_func=_get_age_performance_stats,
+    time_stats_func=_get_time_performance_stats,
+    keyword_lookup_func=_ACCOUNT_LOOKUP_SERVICE.query_keywords,
+    ad_lookup_func=_ACCOUNT_LOOKUP_SERVICE.query_ads,
+    fetch_stats_rows_for_targets_func=_fetch_stats_rows_for_targets,
+    stat_row_id_func=_stat_row_id,
+    build_empty_metric_func=_build_empty_perf_metric,
+    add_stat_to_metric_func=_add_stat_to_metric,
+    finalize_metric_func=_finalize_perf_metric,
+    performance_number_func=_performance_number,
+    stat_fields=PERFORMANCE_STAT_FIELDS,
+    fast_workers=FAST_IO_WORKERS,
+)
+app.register_blueprint(create_ai_analysis_blueprint(_AI_ANALYSIS_SERVICE))
 
 
 @app.route("/find_powerlink_duplicate_keywords", methods=["POST"])
@@ -11107,6 +16224,179 @@ def get_performance_stats():
         return jsonify({"ok": True, **result})
     except Exception as e:
         return jsonify({"error": "성과 조회 실패", "details": str(e)}), 400
+
+@app.route("/get_age_performance_stats", methods=["POST"])
+def get_age_performance_stats():
+    d = request.json or {}
+    api_key = str(d.get("api_key") or "").strip()
+    secret_key = str(d.get("secret_key") or "").strip()
+    cid = str(d.get("customer_id") or "").strip()
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API 정보 및 광고주를 선택해주세요."}), 400
+    try:
+        result = _get_age_performance_stats(api_key, secret_key, cid, d)
+        return jsonify({"ok": True, **result})
+    except Exception as e:
+        return jsonify({"error": "연령별 데이터 조회 실패", "details": str(e)}), 400
+
+@app.route("/get_time_performance_stats", methods=["POST"])
+def get_time_performance_stats():
+    d = request.json or {}
+    api_key = str(d.get("api_key") or "").strip()
+    secret_key = str(d.get("secret_key") or "").strip()
+    cid = str(d.get("customer_id") or "").strip()
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API 정보 및 광고주를 선택해주세요."}), 400
+    try:
+        result = _get_time_performance_stats(api_key, secret_key, cid, d)
+        return jsonify({"ok": True, **result})
+    except Exception as e:
+        return jsonify({"error": "시간대별 데이터 조회 실패", "details": str(e)}), 400
+
+@app.route("/get_dimension_performance_stats", methods=["POST"])
+def get_dimension_performance_stats():
+    d = request.json or {}
+    api_key = str(d.get("api_key") or "").strip()
+    secret_key = str(d.get("secret_key") or "").strip()
+    cid = str(d.get("customer_id") or "").strip()
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API 정보 및 광고주를 선택해주세요."}), 400
+    try:
+        result = _get_dimension_performance_stats(api_key, secret_key, cid, d)
+        return jsonify({"ok": True, **result})
+    except Exception as e:
+        return jsonify({"error": "영역/매체/지역 데이터 조회 실패", "details": str(e)}), 400
+
+@app.route("/get_creative_performance_stats", methods=["POST"])
+def get_creative_performance_stats():
+    d = request.json or {}
+    api_key = str(d.get("api_key") or "").strip()
+    secret_key = str(d.get("secret_key") or "").strip()
+    cid = str(d.get("customer_id") or "").strip()
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API 정보 및 광고주를 선택해주세요."}), 400
+    try:
+        result = _get_creative_performance_stats(api_key, secret_key, cid, d)
+        return jsonify({"ok": True, **result})
+    except Exception as e:
+        return jsonify({"error": "소재별 성과 조회 실패", "details": str(e)}), 400
+
+@app.route("/get_shopping_query_conversion_insights", methods=["POST"])
+def get_shopping_query_conversion_insights():
+    d = request.json or {}
+    api_key = str(d.get("api_key") or "").strip()
+    secret_key = str(d.get("secret_key") or "").strip()
+    cid = str(d.get("customer_id") or "").strip()
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API 정보 및 광고주를 선택해주세요."}), 400
+    route_start = time.monotonic()
+    try:
+        print(
+            "shopping_query_start",
+            json.dumps({
+                "customer_id": cid,
+                "scope": d.get("target_scope") or d.get("scope"),
+                "date_preset": d.get("date_preset"),
+                "since": d.get("since"),
+                "until": d.get("until"),
+            }, ensure_ascii=False, separators=(",", ":")),
+            flush=True,
+        )
+    except Exception:
+        pass
+    try:
+        result = _get_shopping_query_conversion_insights(api_key, secret_key, cid, d)
+        try:
+            print(
+                "shopping_query_timing",
+                json.dumps({
+                    "customer_id": cid,
+                    "scope": result.get("scope"),
+                    "since": result.get("since"),
+                    "until": result.get("until"),
+                    "rows": len(result.get("rows") or []),
+                    "warnings": len(result.get("warnings") or []),
+                    "pending_report_count": result.get("pending_report_count"),
+                    "background_refresh": result.get("background_refresh"),
+                    "timing_ms": result.get("debug_timing_ms") or {},
+                }, ensure_ascii=False, separators=(",", ":")),
+                flush=True,
+            )
+        except Exception:
+            pass
+        return jsonify({"ok": True, **result})
+    except Exception as e:
+        try:
+            print(
+                "shopping_query_error",
+                json.dumps({
+                    "customer_id": cid,
+                    "elapsed_ms": int((time.monotonic() - route_start) * 1000),
+                    "error": str(e)[:300],
+                }, ensure_ascii=False, separators=(",", ":")),
+                flush=True,
+            )
+        except Exception:
+            pass
+        return jsonify({"error": "쇼핑검색 검색어 전환 조회 실패", "details": str(e)}), 400
+
+@app.route("/get_shopping_query_non_conversion_insights", methods=["POST"])
+def get_shopping_query_non_conversion_insights():
+    d = request.json or {}
+    api_key = str(d.get("api_key") or "").strip()
+    secret_key = str(d.get("secret_key") or "").strip()
+    cid = str(d.get("customer_id") or "").strip()
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API 정보 및 광고주를 선택해주세요."}), 400
+    route_start = time.monotonic()
+    try:
+        print(
+            "shopping_query_non_conversion_start",
+            json.dumps({
+                "customer_id": cid,
+                "scope": d.get("target_scope") or d.get("scope"),
+                "date_preset": d.get("date_preset"),
+                "since": d.get("since"),
+                "until": d.get("until"),
+            }, ensure_ascii=False, separators=(",", ":")),
+            flush=True,
+        )
+    except Exception:
+        pass
+    try:
+        result = _get_shopping_query_non_conversion_insights(api_key, secret_key, cid, d)
+        try:
+            print(
+                "shopping_query_non_conversion_timing",
+                json.dumps({
+                    "customer_id": cid,
+                    "scope": result.get("scope"),
+                    "since": result.get("since"),
+                    "until": result.get("until"),
+                    "rows": len(result.get("rows") or []),
+                    "warnings": len(result.get("warnings") or []),
+                    "timing_ms": result.get("debug_timing_ms") or {},
+                }, ensure_ascii=False, separators=(",", ":")),
+                flush=True,
+            )
+        except Exception:
+            pass
+        return jsonify({"ok": True, **result})
+    except Exception as e:
+        try:
+            print(
+                "shopping_query_non_conversion_error",
+                json.dumps({
+                    "customer_id": cid,
+                    "elapsed_ms": int((time.monotonic() - route_start) * 1000),
+                    "error": str(e)[:300],
+                }, ensure_ascii=False, separators=(",", ":")),
+                flush=True,
+            )
+        except Exception:
+            pass
+        return jsonify({"error": "전환 없는 쇼핑검색어 조회 실패", "details": str(e)}), 400
+
 @app.route("/get_performance_text_report", methods=["POST"])
 def get_performance_text_report():
     d = request.json or {}
@@ -11116,7 +16406,37 @@ def get_performance_text_report():
     if not api_key or not secret_key or not cid:
         return jsonify({"error": "API 정보 및 광고주를 선택해주세요."}), 400
     try:
+        try:
+            print(
+                "text_report_start",
+                json.dumps({
+                    "customer_id": cid,
+                    "scope": d.get("target_scope") or d.get("scope"),
+                    "campaign_type": d.get("campaign_type") or d.get("type_filter"),
+                    "report_format": d.get("report_format"),
+                    "include_general_conversion_keywords": d.get("include_general_conversion_keywords"),
+                    "include_purchase_conversion_keywords": d.get("include_purchase_conversion_keywords"),
+                }, ensure_ascii=False, separators=(",", ":")),
+                flush=True,
+            )
+        except Exception:
+            pass
         result = _build_performance_text_report(api_key, secret_key, cid, d)
+        try:
+            report_text = str(result.get("report_text") or "")
+            print(
+                "text_report_done",
+                json.dumps({
+                    "customer_id": cid,
+                    "report_format": result.get("report_format"),
+                    "has_inflow_keyword": "주요 유입 키워드" in report_text or "주요 쇼핑검색 유입 검색어" in report_text,
+                    "has_conversion_keyword": "전환 키워드" in report_text or "전환 검색어" in report_text,
+                    "warnings": len(result.get("warnings") or []),
+                }, ensure_ascii=False, separators=(",", ":")),
+                flush=True,
+            )
+        except Exception:
+            pass
         return jsonify({"ok": True, **result})
     except Exception as e:
         return jsonify({"error": "텍스트 보고서 생성 실패", "details": str(e)}), 400
@@ -12184,7 +17504,7 @@ def create_extension_simple():
         if not description or len(description) > 14:
             return jsonify({"error": "홍보문구는 1~14자로 입력해야 합니다."}), 400
         data["description"] = description
-        heading = str(d.get("promo_type") or d.get("heading") or "").strip()
+        heading = _normalize_description_heading(_first_non_empty(d.get("promo_type"), d.get("heading")))
         if heading:
             data["heading"] = heading
     elif ext_type == "PROMOTION":
@@ -12502,19 +17822,22 @@ def _bulk_extension_text(row: Dict[str, Any], ext_type: str) -> str:
 def _bulk_extension_promotion_texts(row: Dict[str, Any]) -> Tuple[str, str]:
     basic_text = str(_row_pick_value(row, [
         "basicText", "basic_text", "text1", "text_1", "promotionText1", "promoText1",
-        "문구1", "문구 1", "기본문구", "추가홍보문구", "쇼핑추가홍보문구", "홍보문구",
+        "문구1", "문구 1", "기본문구", "추가홍보문구", "추가홍보문구1", "추가홍보문구 1",
+        "쇼핑추가홍보문구", "쇼핑추가홍보문구1", "쇼핑추가홍보문구 1",
+        "홍보문구", "홍보문구1", "홍보문구 1",
     ]) or "").strip()
     additional_text = str(_row_pick_value(row, [
         "additionalText", "additional_text", "text2", "text_2", "promotionText2", "promoText2",
-        "문구2", "문구 2", "추가문구", "부가문구",
+        "문구2", "문구 2", "추가문구", "부가문구", "추가홍보문구2", "추가홍보문구 2",
+        "쇼핑추가홍보문구2", "쇼핑추가홍보문구 2", "홍보문구2", "홍보문구 2",
     ]) or "").strip()
     return basic_text, additional_text
 
 
 def _bulk_extension_heading(row: Dict[str, Any]) -> str:
-    return str(_row_pick_value(row, [
+    return _normalize_description_heading(_row_pick_value(row, [
         "heading", "promoType", "promo_type", "홍보종류", "홍보 종류", "종류", "말머리",
-    ]) or "").strip()
+    ]))
 
 
 def _bulk_extension_biz_channel_id(row: Dict[str, Any]) -> str:
@@ -12927,12 +18250,16 @@ def _shopping_bulk_product_id_from_url(value: Any) -> str:
         return _shopping_bulk_clean_product_id(match.group(1))
     return ""
 
-SHOPPING_NVMID_CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shopping_nvmid_cache.json")
+SHOPPING_NVMID_CACHE_PATH = os.path.join(CACHE_DIR, "shopping_nvmid_cache.json")
+SHOPPING_NVMID_LEGACY_CACHE_PATH = os.path.join(BASE_DIR, "shopping_nvmid_cache.json")
 _SHOPPING_NVMID_CACHE_LOCK = threading.Lock()
 
 def _shopping_bulk_load_nvmid_cache() -> Dict[str, str]:
     try:
-        with open(SHOPPING_NVMID_CACHE_PATH, "r", encoding="utf-8") as f:
+        cache_path = SHOPPING_NVMID_CACHE_PATH
+        if not os.path.exists(cache_path) and os.path.exists(SHOPPING_NVMID_LEGACY_CACHE_PATH):
+            cache_path = SHOPPING_NVMID_LEGACY_CACHE_PATH
+        with open(cache_path, "r", encoding="utf-8") as f:
             data = json.load(f) or {}
     except Exception:
         return {}
@@ -12952,6 +18279,7 @@ def _shopping_bulk_save_nvmid_cache(cache: Dict[str, str]) -> None:
     }
     try:
         with _SHOPPING_NVMID_CACHE_LOCK:
+            os.makedirs(os.path.dirname(SHOPPING_NVMID_CACHE_PATH), exist_ok=True)
             with open(SHOPPING_NVMID_CACHE_PATH, "w", encoding="utf-8") as f:
                 json.dump(cleaned, f, ensure_ascii=False, indent=2)
     except Exception:
@@ -13395,7 +18723,7 @@ def _shopping_bulk_post_product_ad(api_key: str, secret_key: str, cid: str, row_
     if product_name:
         if ad_id:
             put_res = _put_single_ad_product_name(api_key, secret_key, cid, item, product_name)
-            if put_res.status_code in [200, 201]:
+            if put_res.status_code in [200, 201, 204]:
                 detail += f", 노출용 상품명={product_name}"
             else:
                 detail += f", 노출용 상품명 적용 실패={_response_detail_text(put_res)}"
@@ -14447,22 +19775,41 @@ def copy_entities_to_adgroups():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
     source_ids = _unique_keep_order(d.get("source_ids") or [])
+    source_campaign_ids = _unique_keep_order(d.get("source_campaign_ids") or [])
     target_adgroup_ids = _unique_keep_order(d.get("target_adgroup_ids") or [])
+    target_campaign_ids = _unique_keep_order(d.get("target_campaign_ids") or [])
     include_keywords = _boolish(d.get("include_keywords"), True)
     include_ads = _boolish(d.get("include_ads"), True)
     include_extensions = _boolish(d.get("include_extensions"), True)
     include_negatives = _boolish(d.get("include_negatives"), True)
     exclude_off_assets = _boolish(d.get("exclude_off_assets"), True)
     extension_types = _normalize_copy_extension_types(d.get("extension_types") if d.get("extension_types") is not None else d.get("ext_types"))
+    try:
+        source_ids, source_warnings = _resolve_copy_source_adgroup_ids(api_key, secret_key, cid, source_ids, source_campaign_ids)
+    except Exception as exc:
+        return jsonify({
+            "ok": False,
+            "error": "복사 원본 광고그룹 확인 중 오류가 발생했습니다.",
+            "details": f"{type(exc).__name__}: {exc}",
+        }), 500
+    try:
+        target_campaign_adgroup_ids, target_warnings = _resolve_adgroup_ids(api_key, secret_key, cid, "campaign", target_campaign_ids)
+    except Exception as exc:
+        return jsonify({
+            "ok": False,
+            "error": "대상 캠페인 하위 광고그룹 확인 중 오류가 발생했습니다.",
+            "details": f"{type(exc).__name__}: {exc}",
+        }), 500
+    target_adgroup_ids = _unique_keep_order(target_adgroup_ids + target_campaign_adgroup_ids)
     if not source_ids:
-        return jsonify({"error": "복사 원본 광고그룹을 선택해주세요."}), 400
+        return jsonify({"error": "복사 원본 광고그룹 또는 캠페인을 선택해주세요."}), 400
     if not target_adgroup_ids:
-        return jsonify({"error": "대상 광고그룹을 선택해주세요."}), 400
+        return jsonify({"error": "대상 광고그룹 또는 캠페인을 선택해주세요."}), 400
     success = 0
     fail = 0
     skipped_same = 0
     skipped_off_sources = 0
-    all_errors: List[str] = []
+    all_errors: List[str] = list(source_warnings or []) + list(target_warnings or [])
     for src_id in source_ids:
         if _should_skip_off_source_adgroup(api_key, secret_key, cid, str(src_id), None, exclude_off_assets):
             skipped_count = max(len(target_adgroup_ids), 1)
@@ -14492,7 +19839,7 @@ def copy_entities_to_adgroups():
             else:
                 success += 1
                 all_errors.append(f"[원본 {src_id} → 대상 {target_id}] {summary_line}")
-    msg = f"항목 복사 완료! (성공: {success}, 실패: {fail}, 동일 그룹 건너뜀: {skipped_same}, OFF 원본 그룹 건너뜀: {skipped_off_sources})"
+    msg = f"항목 복사 완료! (원본: {len(source_ids)}, 대상: {len(target_adgroup_ids)}, 성공: {success}, 실패: {fail}, 동일 그룹 건너뜀: {skipped_same}, OFF 원본 그룹 건너뜀: {skipped_off_sources})"
     if all_errors:
         msg += "\n" + "\n".join(all_errors[:60])
     _cache_invalidate(d.get("api_key"), d.get("secret_key"), d.get("customer_id"))
@@ -14505,6 +19852,10 @@ def copy_entities_to_adgroups():
         "skipped_same": skipped_same,
         "skipped_off_sources": skipped_off_sources,
         "extension_types": extension_types,
+        "source_count": len(source_ids),
+        "target_count": len(target_adgroup_ids),
+        "source_campaign_count": len(source_campaign_ids),
+        "target_campaign_count": len(target_campaign_ids),
         "total": max(len(source_ids) * len(target_adgroup_ids), success + fail + skipped_same + skipped_off_sources),
         "details": all_errors[:100],
     })
@@ -15493,6 +20844,95 @@ def update_contents_network_bid_amt():
     }), (200 if tone_ok else 400)
 
 
+def update_adgroup_bid_amt():
+    d = request.get_json(silent=True) or {}
+    api_key = d.get("api_key")
+    secret_key = d.get("secret_key")
+    cid = d.get("customer_id")
+    target_bid, bid_error = _parse_strict_bid_amt(d.get("bid_amt") if d.get("bid_amt") is not None else d.get("adgroup_bid_amt"), "광고그룹 입찰가")
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API Key / Secret Key / Customer ID가 필요합니다."}), 400
+    if bid_error:
+        return jsonify({"error": bid_error}), 400
+
+    scope = str(d.get("entity_type") or d.get("scope") or "adgroup").strip().lower()
+    if scope not in {"campaign", "adgroup"}:
+        return jsonify({"error": "entity_type은 campaign 또는 adgroup 이어야 합니다."}), 400
+    entity_ids = [str(x).strip() for x in (d.get("entity_ids") or []) if str(x).strip()]
+    if not entity_ids:
+        return jsonify({"error": "좌측 체크박스에서 캠페인 또는 광고그룹을 선택해주세요."}), 400
+
+    adgroup_contexts, resolve_warnings = _resolve_adgroup_contexts(api_key, secret_key, cid, scope, entity_ids)
+    if not adgroup_contexts:
+        msg = "적용할 광고그룹이 없습니다."
+        if resolve_warnings:
+            msg += "\n" + "\n".join(resolve_warnings[:10])
+        return jsonify({"error": msg}), 400
+    adgroup_contexts, name_filter_info = _filter_adgroup_contexts_by_name_conditions(adgroup_contexts, d)
+    if not adgroup_contexts:
+        lines = ["광고그룹명 조건 필터 적용 후 대상 광고그룹이 없습니다."]
+        lines.extend(_adgroup_name_filter_summary(name_filter_info))
+        return jsonify({"ok": True, "message": "\n".join(lines), "success": 0, "unchanged": 0, "fail": 0}), 200
+
+    success = 0
+    unchanged = 0
+    fail = 0
+    details: List[str] = list(resolve_warnings)
+    details.extend(_adgroup_name_filter_summary(name_filter_info))
+    results: List[Dict[str, Any]] = []
+    updated_adgroup_ids: List[str] = []
+
+    for ctx in adgroup_contexts:
+        adg_id = str((ctx or {}).get("adgroup_id") or "").strip()
+        if not adg_id:
+            continue
+        detail_res, adgroup_obj = _fetch_adgroup_detail(api_key, secret_key, cid, adg_id)
+        if detail_res.status_code != 200 or not isinstance(adgroup_obj, dict):
+            fail += 1
+            detail = f"광고그룹 조회 실패: {_response_detail_text(detail_res)}"
+            details.append(f"[{adg_id}] {detail}")
+            results.append({"ok": False, "level": "fail", "adgroup_id": adg_id, "name": adg_id, "target": adg_id, "detail": detail})
+            continue
+        name = str(adgroup_obj.get("name") or (ctx or {}).get("name") or adg_id)
+        current_bid = _normalize_bid_amt(adgroup_obj.get("bidAmt"))
+        if current_bid == int(target_bid):
+            unchanged += 1
+            detail = f"이미 {int(target_bid):,}원"
+            details.append(f"[{name}] 유지: {detail}")
+            results.append({"ok": None, "level": "skip", "adgroup_id": adg_id, "name": name, "target": name, "detail": detail, "bidAmt": int(target_bid)})
+            continue
+        old_label = f"{int(current_bid):,}원" if current_bid is not None else "없음"
+        adgroup_obj["bidAmt"] = int(target_bid)
+        res_put = _do_req("PUT", api_key, secret_key, cid, f"/ncc/adgroups/{adg_id}", params={"fields": "bidAmt"}, json_body=adgroup_obj)
+        if res_put.status_code in [200, 201, 204]:
+            success += 1
+            updated_adgroup_ids.append(adg_id)
+            detail = f"{old_label} → {int(target_bid):,}원"
+            details.append(f"[{name}] 변경 완료: {detail}")
+            results.append({"ok": True, "level": "success", "adgroup_id": adg_id, "name": name, "target": name, "detail": detail, "bidAmt": int(target_bid)})
+        else:
+            fail += 1
+            detail = f"변경 실패: {_response_detail_text(res_put)}"
+            details.append(f"[{name}] {detail}")
+            results.append({"ok": False, "level": "fail", "adgroup_id": adg_id, "name": name, "target": name, "detail": detail, "bidAmt": int(target_bid), "code": _extract_error_code_from_value(detail)})
+
+    _cache_invalidate(api_key, secret_key, cid)
+    tone_ok = success > 0 or unchanged > 0
+    scope_label = "선택 캠페인 하위" if scope == "campaign" else "선택 광고그룹"
+    return jsonify({
+        "ok": tone_ok,
+        "success": success,
+        "unchanged": unchanged,
+        "fail": fail,
+        "target_bid": int(target_bid),
+        "updated_adgroup_ids": updated_adgroup_ids,
+        "message": f"{scope_label} 광고그룹 입찰가만 변경 완료 · 적용가 {int(target_bid):,}원 · 변경 {success}개 / 유지 {unchanged}개 / 실패 {fail}개"
+                   + ("\n" + "\n".join(details[:30]) if details else ""),
+        "details": details,
+        "results": results[:300],
+    }), (200 if tone_ok else 400)
+
+
 def apply_target_settings_bulk():
     d = request.get_json(silent=True) or {}
     api_key = d.get("api_key")
@@ -15636,6 +21076,205 @@ def apply_target_settings_bulk():
         "details": details[:80],
         "patch": "bulk-target-source-select-v16-20260428",
     }), status_code
+
+
+def _resolve_bulk_age_target_codes(raw_codes: Any) -> List[str]:
+    if isinstance(raw_codes, str):
+        candidates = re.split(r"[\s,]+", raw_codes)
+    else:
+        try:
+            candidates = list(raw_codes or [])
+        except Exception:
+            candidates = []
+    valid_codes = set(AGE_CRITERION_LABELS.keys())
+    resolved: List[str] = []
+    for code in candidates:
+        raw_code = str(code or "").strip().upper()
+        if not raw_code or raw_code not in valid_codes:
+            continue
+        resolved.append(AGE_CRITERION_CANONICAL_BY_ALIAS.get(raw_code, raw_code))
+    return _unique_keep_order(resolved)
+
+
+def _build_age_target_state_map(
+    selected_codes: List[str],
+    mode: str,
+    bid_weight: int,
+    age_options: Optional[List[Dict[str, str]]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    selected_set = set(selected_codes or [])
+    expose_selected = mode == "include_selected"
+    state_map: Dict[str, Dict[str, Any]] = {}
+    for item in (age_options or AGE_CRITERION_OPTIONS):
+        code = str(item.get("code") or "").strip().upper()
+        canonical_code = str(item.get("canonical_code") or code).strip().upper()
+        if not code:
+            continue
+        if canonical_code in AGE_NON_EXPOSABLE_CANONICAL_CODES:
+            continue
+        selected = canonical_code in selected_set or code in selected_set
+        excluded = (not selected) if expose_selected else selected
+        state_map[code] = {
+            "dictionaryCode": code,
+            "bidWeight": int(bid_weight),
+            "negative": 1 if excluded else 0,
+            "onOff": 1,
+        }
+    return state_map
+
+
+def _verify_age_target_state(
+    api_key: str,
+    secret_key: str,
+    cid: str,
+    adgroup_id: str,
+    expected_map: Dict[str, Dict[str, Any]],
+) -> Tuple[bool, str]:
+    res_get, rows = _fetch_criterion_entries(api_key, secret_key, cid, adgroup_id, "AG")
+    if res_get.status_code != 200:
+        return False, f"검증 조회 실패: {_response_detail_text(res_get)}"
+    actual_map = _criterion_rows_to_state_map(rows or [])
+    missing = [code for code in expected_map.keys() if code not in actual_map]
+    mismatched: List[str] = []
+    for code, expected in expected_map.items():
+        actual = actual_map.get(code)
+        if not actual:
+            continue
+        try:
+            expected_negative = int(expected.get("negative") or 0)
+            actual_negative = int(actual.get("negative") or 0)
+        except Exception:
+            expected_negative = 0
+            actual_negative = 0
+        if expected_negative != actual_negative:
+            label = AGE_CRITERION_LABELS.get(code, code)
+            mismatched.append(f"{label} 노출/제외 불일치")
+            continue
+        try:
+            expected_weight = int(expected.get("bidWeight") or 100)
+            actual_weight = int(actual.get("bidWeight") or 100)
+        except Exception:
+            expected_weight = 100
+            actual_weight = 100
+        if expected_weight != actual_weight:
+            label = AGE_CRITERION_LABELS.get(code, code)
+            mismatched.append(f"{label} 가중치 {actual_weight}%")
+    if missing or mismatched:
+        pieces: List[str] = []
+        if missing:
+            pieces.append("누락 " + ", ".join([AGE_CRITERION_LABELS.get(code, code) for code in missing[:4]]))
+        if mismatched:
+            pieces.append("불일치 " + ", ".join(mismatched[:4]))
+        return False, " / ".join(pieces)
+    return True, ""
+
+
+def update_age_targets_bulk():
+    d = request.get_json(silent=True) or {}
+    api_key = d.get("api_key")
+    secret_key = d.get("secret_key")
+    cid = d.get("customer_id")
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API Key / Secret Key / Customer ID가 필요합니다."}), 400
+
+    mode = str(d.get("mode") or "include_selected").strip().lower()
+    if mode not in {"exclude_selected", "include_selected"}:
+        return jsonify({"error": "mode는 exclude_selected 또는 include_selected 이어야 합니다."}), 400
+    selected_codes = _resolve_bulk_age_target_codes(d.get("age_codes"))
+    selected_non_exposable_codes = [code for code in selected_codes if code in AGE_NON_EXPOSABLE_CANONICAL_CODES]
+    if selected_non_exposable_codes:
+        selected_codes = [code for code in selected_codes if code not in AGE_NON_EXPOSABLE_CANONICAL_CODES]
+    if not selected_codes:
+        return jsonify({"error": "14세 미만은 네이버 정책상 자동으로 꺼지는 연령대입니다. 14세 이상 연령대를 1개 이상 선택해주세요."}), 400
+    try:
+        bid_weight = int(float(str(d.get("bid_weight") or 100).replace(",", "").strip()))
+    except Exception:
+        return jsonify({"error": "입찰 가중치는 숫자로 입력해주세요."}), 400
+    if bid_weight < 50 or bid_weight > 500:
+        return jsonify({"error": "입찰 가중치는 50% 이상 500% 이하로 입력해주세요."}), 400
+
+    raw_scopes = d.get("target_scopes")
+    if isinstance(raw_scopes, list):
+        target_scopes = [str(x or "").strip().lower() for x in raw_scopes if str(x or "").strip()]
+    else:
+        target_scopes = [str(d.get("target_scope") or "adgroup").strip().lower()]
+    target_scopes = _unique_keep_order([x for x in target_scopes if x in {"campaign", "adgroup"}]) or ["adgroup"]
+    if len(target_scopes) > 1:
+        return jsonify({"error": "연령대 설정 적용 범위는 선택 광고그룹 또는 선택 캠페인 중 하나만 선택할 수 있습니다."}), 400
+    campaign_ids = [str(x).strip() for x in (d.get("campaign_ids") or []) if str(x).strip()]
+    adgroup_ids = [str(x).strip() for x in (d.get("adgroup_ids") or []) if str(x).strip()]
+
+    target_adgroup_ids: List[str] = []
+    warnings: List[str] = []
+    if selected_non_exposable_codes:
+        warnings.append("14세 미만은 네이버 정책상 자동으로 꺼지는 연령대라 적용 본문에서 제외했습니다.")
+    if "campaign" in target_scopes:
+        resolved, warn = _resolve_bulk_target_adgroup_ids(api_key, secret_key, cid, "campaign", campaign_ids, [])
+        target_adgroup_ids.extend(resolved)
+        warnings.extend(warn)
+    if "adgroup" in target_scopes:
+        resolved, warn = _resolve_bulk_target_adgroup_ids(api_key, secret_key, cid, "adgroup", [], adgroup_ids)
+        target_adgroup_ids.extend(resolved)
+        warnings.extend(warn)
+    target_adgroup_ids = _unique_keep_order([x for x in target_adgroup_ids if x])
+    if not target_adgroup_ids:
+        msg = "적용할 대상 광고그룹이 없습니다."
+        if warnings:
+            msg += "\n" + "\n".join(warnings[:10])
+        return jsonify({"error": msg}), 400
+
+    age_options, age_warning = _resolve_age_criterion_options(api_key, secret_key, cid)
+    if age_warning:
+        warnings.append(age_warning)
+    state_map = _build_age_target_state_map(selected_codes, mode, bid_weight, age_options)
+    option_label_map = {
+        str(item.get("canonical_code") or item.get("code") or "").strip().upper(): str(item.get("label") or item.get("code") or "")
+        for item in age_options
+    }
+    selected_labels = [option_label_map.get(code, AGE_CRITERION_LABELS.get(code, code)) for code in selected_codes]
+    mode_label = "선택 연령대만 광고 노출" if mode == "include_selected" else "선택 연령대 노출 제외"
+    success = 0
+    fail = 0
+    details: List[str] = list(warnings)
+    results: List[Dict[str, Any]] = []
+    for adgroup_id in target_adgroup_ids:
+        ok_put, step, detail = _put_criterion_state_map(api_key, secret_key, cid, adgroup_id, "AG", state_map)
+        if not ok_put:
+            fail += 1
+            msg = f"{step}: {str(detail or '')[:700]}"
+            details.append(f"[{adgroup_id}] 변경 실패: {msg}")
+            results.append({"ok": False, "adgroup_id": adgroup_id, "detail": msg})
+            continue
+        ok_verify, verify_msg = _verify_age_target_state(api_key, secret_key, cid, adgroup_id, state_map)
+        if ok_verify:
+            success += 1
+            detail_msg = f"{mode_label} · {len(selected_codes)}개 · 가중치 {bid_weight}%"
+            results.append({"ok": True, "adgroup_id": adgroup_id, "detail": detail_msg})
+        else:
+            fail += 1
+            msg = verify_msg or "적용 후 검증 실패"
+            details.append(f"[{adgroup_id}] 검증 실패: {msg}")
+            results.append({"ok": False, "adgroup_id": adgroup_id, "detail": msg})
+
+    if success > 0:
+        _cache_invalidate(api_key, secret_key, cid)
+    scope_label = "+".join(["캠페인" if s == "campaign" else "광고그룹" for s in target_scopes])
+    message = (
+        f"연령대 일괄 설정 완료 · 범위 {scope_label} · {mode_label} "
+        f"({', '.join(selected_labels)}) · 가중치 {bid_weight}% · 성공 {success}개 / 실패 {fail}개"
+    )
+    if details:
+        message += "\n" + "\n".join(details[:20])
+    return jsonify({
+        "ok": success > 0,
+        "message": message,
+        "success": success,
+        "fail": fail,
+        "details": details[:80],
+        "results": results[:300],
+        "patch": "bulk-age-target-direct-v1-20260623",
+    }), (200 if success > 0 else 400)
+
 
 def update_budget():
     d = request.json or {}
@@ -19821,6 +25460,70 @@ def _collect_asset_state_adgroup_ids(api_key: str, secret_key: str, cid: str, ca
     return out, errors
 
 
+def _extract_keyword_direct_enabled(keyword_item: Dict[str, Any] | None) -> bool | None:
+    item = keyword_item or {}
+    if not isinstance(item, dict):
+        return None
+    if "userLock" in item:
+        val = _bool_or_none(item.get("userLock"))
+        if val is True:
+            return False
+        if val is False:
+            return True
+    for key in ("enable", "enabled", "isEnabled"):
+        if key in item:
+            val = _bool_or_none(item.get(key))
+            if val is not None:
+                return val
+    for key in ("paused", "pause", "isPaused"):
+        if key in item:
+            val = _bool_or_none(item.get(key))
+            if val is True:
+                return False
+            if val is False:
+                return True
+    return None
+
+
+def _collect_keyword_state_rows(api_key: str, secret_key: str, cid: str, adgroup_ids: List[str]) -> Tuple[List[Dict[str, Any]], List[str]]:
+    rows: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    seen_ids: set[str] = set()
+    if not adgroup_ids:
+        return rows, errors
+    max_workers = min(FAST_IO_WORKERS, max(1, len(adgroup_ids)))
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        future_map = {ex.submit(_fetch_keywords, api_key, secret_key, cid, adgroup_id): adgroup_id for adgroup_id in adgroup_ids}
+        for fut in as_completed(future_map):
+            adgroup_id = future_map[fut]
+            try:
+                res, items = fut.result()
+            except Exception as exc:
+                errors.append(f"[광고그룹 {adgroup_id}] 키워드 조회 실패: {exc}")
+                continue
+            if res.status_code != 200:
+                errors.append(f"[광고그룹 {adgroup_id}] 키워드 조회 실패: {res.text}")
+                continue
+            for item in (items or []):
+                if not isinstance(item, dict):
+                    continue
+                keyword_id = str(item.get("nccKeywordId") or item.get("keywordId") or item.get("id") or "").strip()
+                if not keyword_id or keyword_id in seen_ids:
+                    continue
+                seen_ids.add(keyword_id)
+                keyword_text = str(item.get("keyword") or item.get("keywordNm") or item.get("keywordName") or keyword_id).strip()
+                rows.append({
+                    "id": keyword_id,
+                    "keyword_id": keyword_id,
+                    "adgroup_id": adgroup_id,
+                    "label": keyword_text or keyword_id,
+                    "keyword": keyword_text,
+                    "enabled": _extract_keyword_direct_enabled(item),
+                })
+    rows.sort(key=lambda row: (str(row.get("adgroup_id") or ""), str(row.get("keyword") or ""), str(row.get("id") or "")))
+    return rows, errors
+
+
 def _collect_ad_state_rows(api_key: str, secret_key: str, cid: str, adgroup_ids: List[str], ad_types: List[str]) -> Tuple[List[Dict[str, Any]], List[str]]:
     rows: List[Dict[str, Any]] = []
     errors: List[str] = []
@@ -20160,6 +25863,8 @@ def _ad_allows_product_name_update(ad_item: Dict[str, Any] | None) -> bool:
 
 def _put_single_ad_product_name(api_key: str, secret_key: str, cid: str, ad_item: Dict[str, Any], product_name: str):
     ad_id = _extract_ad_id(ad_item)
+    if not ad_id:
+        return _make_fake_response(400, "소재 ID를 확인할 수 없습니다.")
     item = copy.deepcopy(ad_item or {})
     target = item.get("ad") if isinstance(item.get("ad"), dict) else item
     target["productName"] = product_name
@@ -20170,17 +25875,13 @@ def _put_single_ad_product_name(api_key: str, secret_key: str, cid: str, ad_item
     cleanup_keys = ['regTm', 'editTm', 'status', 'statusReason', 'inspectStatus', 'delFlag', 'referenceKey', 'referenceData', 'referenceKeyData']
     for k in cleanup_keys:
         item.pop(k, None)
-    attempts = [
-        (f"/ncc/ads/{ad_id}", {"fields": "ad"}, item),
-        (f"/ncc/ads/{ad_id}", {"fields": "productName"}, item),
-        (f"/ncc/ads/{ad_id}", None, item),
-    ]
-    last_res = None
-    for uri, params, body in attempts:
-        last_res = _do_req("PUT", api_key, secret_key, cid, uri, params=params, json_body=body)
-        if last_res.status_code in [200, 201]:
-            return last_res
-    return last_res
+    res = _do_req("PUT", api_key, secret_key, cid, f"/ncc/ads/{ad_id}", params={"fields": "ad"}, json_body=item)
+    if res.status_code in [200, 201, 204]:
+        return res
+    fallback = _do_req("PUT", api_key, secret_key, cid, "/ncc/ads", params={"fields": "ad"}, json_body=[item])
+    if fallback.status_code in [200, 201, 204]:
+        return fallback
+    return res
 
 def update_ad_product_name():
     d = request.json or {}
@@ -20205,7 +25906,7 @@ def update_ad_product_name():
         return jsonify({"error": "노출용 상품명 수정은 쇼핑/카탈로그 소재에서만 지원합니다."}), 400
     old_product_name = _extract_ad_product_name(ad_item)
     put_res = _put_single_ad_product_name(api_key, secret_key, cid, ad_item, product_name)
-    if not put_res or put_res.status_code not in [200, 201]:
+    if not put_res or put_res.status_code not in [200, 201, 204]:
         detail = put_res.text if put_res is not None else "응답 없음"
         return jsonify({"error": f"노출용 상품명 수정 실패: {detail}"}), 500
     _cache_invalidate(api_key, secret_key, cid)
@@ -20334,7 +26035,7 @@ def update_ad_product_names_bulk():
                 group_skipped += 1
                 continue
             put_res = _put_single_ad_product_name(api_key, secret_key, cid, ad_item, product_name)
-            if put_res and put_res.status_code in [200, 201]:
+            if put_res and put_res.status_code in [200, 201, 204]:
                 group_success += 1
                 if len(group_messages) < 3:
                     group_messages.append(f"{ad_id}: {old_product_name or '-'} → {product_name}")
@@ -20380,6 +26081,232 @@ def update_ad_product_names_bulk():
         "updated_adgroup_ids": updated_adgroup_ids,
         "patch": "ad-product-name-bulk-v1-20260519",
     }), (200 if success > 0 else 400)
+
+_AD_PRODUCT_NAME_UPLOAD_HEADER_ALIASES = {
+    "ad_id": {"소재ID", "소재아이디", "광고ID", "광고아이디", "materialId", "material_id", "nccAdId", "adId", "ad_id", "id"},
+    "product_name": {"노출용 상품명", "노출용상품명", "노출 상품명", "상품명", "소재명", "productName", "product_name", "displayProductName", "display_product_name"},
+}
+
+def _ad_product_name_upload_header_score(headers: List[Any]) -> int:
+    score = 0
+    alias_sets = [{_normalize_table_header_key(x) for x in aliases} for aliases in _AD_PRODUCT_NAME_UPLOAD_HEADER_ALIASES.values()]
+    for header in headers or []:
+        norm = _normalize_table_header_key(header)
+        if any(norm in aliases for aliases in alias_sets):
+            score += 2
+    return score
+
+def _read_ad_product_name_upload(upload) -> List[Dict[str, Any]]:
+    if upload is None or not getattr(upload, "filename", ""):
+        return []
+    filename = str(upload.filename or "").lower()
+    raw = upload.read()
+    try:
+        upload.stream.seek(0)
+    except Exception:
+        pass
+    if not raw:
+        return []
+
+    if filename.endswith(".csv") or filename.endswith(".txt") or filename.endswith(".tsv"):
+        text = _decode_uploaded_text(raw)
+        sample = text[:2048]
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=",\t;")
+            sep = dialect.delimiter
+        except Exception:
+            sep = "\t" if "\t" in sample else ","
+        rows = list(csv.reader(io.StringIO(text), delimiter=sep))
+        header_row = 0
+        for idx, row in enumerate(rows[:12]):
+            if _ad_product_name_upload_header_score(row) >= 4:
+                header_row = idx
+                break
+        df = pd.read_csv(io.StringIO(text), sep=sep, dtype=str, keep_default_na=False, header=header_row)
+        return df.to_dict(orient="records")
+
+    if filename.endswith(".xlsx") or filename.endswith(".xls"):
+        try:
+            raw_df = pd.read_excel(io.BytesIO(raw), dtype=str, keep_default_na=False, header=None)
+        except Exception as e:
+            raise ValueError(f"엑셀 파일을 읽지 못했습니다: {e}")
+        header_row = 0
+        for idx in range(min(12, len(raw_df.index))):
+            if _ad_product_name_upload_header_score(list(raw_df.iloc[idx].values)) >= 4:
+                header_row = idx
+                break
+        headers = list(raw_df.iloc[header_row].values)
+        df = raw_df.iloc[header_row + 1:].copy()
+        df.columns = headers
+        df = df.loc[:, [str(c).strip() != "" and not str(c).startswith("Unnamed") for c in df.columns]]
+        return df.to_dict(orient="records")
+
+    raise ValueError("지원 파일 형식은 csv, txt, tsv, xls, xlsx 입니다.")
+
+def _ad_product_name_upload_row_value(row: Dict[str, Any], field: str) -> str:
+    aliases = {_normalize_table_header_key(x) for x in _AD_PRODUCT_NAME_UPLOAD_HEADER_ALIASES.get(field, set())}
+    for key, value in (row or {}).items():
+        if _normalize_table_header_key(key) in aliases:
+            return str(value or "").strip()
+    return ""
+
+def bulk_update_ad_product_names_csv():
+    api_key = request.form.get("api_key")
+    secret_key = request.form.get("secret_key")
+    cid = request.form.get("customer_id")
+    upload = request.files.get("file")
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API Key / Secret Key / Customer ID가 필요합니다."}), 400
+    if upload is None or not getattr(upload, "filename", ""):
+        return jsonify({"error": "업로드 파일을 선택해주세요."}), 400
+    try:
+        raw_rows = _read_ad_product_name_upload(upload)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+    if not raw_rows:
+        return jsonify({"error": "업로드 파일에서 데이터 행을 찾지 못했습니다."}), 400
+
+    targets: Dict[str, Dict[str, Any]] = {}
+    invalid_results: List[Dict[str, Any]] = []
+    duplicate_count = 0
+    duplicate_conflicts = 0
+    for idx, row in enumerate(raw_rows, start=2):
+        if not any(str(v or "").strip() for v in (row or {}).values()):
+            continue
+        ad_id = _ad_product_name_upload_row_value(row, "ad_id")
+        product_name = _ad_product_name_upload_row_value(row, "product_name")
+        missing = []
+        if not ad_id:
+            missing.append("소재ID")
+        if not product_name:
+            missing.append("노출용 상품명")
+        row_label = ad_id or f"{idx}행"
+        if missing:
+            invalid_results.append({"row_no": idx, "ok": False, "name": row_label, "detail": f"필수 열 누락: {', '.join(missing)}"})
+            continue
+        if len(product_name) > AD_PRODUCT_NAME_MAX_LEN:
+            invalid_results.append({"row_no": idx, "ok": False, "name": row_label, "productName": product_name, "detail": f"노출용 상품명은 최대 {AD_PRODUCT_NAME_MAX_LEN}자까지 입력할 수 있습니다."})
+            continue
+        key = _bid_change_name_key(ad_id)
+        previous = targets.get(key)
+        if previous is not None:
+            duplicate_count += 1
+            if str(previous.get("product_name") or "") != product_name:
+                duplicate_conflicts += 1
+        targets[key] = {
+            "row_no": idx,
+            "ad_id": ad_id,
+            "product_name": product_name,
+        }
+
+    if not targets and invalid_results:
+        return jsonify({"ok": False, "error": "유효한 변경 대상이 없습니다.", "results": invalid_results[:100], "total": len(raw_rows), "fail": len(invalid_results)}), 400
+
+    results: List[Dict[str, Any]] = list(invalid_results)
+    success = unchanged = fail = 0
+    updated_adgroup_ids: List[str] = []
+    for spec in targets.values():
+        ad_id = str(spec.get("ad_id") or "").strip()
+        product_name = str(spec.get("product_name") or "").strip()
+        row_no = int(spec.get("row_no") or 0)
+        res_ad = _do_req("GET", api_key, secret_key, cid, f"/ncc/ads/{ad_id}")
+        if res_ad.status_code != 200:
+            fail += 1
+            results.append({"row_no": row_no, "ok": False, "level": "fail", "name": ad_id, "ad_id": ad_id, "productName": product_name, "detail": f"소재 조회 실패: {res_ad.text}", "code": _extract_error_code_from_value(res_ad.text)})
+            continue
+        ad_item = res_ad.json() or {}
+        if not isinstance(ad_item, dict):
+            fail += 1
+            results.append({"row_no": row_no, "ok": False, "level": "fail", "name": ad_id, "ad_id": ad_id, "productName": product_name, "detail": "소재 응답 형식을 확인할 수 없습니다."})
+            continue
+        if not _ad_allows_product_name_update(ad_item):
+            fail += 1
+            results.append({"row_no": row_no, "ok": False, "level": "fail", "name": ad_id, "ad_id": ad_id, "productName": product_name, "detail": "노출용 상품명 수정은 쇼핑/카탈로그 소재에서만 지원합니다."})
+            continue
+
+        old_product_name = _extract_ad_product_name(ad_item)
+        final_ad_id = _extract_ad_id(ad_item) or ad_id
+        adgroup_id = str(ad_item.get("nccAdgroupId") or ad_item.get("adgroupId") or "").strip()
+        if old_product_name == product_name:
+            unchanged += 1
+            results.append({
+                "row_no": row_no,
+                "ok": None,
+                "level": "skip",
+                "name": old_product_name or final_ad_id,
+                "ad_id": final_ad_id,
+                "adgroup_id": adgroup_id,
+                "oldProductName": old_product_name,
+                "productName": product_name,
+                "detail": "이미 동일 상품명이라 유지",
+            })
+            continue
+
+        put_res = _put_single_ad_product_name(api_key, secret_key, cid, ad_item, product_name)
+        if put_res and put_res.status_code in [200, 201, 204]:
+            success += 1
+            if adgroup_id:
+                updated_adgroup_ids.append(adgroup_id)
+            results.append({
+                "row_no": row_no,
+                "ok": True,
+                "level": "success",
+                "name": old_product_name or final_ad_id,
+                "ad_id": final_ad_id,
+                "adgroup_id": adgroup_id,
+                "oldProductName": old_product_name,
+                "productName": product_name,
+                "detail": f"{old_product_name or '-'} → {product_name}",
+            })
+        else:
+            fail += 1
+            detail = put_res.text if put_res is not None else "응답 없음"
+            results.append({
+                "row_no": row_no,
+                "ok": False,
+                "level": "fail",
+                "name": old_product_name or final_ad_id,
+                "ad_id": final_ad_id,
+                "adgroup_id": adgroup_id,
+                "oldProductName": old_product_name,
+                "productName": product_name,
+                "detail": f"노출용 상품명 수정 실패: {detail}",
+                "code": _extract_error_code_from_value(detail),
+            })
+
+    if success > 0:
+        _cache_invalidate(api_key, secret_key, cid)
+
+    warnings: List[str] = []
+    if duplicate_count:
+        warnings.append(f"같은 소재ID가 중복된 행 {duplicate_count}건은 마지막 행 기준으로 적용했습니다.")
+    if duplicate_conflicts:
+        warnings.append(f"중복 행 중 노출용 상품명이 서로 다른 대상 {duplicate_conflicts}건이 있어 마지막 행의 상품명이 최종값입니다.")
+    if invalid_results:
+        warnings.append(f"필수값/상품명 오류로 제외된 행 {len(invalid_results)}건이 있습니다.")
+    total_fail = fail + len(invalid_results)
+    message = (
+        f"노출용 상품명 CSV 대량 변경 완료: 변경 {success}개 / 유지 {unchanged}개 / 실패 {fail}개"
+        + (f" / 제외 행 {len(invalid_results)}건" if invalid_results else "")
+    )
+    ok_response = total_fail == 0
+    return jsonify({
+        "ok": ok_response,
+        "message": message,
+        "total": len(raw_rows),
+        "targets": len(targets),
+        "success": success,
+        "unchanged": unchanged,
+        "fail": total_fail,
+        "target_fail": fail,
+        "invalid_rows": len(invalid_results),
+        "duplicate_rows": duplicate_count,
+        "duplicate_conflicts": duplicate_conflicts,
+        "warnings": warnings,
+        "results": results[:300],
+        "updated_adgroup_ids": sorted(set(updated_adgroup_ids)),
+        "patch": "ad-product-name-csv-bulk-v1-20260624",
+    }), (200 if ok_response else 207 if success > 0 or unchanged > 0 else 400)
 
 def set_ads_state_by_scope():
     d = request.json or {}
@@ -20511,6 +26438,133 @@ def set_searched_powerlink_keyword_state():
         msg += "\n" + "\n".join(details)
     _cache_invalidate(api_key, secret_key, cid)
     return jsonify({"ok": True, "message": msg, "success": success, "fail": fail, "enabled": enabled, "results": results})
+
+def set_keywords_state_by_scope():
+    d = request.json or {}
+    api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
+    campaign_ids = _unique_keep_order([str(x or "").strip() for x in (d.get("campaign_ids") or []) if str(x or "").strip()])
+    adgroup_ids = _unique_keep_order([str(x or "").strip() for x in (d.get("adgroup_ids") or []) if str(x or "").strip()])
+    enabled = _boolish(d.get("enabled"), True)
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API Key / Secret Key / Customer ID가 필요합니다."}), 400
+    if not campaign_ids and not adgroup_ids:
+        return jsonify({"error": "좌측에서 캠페인 또는 광고그룹을 1개 이상 선택해주세요."}), 400
+
+    target_adgroup_ids, collect_errors = _collect_asset_state_adgroup_ids(api_key, secret_key, cid, campaign_ids, adgroup_ids)
+    if not target_adgroup_ids:
+        msg = "선택 범위에서 키워드를 조회할 광고그룹을 찾지 못했습니다."
+        if collect_errors:
+            msg += "\n" + "\n".join(collect_errors[:10])
+        return jsonify({"error": msg, "warnings": collect_errors[:20]}), 400
+
+    rows, row_errors = _collect_keyword_state_rows(api_key, secret_key, cid, target_adgroup_ids)
+    collect_errors.extend(row_errors)
+    if not rows:
+        msg = f"선택 범위 광고그룹 {len(target_adgroup_ids):,}개에서 상태 변경할 키워드가 없습니다."
+        if collect_errors:
+            msg += "\n" + "\n".join(collect_errors[:10])
+        return jsonify({
+            "ok": True,
+            "total": 0,
+            "success": 0,
+            "fail": 0,
+            "skipped": 0,
+            "warnings": collect_errors[:20],
+            "results": [],
+            "updated_adgroup_ids": [],
+            "message": msg,
+        })
+
+    pending_rows: List[Dict[str, Any]] = []
+    skipped = 0
+    results: List[Dict[str, Any]] = []
+    updated_adgroup_ids: set[str] = set()
+    state_label = "ON" if enabled else "OFF"
+    for row in rows:
+        current_enabled = row.get("enabled")
+        if current_enabled is enabled:
+            skipped += 1
+            if len(results) < 300:
+                results.append({
+                    "ok": True,
+                    "level": "skipped",
+                    "target": row.get("label") or row.get("id"),
+                    "id": row.get("id"),
+                    "adgroup_id": row.get("adgroup_id"),
+                    "detail": f"이미 {state_label} 상태라 건너뜀",
+                })
+            continue
+        pending_rows.append(row)
+
+    success = 0
+    fail = 0
+    details: List[str] = []
+    if pending_rows:
+        max_workers = min(max(1, BID_IO_WORKERS), max(1, len(pending_rows)))
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            future_map = {ex.submit(_set_keyword_state, api_key, secret_key, cid, str(row.get("id") or ""), enabled): row for row in pending_rows}
+            for fut in as_completed(future_map):
+                row = future_map[fut]
+                keyword_id = str(row.get("id") or "").strip()
+                label = str(row.get("label") or keyword_id).strip()
+                try:
+                    ok, detail = fut.result()
+                except Exception as exc:
+                    ok, detail = False, str(exc)
+                if ok:
+                    success += 1
+                    updated_adgroup_ids.add(str(row.get("adgroup_id") or ""))
+                    results.append({
+                        "ok": True,
+                        "level": "success",
+                        "target": label,
+                        "id": keyword_id,
+                        "adgroup_id": row.get("adgroup_id"),
+                        "detail": f"{state_label} 변경 완료",
+                    })
+                else:
+                    fail += 1
+                    results.append({
+                        "ok": False,
+                        "level": "fail",
+                        "target": label,
+                        "id": keyword_id,
+                        "adgroup_id": row.get("adgroup_id"),
+                        "detail": detail,
+                        "code": _extract_error_code_from_value(detail),
+                    })
+                    if detail and len(details) < 12:
+                        details.append(f"[{label or keyword_id}] {detail}")
+
+    scope_bits = []
+    if campaign_ids:
+        scope_bits.append(f"캠페인 {len(campaign_ids):,}개")
+    if adgroup_ids:
+        scope_bits.append(f"광고그룹 {len(adgroup_ids):,}개")
+    msg = (
+        f"키워드 {state_label} 변경 완료 "
+        f"({' + '.join(scope_bits)} / 광고그룹 {len(target_adgroup_ids):,}개 / 대상 {len(rows):,}개 / 성공 {success:,} / 건너뜀 {skipped:,} / 실패 {fail:,})"
+    )
+    if collect_errors:
+        msg += "\n" + "\n".join(collect_errors[:10])
+    if details:
+        msg += "\n" + "\n".join(details)
+    _cache_invalidate(api_key, secret_key, cid)
+    return jsonify({
+        "ok": fail == 0,
+        "enabled": enabled,
+        "total": len(rows),
+        "success": success,
+        "fail": fail,
+        "skipped": skipped,
+        "warnings": collect_errors[:20],
+        "details": details,
+        "results": results[:500],
+        "updated_adgroup_ids": sorted(x for x in updated_adgroup_ids if x),
+        "target_adgroup_count": len(target_adgroup_ids),
+        "message": msg,
+        "patch": "keyword-state-by-scope-v1-20260629",
+    }), (200 if success > 0 or skipped > 0 else 400)
 def set_adgroup_state_by_scope():
     d = request.json or {}
     api_key, secret_key, cid = d.get("api_key"), d.get("secret_key"), d.get("customer_id")
@@ -20672,12 +26726,14 @@ _CHANGE_SERVICE = ChangeService({
     "add_restricted_media_ids": add_restricted_media_ids,
     "copy_restricted_media_settings": copy_restricted_media_settings,
     "update_adgroup_options": update_adgroup_options,
+    "update_adgroup_bid_amt": update_adgroup_bid_amt,
     "update_powerlink_device_bid_weights": update_powerlink_device_bid_weights,
     "update_contents_network_bid_amt": update_contents_network_bid_amt,
     "bulk_update_contents_network_bid_amt": bulk_update_contents_network_bid_amt,
     "bulk_update_shopping_ad_bids": bulk_update_shopping_ad_bids,
     "bulk_update_shopping_product_ad_bids": bulk_update_shopping_product_ad_bids,
     "apply_target_settings_bulk": apply_target_settings_bulk,
+    "update_age_targets_bulk": update_age_targets_bulk,
     "update_budget": update_budget,
     "update_schedule": update_schedule,
     "update_schedule_campaign_bulk": update_schedule_campaign_bulk,
@@ -20693,6 +26749,7 @@ _CHANGE_SERVICE = ChangeService({
     "update_keyword_avg_position_by_search": update_keyword_avg_position_by_search,
     "update_keyword_bids_avg_position": update_keyword_bids_avg_position,
     "set_searched_powerlink_keyword_state": set_searched_powerlink_keyword_state,
+    "set_keywords_state_by_scope": set_keywords_state_by_scope,
     "set_campaign_state": set_campaign_state,
     "set_adgroup_state_by_scope": set_adgroup_state_by_scope,
     "set_ads_state_by_scope": set_ads_state_by_scope,
@@ -20700,6 +26757,7 @@ _CHANGE_SERVICE = ChangeService({
     "set_asset_state_by_ids": set_asset_state_by_ids,
     "update_ad_product_name": update_ad_product_name,
     "update_ad_product_names_bulk": update_ad_product_names_bulk,
+    "bulk_update_ad_product_names_csv": bulk_update_ad_product_names_csv,
     "update_shopping_ad_bid": update_shopping_ad_bid,
 })
 app.register_blueprint(create_change_blueprint(_CHANGE_SERVICE))

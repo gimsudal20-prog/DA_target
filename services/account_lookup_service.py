@@ -249,6 +249,9 @@ class AccountLookupService:
             "추가 설명문구": "DESCRIPTION_EXTRA",
             "설명 확장문구": "DESCRIPTION_EXTRA",
             "SHOPPING_PROMO_TEXT": "PROMOTION",
+            "쇼핑 추가홍보문구": "PROMOTION",
+            "쇼핑추가홍보문구": "PROMOTION",
+            "추가홍보문구": "PROMOTION",
             "SHOPPING_EXTRA": "SHOPPING_EXTRA",
             "쇼핑상품부가정보": "SHOPPING_EXTRA",
             "POWER_LINK_IMAGE": "POWER_LINK_IMAGE",
@@ -260,9 +263,14 @@ class AccountLookupService:
 
     @classmethod
     def _extension_filter_label(cls, value: Any) -> str:
+        raw_upper = str(value or "").strip().upper()
+        if raw_upper == "SHOPPING_PROMO_TEXT":
+            return AD_EXTENSION_TYPE_LABELS.get("SHOPPING_PROMO_TEXT", "쇼핑 추가홍보문구")
         normalized = cls._normalize_extension_type_filter(value)
         if normalized == "ALL":
             return "전체"
+        if normalized == "PROMOTION":
+            return AD_EXTENSION_TYPE_LABELS.get("SHOPPING_PROMO_TEXT", "쇼핑 추가홍보문구")
         return AD_EXTENSION_TYPE_LABELS.get(normalized, normalized)
 
     @staticmethod
@@ -303,9 +311,20 @@ class AccountLookupService:
             image_ids = cls._split_image_ids(row.get("imageId"))
             row_copy = dict(row)
             row_copy["resolvedExtensionType"] = resolved_type
-            row_copy["extensionTypeLabel"] = AD_EXTENSION_TYPE_LABELS.get(resolved_type, row.get("type") or resolved_type)
+            if resolved_type == "PROMOTION":
+                row_copy["extensionTypeLabel"] = AD_EXTENSION_TYPE_LABELS.get("SHOPPING_PROMO_TEXT", "쇼핑 추가홍보문구")
+            else:
+                row_copy["extensionTypeLabel"] = AD_EXTENSION_TYPE_LABELS.get(resolved_type, row.get("type") or resolved_type)
             row_copy["imageIdCount"] = len(image_ids) if image_ids else ""
             row_copy["imageIdDetail"] = "\n".join([f"이미지 {idx}: {image_id}" for idx, image_id in enumerate(image_ids, start=1)])
+            basic_text = str(row_copy.get("basicText") or row_copy.get("promotionText1") or "").strip()
+            additional_text = str(row_copy.get("additionalText") or row_copy.get("promotionText2") or "").strip()
+            row_copy["basicText"] = basic_text
+            row_copy["additionalText"] = additional_text
+            row_copy["promotionText1"] = basic_text
+            row_copy["promotionText2"] = additional_text
+            if resolved_type == "PROMOTION" and (basic_text or additional_text):
+                row_copy["extensionContent"] = " / ".join([value for value in [basic_text, additional_text] if value])
             row_copy.setdefault("periodSetting", "설정안함")
             row_copy.setdefault("periodStartDate", "")
             row_copy.setdefault("periodEndDate", "")
@@ -690,6 +709,25 @@ class AccountLookupService:
                 ])
             return columns
 
+        if target == "PROMOTION":
+            return [
+                ("campaignType", "캠페인유형"),
+                ("campaignName", "캠페인명"),
+                ("adgroupType", "광고그룹유형"),
+                ("adgroupName", "광고그룹명"),
+                ("ownerScope", "적용대상"),
+                ("extensionTypeLabel", "확장소재유형"),
+                ("status", "상태"),
+                ("basicText", "추가홍보문구1"),
+                ("additionalText", "추가홍보문구2"),
+                ("extensionContent", "내용"),
+                ("summary", "요약"),
+                ("adExtensionId", "확장소재 ID"),
+                ("ownerId", "owner ID"),
+                ("campaignId", "캠페인 ID"),
+                ("adgroupId", "광고그룹 ID"),
+            ]
+
         base_columns = [
             ("campaignType", "캠페인유형"), ("campaignName", "캠페인명"),
             ("adgroupType", "광고그룹유형"), ("adgroupName", "광고그룹명"),
@@ -697,6 +735,19 @@ class AccountLookupService:
             ("summary", "요약"), ("adExtensionId", "확장소재 ID"),
         ]
         tail_columns = [("ownerId", "owner ID"), ("campaignId", "캠페인 ID"), ("adgroupId", "광고그룹 ID")]
+
+        has_promo_data = any(
+            str((row or {}).get("basicText") or (row or {}).get("additionalText") or "").strip()
+            or cls._row_extension_type(row or {}) == "PROMOTION"
+            for row in (rows or [])
+        )
+        if target == "ALL" and has_promo_data:
+            insert_at = next((idx for idx, (key, _label) in enumerate(base_columns) if key == "summary"), len(base_columns))
+            base_columns[insert_at:insert_at] = [
+                ("basicText", "추가홍보문구1"),
+                ("additionalText", "추가홍보문구2"),
+                ("extensionContent", "내용"),
+            ]
 
         image_types = {"IMAGE_SUB_LINKS", "POWER_LINK_IMAGE"}
         has_image_data = any(cls._split_image_ids((row or {}).get("imageId")) for row in (rows or []))
