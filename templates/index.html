@@ -32140,7 +32140,44 @@ function getPerformanceTextReportPayload() {
         return null;
     }
     const datePreset = document.getElementById('text_report_date_preset')?.value || 'yesterday';
-    const customDate = datePreset === 'custom';
+    const localDateText = date => {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+    const resolveTextReportDatePayload = () => {
+        if(datePreset === 'lastmonth') {
+            const now = new Date();
+            now.setHours(12, 0, 0, 0);
+            const firstOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+            const lastOfPreviousMonth = new Date(firstOfThisMonth);
+            lastOfPreviousMonth.setDate(0);
+            const firstOfPreviousMonth = new Date(lastOfPreviousMonth.getFullYear(), lastOfPreviousMonth.getMonth(), 1);
+            return {
+                date_preset: 'custom',
+                requested_date_preset: datePreset,
+                date_label: '지난달',
+                since: localDateText(firstOfPreviousMonth),
+                until: localDateText(lastOfPreviousMonth),
+            };
+        }
+        if(datePreset === 'custom') {
+            return {
+                date_preset: 'custom',
+                requested_date_preset: datePreset,
+                since: document.getElementById('text_report_since')?.value || '',
+                until: document.getElementById('text_report_until')?.value || '',
+            };
+        }
+        return {
+            date_preset: datePreset,
+            requested_date_preset: datePreset,
+            since: '',
+            until: '',
+        };
+    };
+    const datePayload = resolveTextReportDatePayload();
     const payload = {
         ...c,
         account_name: getSelectedAccountNameForReport(),
@@ -32148,9 +32185,7 @@ function getPerformanceTextReportPayload() {
         campaign_ids: campaignIds,
         adgroup_ids: adgroupIds,
         campaign_type: document.getElementById('text_report_type_filter')?.value || 'all',
-        date_preset: datePreset,
-        since: customDate ? (document.getElementById('text_report_since')?.value || '') : '',
-        until: customDate ? (document.getElementById('text_report_until')?.value || '') : '',
+        ...datePayload,
         exclude_today: true,
         report_format: 'keyword_summary',
         report_metric_mode: document.getElementById('text_report_metric')?.value || 'conversion',

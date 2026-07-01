@@ -5882,6 +5882,26 @@ def _format_performance_report_percent(value: Any, digits: int = 1) -> str:
 def _performance_report_line(label: str, value: str) -> str:
     return f"{label} : {value}"
 
+def _performance_report_cart_lines(
+    metrics: Dict[str, Any] | None,
+    *,
+    include_cart_count: bool = False,
+    include_cart_amount: bool = False,
+) -> List[str]:
+    metrics = metrics or {}
+    lines: List[str] = []
+    if include_cart_count:
+        cart_count = _performance_number(metrics.get("cartCcnt"))
+        if cart_count <= 0:
+            cart_count = _performance_non_negative_diff(metrics.get("ccnt"), metrics.get("purchaseCcnt"))
+        lines.append(_performance_report_line("장바구니 전환 수", f"{_format_performance_report_count(cart_count)}건"))
+    if include_cart_amount:
+        cart_amount = _performance_number(metrics.get("cartConvAmt"))
+        if cart_amount <= 0:
+            cart_amount = _performance_non_negative_diff(metrics.get("convAmt"), metrics.get("purchaseConvAmt"))
+        lines.append(_performance_report_line("장바구니 전환 매출액", _format_performance_report_won(cart_amount)))
+    return lines
+
 def _performance_report_metric_lines(
     metrics: Dict[str, Any] | None,
     *,
@@ -5914,16 +5934,11 @@ def _performance_report_metric_lines(
             _performance_report_line("총전환매출", _format_performance_report_won(metrics.get("convAmt"))),
             _performance_report_line("ROAS", _format_performance_report_percent(metrics.get("ror"), 1)),
         ])
-    if include_cart_count:
-        cart_count = _performance_number(metrics.get("cartCcnt"))
-        if cart_count <= 0:
-            cart_count = _performance_non_negative_diff(metrics.get("ccnt"), metrics.get("purchaseCcnt"))
-        lines.append(_performance_report_line("장바구니 전환 수", f"{_format_performance_report_count(cart_count)}건"))
-    if include_cart_amount:
-        cart_amount = _performance_number(metrics.get("cartConvAmt"))
-        if cart_amount <= 0:
-            cart_amount = _performance_non_negative_diff(metrics.get("convAmt"), metrics.get("purchaseConvAmt"))
-        lines.append(_performance_report_line("장바구니 전환 매출액", _format_performance_report_won(cart_amount)))
+    lines.extend(_performance_report_cart_lines(
+        metrics,
+        include_cart_count=include_cart_count,
+        include_cart_amount=include_cart_amount,
+    ))
     if keyword_text:
         lines.append(_performance_report_line("주요 유입 키워드", keyword_text))
     if general_conversion_keyword_text:
@@ -6016,6 +6031,28 @@ def _performance_media_summary_sort_key(row: Dict[str, Any]) -> Tuple[int, str]:
 
 def _performance_non_negative_diff(total: Any, part: Any) -> float:
     return max(0.0, _performance_number(total) - _performance_number(part))
+
+def _append_missing_performance_cart_lines(
+    report_text: str,
+    metrics: Dict[str, Any] | None,
+    *,
+    include_cart_count: bool = False,
+    include_cart_amount: bool = False,
+) -> str:
+    report_text = str(report_text or "")
+    missing_lines: List[str] = []
+    for line in _performance_report_cart_lines(
+        metrics,
+        include_cart_count=include_cart_count,
+        include_cart_amount=include_cart_amount,
+    ):
+        label = line.split(" : ", 1)[0]
+        if label and label not in report_text:
+            missing_lines.append(line)
+    if not missing_lines:
+        return report_text
+    cart_text = "\n".join(["[ 장바구니 전환 요약 ]", *missing_lines])
+    return "\n\n".join(part for part in (report_text, cart_text) if part)
 
 def _build_performance_media_summary_report(
     rows: List[Dict[str, Any]],
@@ -9458,6 +9495,9 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
             if future is not None and not future.done():
                 future.cancel()
         executor.shutdown(wait=False, cancel_futures=True)
+    date_label_override = str((payload or {}).get("date_label") or "").strip()
+    if date_label_override:
+        base_result["date_label"] = date_label_override
     type_rows = (
         _aggregate_performance_report_rows(base_result.get("rows") or [], "type")
         if base_result.get("result_level") != "type"
@@ -9490,6 +9530,12 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
         if media_extra_lines:
             media_keyword_text = "\n".join(["■ 전환 키워드/검색어", *media_extra_lines])
             media_text = "\n\n\n".join(part for part in (media_text, media_keyword_text) if part)
+        media_text = _append_missing_performance_cart_lines(
+            media_text,
+            base_result.get("summary") or {},
+            include_cart_count=include_cart_count,
+            include_cart_amount=include_cart_amount,
+        )
         media_warnings = list(base_result.get("warnings") or [])
         media_errors = list(base_result.get("errors") or [])
         media_warnings.extend(keyword_result.get("warnings") or [])
@@ -9511,6 +9557,7 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
             "since": base_result.get("since"),
             "until": base_result.get("until"),
             "date_label": base_result.get("date_label"),
+            "requested_date_preset": (payload or {}).get("requested_date_preset") or (payload or {}).get("date_preset"),
             "metric_mode": "media_summary",
             "report_format": "media_summary",
         }
@@ -9609,9 +9656,16 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
         f"텍스트_성과보고서_{_safe_performance_report_filename_part(account_name or cid)}_"
         f"{str(base_result.get('since') or '').replace('-', '')}_{str(base_result.get('until') or '').replace('-', '')}.txt"
     )
+    report_text = "\n\n".join(part for part in report_parts if part)
+    report_text = _append_missing_performance_cart_lines(
+        report_text,
+        base_result.get("summary") or {},
+        include_cart_count=include_cart_count,
+        include_cart_amount=include_cart_amount,
+    )
     return {
         "message": "텍스트 보고서 생성 완료",
-        "report_text": "\n\n".join(part for part in report_parts if part),
+        "report_text": report_text,
         "filename": filename,
         "warnings": warnings[:30],
         "errors": errors[:30],
@@ -9620,6 +9674,7 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
         "since": base_result.get("since"),
         "until": base_result.get("until"),
         "date_label": base_result.get("date_label"),
+        "requested_date_preset": (payload or {}).get("requested_date_preset") or (payload or {}).get("date_preset"),
         "metric_mode": "purchase" if report_uses_purchase else "conversion",
     }
 def _fetch_ads(api_key: str, secret_key: str, cid: str, adgroup_id: str):
