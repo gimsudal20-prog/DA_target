@@ -35434,13 +35434,6 @@ function reportDataDrawRegionLabel(ctx, item, project, metricKey, maxValue, plac
         }
     }
     placedBoxes.push(selectedBox);
-    ctx.beginPath();
-    ctx.arc(ax, ay, item.value > 0 ? 2.6 : 2.1, 0, Math.PI * 2);
-    ctx.fillStyle = item.value / Math.max(1, maxValue) > 0.55 ? 'rgba(255,255,255,0.86)' : 'rgba(15, 23, 42, 0.78)';
-    ctx.fill();
-    ctx.strokeStyle = item.value / Math.max(1, maxValue) > 0.55 ? 'rgba(15, 23, 42, 0.40)' : 'rgba(255,255,255,0.92)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
     if(dx || dy || Math.abs(x - ax) > 2 || Math.abs(y - ay) > 2) {
         ctx.beginPath();
         ctx.moveTo(ax, ay);
