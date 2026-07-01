@@ -3410,6 +3410,10 @@ def _performance_date_range(preset: str, since: Any = "", until: Any = "", *, ex
         if since_d > yesterday:
             raise ValueError("이번달은 오늘을 제외하면 조회할 날짜가 없습니다.")
         return since_d.isoformat(), yesterday.isoformat(), "이번달 (오늘 제외)"
+    if preset_norm in {"lastmonth", "last_month", "previousmonth", "previous_month", "지난달", "전월"}:
+        until_d = today.replace(day=1) - timedelta(days=1)
+        since_d = until_d.replace(day=1)
+        return since_d.isoformat(), until_d.isoformat(), "지난달"
     if exclude_today:
         return yesterday.isoformat(), yesterday.isoformat(), "어제"
     return today.isoformat(), today.isoformat(), "오늘"
