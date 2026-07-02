@@ -16270,6 +16270,104 @@
       border-radius: 8px !important;
     }
 
+    body #tab_data > .performance-stats-card .performance-table-metric-panel {
+      display: grid !important;
+      gap: 10px !important;
+      margin: 0 0 12px !important;
+      padding: 12px 14px !important;
+      border: 1px solid #d8e2ef !important;
+      border-radius: 10px !important;
+      background: #ffffff !important;
+    }
+
+    body #tab_data > .performance-stats-card .performance-table-metric-head {
+      display: flex !important;
+      align-items: center !important;
+      justify-content: space-between !important;
+      gap: 12px !important;
+      min-width: 0 !important;
+    }
+
+    body #tab_data > .performance-stats-card .performance-table-metric-title {
+      display: flex !important;
+      align-items: baseline !important;
+      gap: 8px !important;
+      min-width: 0 !important;
+      color: #0f172a !important;
+      font-size: 13px !important;
+      font-weight: 950 !important;
+    }
+
+    body #tab_data > .performance-stats-card .performance-table-metric-title span {
+      color: #64748b !important;
+      font-size: 11.5px !important;
+      font-weight: 750 !important;
+      white-space: nowrap !important;
+    }
+
+    body #tab_data > .performance-stats-card .performance-table-metric-presets {
+      display: flex !important;
+      align-items: center !important;
+      justify-content: flex-end !important;
+      flex-wrap: wrap !important;
+      gap: 6px !important;
+    }
+
+    body #tab_data > .performance-stats-card .performance-table-metric-preset {
+      min-height: 30px !important;
+      padding: 0 10px !important;
+      border: 1px solid #d8e2ef !important;
+      border-radius: 8px !important;
+      background: #f8fafc !important;
+      color: #334155 !important;
+      font-size: 12px !important;
+      font-weight: 850 !important;
+      cursor: pointer !important;
+    }
+
+    body #tab_data > .performance-stats-card .performance-table-metric-preset.is-active,
+    body #tab_data > .performance-stats-card .performance-table-metric-preset:hover {
+      border-color: #93c5fd !important;
+      background: #eff6ff !important;
+      color: #0b5fce !important;
+    }
+
+    body #tab_data > .performance-stats-card .performance-table-metric-grid {
+      display: grid !important;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)) !important;
+      gap: 8px !important;
+    }
+
+    body #tab_data > .performance-stats-card .performance-table-metric-chip {
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 8px !important;
+      min-height: 34px !important;
+      padding: 7px 10px !important;
+      border: 1px solid #d8e2ef !important;
+      border-radius: 8px !important;
+      background: #fbfdff !important;
+      color: #334155 !important;
+      font-size: 12px !important;
+      font-weight: 850 !important;
+      line-height: 1.2 !important;
+      cursor: pointer !important;
+    }
+
+    body #tab_data > .performance-stats-card .performance-table-metric-chip:has(input:checked) {
+      border-color: #93c5fd !important;
+      background: #eff6ff !important;
+      color: #0b5fce !important;
+    }
+
+    body #tab_data > .performance-stats-card .performance-table-metric-chip input {
+      flex: 0 0 auto !important;
+      width: 14px !important;
+      height: 14px !important;
+      min-height: 14px !important;
+      margin: 0 !important;
+    }
+
     body #tab_data > .performance-stats-card > .performance-result-viewbar,
     body #tab_data > .performance-stats-card > .performance-copy-control,
     body #tab_data > .performance-stats-card > #performance_stats_result,
@@ -16397,6 +16495,15 @@
       }
 
       body #tab_data > .performance-stats-card .performance-query-actions {
+        justify-content: flex-start !important;
+      }
+
+      body #tab_data > .performance-stats-card .performance-table-metric-head {
+        align-items: stretch !important;
+        flex-direction: column !important;
+      }
+
+      body #tab_data > .performance-stats-card .performance-table-metric-presets {
         justify-content: flex-start !important;
       }
 
@@ -18682,7 +18789,7 @@
         <div id="tab_data" class="tab-content active">
           <div class="card performance-stats-card">
             <div class="card-title">검색광고 성과 조회</div>
-            <div class="field-note">노출수, 클릭수, 전환수, 구매완료수, 구매완료 ROAS, 총비용, CPC만 확인합니다.</div>
+            <div class="field-note">성과 표에 표시할 지표를 선택해서 확인합니다.</div>
             <div class="performance-query-panel">
               <div class="performance-query-fields">
                 <div class="grid-3 performance-filter-grid" style="margin-bottom:12px;">
@@ -18749,6 +18856,21 @@
                  <button class="btn btn-sub" onclick="togglePerformanceAutoRefresh()">자동 새로고침 적용</button>
                  <button class="btn btn-sub" onclick="clearPerformanceStatsResult()">결과 비우기</button>
                </div>
+            </div>
+            <div class="performance-table-metric-panel" aria-label="성과 표 지표 선택">
+              <div class="performance-table-metric-head">
+                <div class="performance-table-metric-title">
+                  <strong>표 지표</strong>
+                  <span id="performance_table_metric_status">기본 지표 표시</span>
+                </div>
+                <div class="performance-table-metric-presets">
+                  <button type="button" class="performance-table-metric-preset" data-performance-metric-preset="core" onclick="setPerformanceTableMetricPreset('core')">핵심</button>
+                  <button type="button" class="performance-table-metric-preset" data-performance-metric-preset="conversion" onclick="setPerformanceTableMetricPreset('conversion')">전환</button>
+                  <button type="button" class="performance-table-metric-preset" data-performance-metric-preset="cart" onclick="setPerformanceTableMetricPreset('cart')">장바구니 포함</button>
+                  <button type="button" class="performance-table-metric-preset" data-performance-metric-preset="all" onclick="setPerformanceTableMetricPreset('all')">전체</button>
+                </div>
+              </div>
+              <div class="performance-table-metric-grid" id="performance_table_metric_grid"></div>
             </div>
             <div class="performance-result-viewbar" role="group" aria-label="성과 결과 보기">
               <div class="performance-result-view-label">결과 보기</div>
@@ -21475,6 +21597,9 @@ let dimensionDataBackgroundTimers = {};
 let dimensionDataBackgroundTokens = {};
 let performanceStatsSortState = { key: null, direction: 'desc', kind: 'number' };
 let reportDataTableSortStates = {};
+const PERFORMANCE_TABLE_METRIC_STORAGE_KEY = 'naver_performance_table_metrics_v1';
+const PERFORMANCE_TABLE_DEFAULT_METRIC_KEYS = ['impCnt', 'clkCnt', 'ccnt', 'purchaseCcnt', 'purchaseRor', 'salesAmt', 'cpc'];
+let performanceTableMetricKeys = null;
 let performanceBidEditorState = { key: null };
 let performanceAdgroupCopyModeEnabled = false;
 let selectedPerformanceCopyAdgroupIds = new Set();
@@ -24583,6 +24708,7 @@ window.onload = async function() {
     restoreWorkflowAssistMode();
     initWorkflowHelpHubMotion();
     renderAccounts();
+    renderPerformanceTableMetricPicker();
     if(restoredAuth.customerId) {
         const matched = getUniqueAccountsData().find(acc => String(acc.customer_id || '') === String(restoredAuth.customerId || ''));
         if(matched) {
@@ -31448,10 +31574,12 @@ function formatMetricPercent(value) {
     const n = Number(value || 0);
     return `${Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '0'} %`;
 }
-function performanceMetricCell(metrics, key, kind = 'number') {
+function performanceMetricCell(metrics, key, kind = null) {
     const value = metrics?.[key] ?? 0;
-    if(kind === 'won') return escapeMaybe(formatMetricWon(value));
-    if(kind === 'percent') return escapeMaybe(formatMetricPercent(value));
+    const resolvedKind = kind || getPerformanceMetricInfo(key)?.kind || 'number';
+    if(resolvedKind === 'won') return escapeMaybe(formatMetricWon(value));
+    if(resolvedKind === 'percent') return escapeMaybe(formatMetricPercent(value));
+    if(resolvedKind === 'rank') return escapeMaybe(formatPerformanceDemographicMetric(value, key));
     return escapeMaybe(formatMetricNumber(value));
 }
 
@@ -31475,6 +31603,132 @@ const PERFORMANCE_DEMOGRAPHIC_METRICS = [
     { key: 'salesAmt', label: '총비용', kind: 'won' },
     { key: 'avgRnk', label: '평균노출순위', kind: 'rank' },
 ];
+
+const PERFORMANCE_TABLE_PRESETS = {
+    core: ['impCnt', 'clkCnt', 'ccnt', 'purchaseCcnt', 'purchaseRor', 'salesAmt', 'cpc'],
+    conversion: ['impCnt', 'clkCnt', 'ccnt', 'convAmt', 'cvr', 'ror', 'purchaseCcnt', 'purchaseConvAmt', 'purchaseCvr', 'purchaseRor', 'salesAmt'],
+    cart: ['impCnt', 'clkCnt', 'ccnt', 'purchaseCcnt', 'purchaseRor', 'cartCcnt', 'cartConvAmt', 'cartCvr', 'cartRor', 'salesAmt', 'cpc'],
+    all: PERFORMANCE_DEMOGRAPHIC_METRICS.map(item => item.key),
+};
+
+function getPerformanceMetricInfo(key) {
+    return PERFORMANCE_DEMOGRAPHIC_METRICS.find(item => item.key === key) || null;
+}
+
+function normalizePerformanceTableMetricKeys(keys = []) {
+    const allowed = new Set(PERFORMANCE_DEMOGRAPHIC_METRICS.map(item => item.key));
+    const normalized = [];
+    (Array.isArray(keys) ? keys : []).forEach(key => {
+        const cleanKey = String(key || '').trim();
+        if(allowed.has(cleanKey) && !normalized.includes(cleanKey)) normalized.push(cleanKey);
+    });
+    return normalized.length ? normalized : [...PERFORMANCE_TABLE_DEFAULT_METRIC_KEYS];
+}
+
+function loadPerformanceTableMetricKeys() {
+    try {
+        const raw = localStorage.getItem(PERFORMANCE_TABLE_METRIC_STORAGE_KEY);
+        if(raw) return normalizePerformanceTableMetricKeys(JSON.parse(raw));
+    } catch(e) {}
+    return normalizePerformanceTableMetricKeys(PERFORMANCE_TABLE_DEFAULT_METRIC_KEYS);
+}
+
+function savePerformanceTableMetricKeys(keys = []) {
+    performanceTableMetricKeys = normalizePerformanceTableMetricKeys(keys);
+    try {
+        localStorage.setItem(PERFORMANCE_TABLE_METRIC_STORAGE_KEY, JSON.stringify(performanceTableMetricKeys));
+    } catch(e) {}
+    clearHiddenPerformanceMetricSorts();
+}
+
+function getPerformanceTableMetricKeys() {
+    if(!performanceTableMetricKeys) performanceTableMetricKeys = loadPerformanceTableMetricKeys();
+    performanceTableMetricKeys = normalizePerformanceTableMetricKeys(performanceTableMetricKeys);
+    return performanceTableMetricKeys;
+}
+
+function getVisiblePerformanceTableMetrics() {
+    return getPerformanceTableMetricKeys()
+        .map(key => getPerformanceMetricInfo(key))
+        .filter(Boolean);
+}
+
+function isPerformanceTableMetricVisible(key) {
+    return getPerformanceTableMetricKeys().includes(String(key || ''));
+}
+
+function isPerformanceMetricKey(key) {
+    return PERFORMANCE_DEMOGRAPHIC_METRICS.some(item => item.key === key);
+}
+
+function performanceMetricKeySetsEqual(a = [], b = []) {
+    const left = normalizePerformanceTableMetricKeys(a);
+    const right = normalizePerformanceTableMetricKeys(b);
+    const rightSet = new Set(right);
+    return left.length === right.length && left.every(key => rightSet.has(key));
+}
+
+function clearHiddenPerformanceMetricSorts() {
+    if(performanceStatsSortState?.key && performanceStatsSortState.key !== 'name' && isPerformanceMetricKey(performanceStatsSortState.key) && !isPerformanceTableMetricVisible(performanceStatsSortState.key)) {
+        performanceStatsSortState = { key: null, direction: 'desc', kind: 'number' };
+    }
+    Object.keys(reportDataTableSortStates || {}).forEach(tableKey => {
+        const state = reportDataTableSortStates[tableKey];
+        if(state?.key && isPerformanceMetricKey(state.key) && !isPerformanceTableMetricVisible(state.key)) {
+            reportDataTableSortStates[tableKey] = { key: null, direction: 'asc', kind: 'number' };
+        }
+    });
+}
+
+function renderPerformanceTableMetricPicker() {
+    const grid = document.getElementById('performance_table_metric_grid');
+    const status = document.getElementById('performance_table_metric_status');
+    if(!grid) return;
+    const selected = new Set(getPerformanceTableMetricKeys());
+    grid.innerHTML = PERFORMANCE_DEMOGRAPHIC_METRICS.map(item => `
+        <label class="performance-table-metric-chip">
+            <input type="checkbox" ${selected.has(item.key) ? 'checked' : ''} onchange="setPerformanceTableMetricKey('${escapeAttr(item.key)}', this.checked)">
+            <span>${escapeMaybe(item.label)}</span>
+        </label>
+    `).join('');
+    if(status) status.textContent = `${selected.size}개 지표 표시`;
+    document.querySelectorAll('[data-performance-metric-preset]').forEach(button => {
+        const preset = button.dataset.performanceMetricPreset || '';
+        button.classList.toggle('is-active', performanceMetricKeySetsEqual(Array.from(selected), PERFORMANCE_TABLE_PRESETS[preset] || []));
+    });
+}
+
+function rerenderPerformanceMetricTables() {
+    if(performanceStatsLastData) renderPerformanceStatsResult(performanceStatsLastData);
+    if(ageDataLastData) renderAgeDataReport();
+    if(timeDataLastData) renderTimeDataReport();
+    ['area_data', 'media_data', 'region_data'].forEach(prefix => {
+        if(getDimensionDataStore(prefix)) renderDimensionDataReport(prefix);
+    });
+}
+
+function setPerformanceTableMetricKey(key, checked) {
+    const current = new Set(getPerformanceTableMetricKeys());
+    if(checked) {
+        current.add(key);
+    } else if(current.size <= 1) {
+        showToast('표 지표는 최소 1개 이상 선택해야 합니다.', 'error');
+        renderPerformanceTableMetricPicker();
+        return;
+    } else {
+        current.delete(key);
+    }
+    savePerformanceTableMetricKeys(Array.from(current));
+    renderPerformanceTableMetricPicker();
+    rerenderPerformanceMetricTables();
+}
+
+function setPerformanceTableMetricPreset(preset) {
+    const keys = PERFORMANCE_TABLE_PRESETS[preset] || PERFORMANCE_TABLE_PRESETS.core;
+    savePerformanceTableMetricKeys(keys);
+    renderPerformanceTableMetricPicker();
+    rerenderPerformanceMetricTables();
+}
 
 function reportDataMetricOptionsHtml(selectedKey = 'impCnt') {
     return PERFORMANCE_DEMOGRAPHIC_METRICS
@@ -31791,17 +32045,12 @@ function renderPerformanceTotalRow(summary, level, includeActions = false, inclu
         document.getElementById('performance_date_preset')?.selectedOptions?.[0]?.textContent || '',
         document.getElementById('performance_target_scope')?.selectedOptions?.[0]?.textContent || ''
     ].filter(Boolean).join(' · ');
+    const visibleMetrics = getVisiblePerformanceTableMetrics();
     return `
         <tr class="performance-total-row">
             ${includeSelection ? '<td class="performance-copy-select-cell"></td>' : ''}
             <td><strong>${escapeMaybe(getPerformanceTotalLabel(level, campaignType))}</strong><div class="field-note">${escapeMaybe(subLabel || '조회 조건 종합')}</div></td>
-            <td>${performanceMetricCell(metrics, 'impCnt')}</td>
-            <td>${performanceMetricCell(metrics, 'clkCnt')}</td>
-            <td>${performanceMetricCell(metrics, 'ccnt')}</td>
-            <td>${performanceMetricCell(metrics, 'purchaseCcnt')}</td>
-            <td>${performanceMetricCell(metrics, 'purchaseRor', 'percent')}</td>
-            <td>${performanceMetricCell(metrics, 'salesAmt', 'won')}</td>
-            <td>${performanceMetricCell(metrics, 'cpc', 'won')}</td>
+            ${visibleMetrics.map(metric => `<td>${performanceMetricCell(metrics, metric.key, metric.kind)}</td>`).join('')}
             ${includeActions ? '<td class="performance-bid-cell"></td>' : ''}
         </tr>
     `;
@@ -31819,6 +32068,7 @@ function getPerformanceSortValue(row, key) {
 function sortPerformanceRows(rows) {
     const state = performanceStatsSortState || {};
     if(!state.key) return rows;
+    if(state.key !== 'name' && isPerformanceMetricKey(state.key) && !isPerformanceTableMetricVisible(state.key)) return rows;
     const direction = state.direction === 'asc' ? 1 : -1;
     const kind = state.kind === 'text' ? 'text' : 'number';
     return [...rows].sort((a, b) => {
@@ -32101,6 +32351,7 @@ function renderPerformanceDailyTable(row, level = null) {
     }
     const dataLevel = normalizePerformanceResultLevel(level || performanceStatsLastData?.result_level || 'type');
     const tableKey = `performance_daily_${getPerformanceRowKey(row, dataLevel) || 'row'}`;
+    const visibleMetrics = getVisiblePerformanceTableMetrics();
     const sortedDays = sortReportDataRows(
         days,
         tableKey,
@@ -32112,13 +32363,7 @@ function renderPerformanceDailyTable(row, level = null) {
         return `
             <tr>
                 <td><strong>${escapeMaybe(day.date || '-')}</strong></td>
-                <td>${performanceMetricCell(metrics, 'impCnt')}</td>
-                <td>${performanceMetricCell(metrics, 'clkCnt')}</td>
-                <td>${performanceMetricCell(metrics, 'ccnt')}</td>
-                <td>${performanceMetricCell(metrics, 'purchaseCcnt')}</td>
-                <td>${performanceMetricCell(metrics, 'purchaseRor', 'percent')}</td>
-                <td>${performanceMetricCell(metrics, 'salesAmt', 'won')}</td>
-                <td>${performanceMetricCell(metrics, 'cpc', 'won')}</td>
+                ${visibleMetrics.map(metric => `<td>${performanceMetricCell(metrics, metric.key, metric.kind)}</td>`).join('')}
             </tr>
         `;
     }).join('');
@@ -32128,13 +32373,7 @@ function renderPerformanceDailyTable(row, level = null) {
                 <thead>
                     <tr>
                         ${renderReportDataSortHeader(tableKey, 'date', '일자', 'text')}
-                        ${renderReportDataSortHeader(tableKey, 'impCnt', '노출수')}
-                        ${renderReportDataSortHeader(tableKey, 'clkCnt', '클릭수')}
-                        ${renderReportDataSortHeader(tableKey, 'ccnt', '전환수')}
-                        ${renderReportDataSortHeader(tableKey, 'purchaseCcnt', '구매완료수')}
-                        ${renderReportDataSortHeader(tableKey, 'purchaseRor', '구매완료 ROAS')}
-                        ${renderReportDataSortHeader(tableKey, 'salesAmt', '총비용')}
-                        ${renderReportDataSortHeader(tableKey, 'cpc', 'CPC')}
+                        ${visibleMetrics.map(metric => renderReportDataSortHeader(tableKey, metric.key, metric.label)).join('')}
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
@@ -32333,17 +32572,12 @@ function renderPerformanceSortHeader(key, label, kind = 'number') {
 }
 
 function renderPerformanceTableHeader(nameLabel, includeActions = false, includeSelection = false) {
+    const visibleMetrics = getVisiblePerformanceTableMetrics();
     return `
         <tr>
             ${includeSelection ? '<th class="performance-copy-select-cell">선택</th>' : ''}
             ${renderPerformanceSortHeader('name', nameLabel, 'text')}
-            ${renderPerformanceSortHeader('impCnt', '노출수')}
-            ${renderPerformanceSortHeader('clkCnt', '클릭수')}
-            ${renderPerformanceSortHeader('ccnt', '전환수')}
-            ${renderPerformanceSortHeader('purchaseCcnt', '구매완료수')}
-            ${renderPerformanceSortHeader('purchaseRor', '구매완료 ROAS')}
-            ${renderPerformanceSortHeader('salesAmt', '총비용')}
-            ${renderPerformanceSortHeader('cpc', 'CPC')}
+            ${visibleMetrics.map(metric => renderPerformanceSortHeader(metric.key, metric.label)).join('')}
             ${includeActions ? '<th class="performance-bid-cell">작업</th>' : ''}
         </tr>
     `;
@@ -32362,7 +32596,8 @@ function renderPerformanceStatsResult(data) {
     const includeActions = isPerformanceEditableLevel(level);
     const includeSelection = performanceAdgroupCopyModeEnabled && level === 'adgroup';
     if(includeSelection) prunePerformanceCopySelection();
-    const colCount = 8 + (includeActions ? 1 : 0) + (includeSelection ? 1 : 0);
+    const visibleMetrics = getVisiblePerformanceTableMetrics();
+    const colCount = 1 + visibleMetrics.length + (includeActions ? 1 : 0) + (includeSelection ? 1 : 0);
     syncPerformanceResultLevelTabs(level);
     updatePerformanceCopyControls();
     const nameLabel = level === 'adgroup' ? '광고그룹 / 캠페인' : (level === 'campaign' ? '캠페인' : '유형');
@@ -32390,13 +32625,7 @@ function renderPerformanceStatsResult(data) {
             <tr class="performance-row${navigable ? ' is-navigable' : ''}">
                 ${renderPerformanceCopySelectCell(row, level)}
                 ${renderPerformanceNameCell(row, level, name, sub)}
-                <td>${performanceMetricCell(metrics, 'impCnt')}</td>
-                <td>${performanceMetricCell(metrics, 'clkCnt')}</td>
-                <td>${performanceMetricCell(metrics, 'ccnt')}</td>
-                <td>${performanceMetricCell(metrics, 'purchaseCcnt')}</td>
-                <td>${performanceMetricCell(metrics, 'purchaseRor', 'percent')}</td>
-                <td>${performanceMetricCell(metrics, 'salesAmt', 'won')}</td>
-                <td>${performanceMetricCell(metrics, 'cpc', 'won')}</td>
+                ${visibleMetrics.map(metric => `<td>${performanceMetricCell(metrics, metric.key, metric.kind)}</td>`).join('')}
                 ${renderPerformanceBidCell(row, level)}
             </tr>
             ${renderPerformanceBidEditorRow(row, level, colCount)}
@@ -34073,7 +34302,11 @@ function normalizeReportDataMetricSet(metrics = {}) {
 }
 
 function getReportDataTableSortState(tableKey) {
-    return reportDataTableSortStates?.[tableKey] || { key: null, direction: 'asc', kind: 'number' };
+    const state = reportDataTableSortStates?.[tableKey] || { key: null, direction: 'asc', kind: 'number' };
+    if(state.key && isPerformanceMetricKey(state.key) && !isPerformanceTableMetricVisible(state.key)) {
+        return { key: null, direction: 'asc', kind: 'number' };
+    }
+    return state;
 }
 
 function renderReportDataSortHeader(tableKey, key, label, kind = 'number') {
@@ -34331,6 +34564,7 @@ function renderReportDataGenderSidePanel(genderRows, metricKey) {
 function renderReportDataGenderMetricTable(genderRows) {
     if(!Array.isArray(genderRows) || !genderRows.length) return '';
     const tableKey = 'age_data_gender_metrics';
+    const tableMetrics = getReportDataTableMetrics();
     const sortedRows = sortReportDataRows(
         genderRows,
         tableKey,
@@ -34339,7 +34573,7 @@ function renderReportDataGenderMetricTable(genderRows) {
     );
     const body = sortedRows.map(row => `<tr>
         <td>${escapeMaybe(row.label || '-')}</td>
-        ${TIME_DATA_TABLE_METRICS.map(metric => `<td>${escapeMaybe(formatPerformanceDemographicMetric(row?.metrics?.[metric.key] || 0, metric.key))}</td>`).join('')}
+        ${tableMetrics.map(metric => `<td>${escapeMaybe(formatPerformanceDemographicMetric(row?.metrics?.[metric.key] || 0, metric.key))}</td>`).join('')}
     </tr>`).join('');
     return `
         <div class="report-data-section-title">성별 전체 지표</div>
@@ -34348,10 +34582,10 @@ function renderReportDataGenderMetricTable(genderRows) {
             <thead>
               <tr>
                 ${renderReportDataSortHeader(tableKey, 'label', '성별', 'text')}
-                ${TIME_DATA_TABLE_METRICS.map(item => renderReportDataSortHeader(tableKey, item.key, item.label)).join('')}
+                ${tableMetrics.map(item => renderReportDataSortHeader(tableKey, item.key, item.label)).join('')}
               </tr>
             </thead>
-            <tbody>${body || `<tr><td colspan="${TIME_DATA_TABLE_METRICS.length + 1}">표시할 성별 데이터가 없습니다.</td></tr>`}</tbody>
+            <tbody>${body || `<tr><td colspan="${tableMetrics.length + 1}">표시할 성별 데이터가 없습니다.</td></tr>`}</tbody>
           </table>
         </div>
     `;
@@ -35508,6 +35742,49 @@ function reportDataRegionLabelBoxFits(box, mapBox) {
         && box.y + box.h <= mapBox.y + mapBox.h - 6;
 }
 
+function reportDataTrimConnectorBeforeBox(ax, ay, box, gap = 5) {
+    const cx = box.x + box.w / 2;
+    const cy = box.y + box.h / 2;
+    const dx = cx - ax;
+    const dy = cy - ay;
+    const distance = Math.hypot(dx, dy);
+    if(distance < 2) return null;
+    const halfW = box.w / 2;
+    const halfH = box.h / 2;
+    const scaleX = dx ? halfW / Math.abs(dx) : Infinity;
+    const scaleY = dy ? halfH / Math.abs(dy) : Infinity;
+    const scale = Math.min(scaleX, scaleY);
+    if(!Number.isFinite(scale) || scale <= 0 || scale >= 1) return null;
+    const edgeX = cx - dx * scale;
+    const edgeY = cy - dy * scale;
+    const edgeDx = edgeX - ax;
+    const edgeDy = edgeY - ay;
+    const edgeDistance = Math.hypot(edgeDx, edgeDy);
+    if(edgeDistance <= gap + 1) return null;
+    return {
+        x: edgeX - edgeDx / edgeDistance * gap,
+        y: edgeY - edgeDy / edgeDistance * gap,
+    };
+}
+
+function reportDataConnectorCrossesLabelBox(x1, y1, x2, y2, boxes = [], targetBox = null) {
+    const distance = Math.hypot(x2 - x1, y2 - y1);
+    const steps = Math.max(6, Math.ceil(distance / 5));
+    return (boxes || []).some(box => {
+        if(!box || box === targetBox) return false;
+        const pad = 3;
+        for(let i = 1; i < steps; i += 1) {
+            const t = i / steps;
+            const x = x1 + (x2 - x1) * t;
+            const y = y1 + (y2 - y1) * t;
+            if(x >= box.x - pad && x <= box.x + box.w + pad && y >= box.y - pad && y <= box.y + box.h + pad) {
+                return true;
+            }
+        }
+        return false;
+    });
+}
+
 function reportDataDrawRegionLabel(ctx, item, project, metricKey, maxValue, placedBoxes = [], mapBox = null) {
     const anchor = REPORT_DATA_REGION_LABEL_ANCHORS[item.code] || reportDataRegionFallbackCenter(item.feature);
     const [ax, ay] = project(anchor);
@@ -35543,12 +35820,15 @@ function reportDataDrawRegionLabel(ctx, item, project, metricKey, maxValue, plac
     }
     placedBoxes.push(selectedBox);
     if(dx || dy || Math.abs(x - ax) > 2 || Math.abs(y - ay) > 2) {
-        ctx.beginPath();
-        ctx.moveTo(ax, ay);
-        ctx.lineTo(x, y);
-        ctx.strokeStyle = item.value / Math.max(1, maxValue) > 0.55 ? 'rgba(15, 23, 42, 0.42)' : 'rgba(71, 85, 105, 0.28)';
-        ctx.lineWidth = 1.15;
-        ctx.stroke();
+        const connectorEnd = reportDataTrimConnectorBeforeBox(ax, ay, selectedBox);
+        if(connectorEnd && !reportDataConnectorCrossesLabelBox(ax, ay, connectorEnd.x, connectorEnd.y, placedBoxes, selectedBox)) {
+            ctx.beginPath();
+            ctx.moveTo(ax, ay);
+            ctx.lineTo(connectorEnd.x, connectorEnd.y);
+            ctx.strokeStyle = item.value / Math.max(1, maxValue) > 0.55 ? 'rgba(15, 23, 42, 0.42)' : 'rgba(71, 85, 105, 0.28)';
+            ctx.lineWidth = 1.15;
+            ctx.stroke();
+        }
     }
     ctx.shadowColor = 'rgba(15, 23, 42, 0.14)';
     ctx.shadowBlur = 10;
@@ -35936,6 +36216,10 @@ function renderReportDataMetricTable(rows, series, metricKey, labelHeader = '구
 
 const TIME_DATA_TABLE_METRICS = PERFORMANCE_DEMOGRAPHIC_METRICS;
 
+function getReportDataTableMetrics() {
+    return getVisiblePerformanceTableMetrics();
+}
+
 function getTimeDataJudgement(row, profile, series, metricKey) {
     const value = reportDataRowMetricValue(row, series, metricKey);
     const maxValue = profile?.maxValue || 0;
@@ -35948,6 +36232,7 @@ function renderTimeDataMetricTable(rows, metricKey = 'impCnt') {
     const series = [{ key: 'total', label: '합계', color: '#2563eb' }];
     const profile = getReportDataTimeProfile(rows, series, metricKey);
     const tableKey = 'time_data_metrics';
+    const tableMetrics = getReportDataTableMetrics();
     const sortedRows = sortReportDataRows(
         rows || [],
         tableKey,
@@ -35964,18 +36249,18 @@ function renderTimeDataMetricTable(rows, metricKey = 'impCnt') {
         const judgement = getTimeDataJudgement(row, profile, series, metricKey);
         return `<tr>
             <td>${escapeMaybe(row.label || '-')}</td>
-            ${TIME_DATA_TABLE_METRICS.map(metric => `<td>${escapeMaybe(formatPerformanceDemographicMetric(metrics?.[metric.key] || 0, metric.key))}</td>`).join('')}
+            ${tableMetrics.map(metric => `<td>${escapeMaybe(formatPerformanceDemographicMetric(metrics?.[metric.key] || 0, metric.key))}</td>`).join('')}
             <td><span class="report-data-judgement ${escapeAttr(judgement.className)}">${escapeMaybe(judgement.label)}</span></td>
         </tr>`;
     }).join('');
-    const colSpan = TIME_DATA_TABLE_METRICS.length + 2;
+    const colSpan = tableMetrics.length + 2;
     return `
         <div class="report-data-table-wrap">
           <table class="report-data-table">
             <thead>
               <tr>
                 ${renderReportDataSortHeader(tableKey, 'label', '시간대', 'text')}
-                ${TIME_DATA_TABLE_METRICS.map(item => renderReportDataSortHeader(tableKey, item.key, item.label)).join('')}
+                ${tableMetrics.map(item => renderReportDataSortHeader(tableKey, item.key, item.label)).join('')}
                 ${renderReportDataSortHeader(tableKey, 'judgement', '판단', 'text')}
               </tr>
             </thead>
@@ -35987,7 +36272,8 @@ function renderTimeDataMetricTable(rows, metricKey = 'impCnt') {
 
 function renderAgeDataFullMetricTable(rows, series) {
     const hasSplit = Array.isArray(series) && series.some(item => item.key !== 'total');
-    const headers = ['연령대', hasSplit ? '구분' : '합계', ...TIME_DATA_TABLE_METRICS.map(item => item.label)];
+    const tableMetrics = getReportDataTableMetrics();
+    const headers = ['연령대', hasSplit ? '구분' : '합계', ...tableMetrics.map(item => item.label)];
     const tableKey = 'age_data_metrics';
     const sortedRows = sortReportDataRows(
         rows || [],
@@ -36005,7 +36291,7 @@ function renderAgeDataFullMetricTable(rows, series) {
                 rowParts.push(`<tr>
                     <td>${escapeMaybe(row.label || '-')}</td>
                     <td class="report-data-group-cell">${escapeMaybe(item.label || '-')}</td>
-                    ${TIME_DATA_TABLE_METRICS.map(metric => `<td>${escapeMaybe(formatPerformanceDemographicMetric(metrics?.[metric.key] || 0, metric.key))}</td>`).join('')}
+                    ${tableMetrics.map(metric => `<td>${escapeMaybe(formatPerformanceDemographicMetric(metrics?.[metric.key] || 0, metric.key))}</td>`).join('')}
                 </tr>`);
             });
         }
@@ -36013,7 +36299,7 @@ function renderAgeDataFullMetricTable(rows, series) {
         rowParts.push(`<tr class="report-data-total-row">
             <td>${escapeMaybe(row.label || '-')}</td>
             <td class="report-data-group-cell">합계</td>
-            ${TIME_DATA_TABLE_METRICS.map(metric => `<td>${escapeMaybe(formatPerformanceDemographicMetric(totalMetrics?.[metric.key] || 0, metric.key))}</td>`).join('')}
+            ${tableMetrics.map(metric => `<td>${escapeMaybe(formatPerformanceDemographicMetric(totalMetrics?.[metric.key] || 0, metric.key))}</td>`).join('')}
         </tr>`);
         return rowParts.join('');
     }).join('');
@@ -36023,7 +36309,7 @@ function renderAgeDataFullMetricTable(rows, series) {
             <thead><tr>
                 ${renderReportDataSortHeader(tableKey, 'label', '연령대', 'text')}
                 <th>${escapeMaybe(hasSplit ? '구분' : '합계')}</th>
-                ${TIME_DATA_TABLE_METRICS.map(item => renderReportDataSortHeader(tableKey, item.key, item.label)).join('')}
+                ${tableMetrics.map(item => renderReportDataSortHeader(tableKey, item.key, item.label)).join('')}
             </tr></thead>
             <tbody>${body || `<tr><td colspan="${headers.length}">표시할 데이터가 없습니다.</td></tr>`}</tbody>
           </table>
@@ -36274,6 +36560,7 @@ function getDimensionDataJudgement(prefix, row, rows, metricKey) {
 function renderDimensionDataMetricTable(prefix, rows, metricKey = 'impCnt') {
     const config = DIMENSION_DATA_CONFIGS[prefix] || DIMENSION_DATA_CONFIGS.area_data;
     const tableKey = `${prefix}_metrics`;
+    const tableMetrics = getReportDataTableMetrics();
     const sortedRows = sortReportDataRows(
         rows || [],
         tableKey,
@@ -36294,18 +36581,18 @@ function renderDimensionDataMetricTable(prefix, rows, metricKey = 'impCnt') {
         ) ? ' class="report-data-media-muted"' : '';
         return `<tr>
             <td${mutedNameClass}>${escapeMaybe(row.label || '-')}</td>
-            ${TIME_DATA_TABLE_METRICS.map(metric => `<td>${escapeMaybe(formatPerformanceDemographicMetric(metrics?.[metric.key] || 0, metric.key))}</td>`).join('')}
+            ${tableMetrics.map(metric => `<td>${escapeMaybe(formatPerformanceDemographicMetric(metrics?.[metric.key] || 0, metric.key))}</td>`).join('')}
             <td><span class="report-data-judgement ${escapeAttr(judgement.className)}">${escapeMaybe(judgement.label)}</span></td>
         </tr>`;
     }).join('');
-    const colSpan = TIME_DATA_TABLE_METRICS.length + 2;
+    const colSpan = tableMetrics.length + 2;
     return `
         <div class="report-data-table-wrap">
           <table class="report-data-table">
             <thead>
               <tr>
                 ${renderReportDataSortHeader(tableKey, 'label', config.labelHeader, 'text')}
-                ${TIME_DATA_TABLE_METRICS.map(item => renderReportDataSortHeader(tableKey, item.key, item.label)).join('')}
+                ${tableMetrics.map(item => renderReportDataSortHeader(tableKey, item.key, item.label)).join('')}
                 ${renderReportDataSortHeader(tableKey, 'judgement', '판단', 'text')}
               </tr>
             </thead>
@@ -36680,7 +36967,7 @@ function clearDimensionDataReport(prefix) {
 
 function metricsCsvValues(metrics) {
     const normalized = normalizeReportDataMetricSet(metrics || {});
-    return TIME_DATA_TABLE_METRICS.map(item => {
+    return getReportDataTableMetrics().map(item => {
         const value = Number(normalized?.[item.key] || 0);
         if(item.kind === 'won') return Math.round(value);
         return Math.round(value * 100) / 100;
@@ -36689,7 +36976,7 @@ function metricsCsvValues(metrics) {
 
 function timeDataCsvValues(metrics) {
     const normalized = normalizeReportDataMetricSet(metrics || {});
-    return TIME_DATA_TABLE_METRICS.map(item => {
+    return getReportDataTableMetrics().map(item => {
         const value = Number(normalized?.[item.key] || 0);
         if(item.kind === 'won') return Math.round(value);
         return Math.round(value * 100) / 100;
@@ -36702,6 +36989,7 @@ function downloadAgeDataCsv() {
         showToast('먼저 연령별 데이터를 조회해주세요.', 'error');
         return;
     }
+    const tableMetrics = getReportDataTableMetrics();
     const rows = [];
     if(demo.mode === 'age_gender') {
         (demo.age_gender_rows || []).forEach(ageRow => {
@@ -36713,7 +37001,7 @@ function downloadAgeDataCsv() {
     } else {
         (demo.age_rows || []).forEach(row => rows.push([row.label || row.key || '', '합계', ...metricsCsvValues(row.metrics)]));
     }
-    _downloadCsvFile('age_data.csv', ['연령대', '성별', ...TIME_DATA_TABLE_METRICS.map(item => item.label)], rows);
+    _downloadCsvFile('age_data.csv', ['연령대', '성별', ...tableMetrics.map(item => item.label)], rows);
 }
 
 function downloadTimeDataCsv() {
@@ -36721,8 +37009,9 @@ function downloadTimeDataCsv() {
         showToast('먼저 시간대별 데이터를 조회해주세요.', 'error');
         return;
     }
+    const tableMetrics = getReportDataTableMetrics();
     const rows = timeDataLastData.rows.map(row => [formatReportDataHourRangeLabel(row), ...timeDataCsvValues(row.metrics)]);
-    _downloadCsvFile('time_data.csv', ['시간대', ...TIME_DATA_TABLE_METRICS.map(item => item.label)], rows);
+    _downloadCsvFile('time_data.csv', ['시간대', ...tableMetrics.map(item => item.label)], rows);
 }
 
 function downloadDimensionDataCsv(prefix) {
@@ -36740,7 +37029,8 @@ function downloadDimensionDataCsv(prefix) {
         row.raw || row.key || '',
         ...metricsCsvValues(row.metrics || {}),
     ]);
-    _downloadCsvFile(config.filename, [config.labelHeader, '코드', ...TIME_DATA_TABLE_METRICS.map(item => item.label)], rows);
+    const tableMetrics = getReportDataTableMetrics();
+    _downloadCsvFile(config.filename, [config.labelHeader, '코드', ...tableMetrics.map(item => item.label)], rows);
 }
 
 async function fetchPerformanceStats(options = {}) {
