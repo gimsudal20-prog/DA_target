@@ -9566,6 +9566,7 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
     include_purchase_conversion_keywords = _boolish((payload or {}).get("include_purchase_conversion_keywords"), False)
     include_cart_count = _boolish((payload or {}).get("include_cart_count"), True)
     include_cart_amount = _boolish((payload or {}).get("include_cart_amount"), True)
+    include_inflow_keywords = _boolish((payload or {}).get("include_inflow_keywords"), False)
     metric_mode = str((payload or {}).get("report_metric_mode") or "").strip().lower()
     report_uses_purchase = metric_mode in {"purchase", "purchase_only", "구매완료", "구매완료 데이터"}
     report_format = str((payload or {}).get("report_format") or "media_summary").strip().lower()
@@ -9612,7 +9613,7 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
     if fast_enrichment_timeout <= 0:
         fast_enrichment_timeout = PERFORMANCE_SHOPPING_QUERY_FAST_TIMEOUT_SECONDS
     enrichment_deadline = time.monotonic() + max(PERFORMANCE_SHOPPING_QUERY_REPORT_MIN_TIMEOUT_SECONDS, fast_enrichment_timeout)
-    needs_keyword_enrichment = (not media_summary_format) or include_general_conversion_keywords or include_purchase_conversion_keywords
+    needs_keyword_enrichment = include_inflow_keywords or include_general_conversion_keywords or include_purchase_conversion_keywords
     executor = ThreadPoolExecutor(max_workers=3)
     powerlink_future = None
     shopping_future = None
@@ -9716,7 +9717,7 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
             "report_format": "media_summary",
         }
     base_has_shopping = any(_performance_campaign_bucket((row or {}).get("campaign_type") or (row or {}).get("id")) == "SHOPPING" for row in (base_result.get("rows") or []))
-    main_keyword_text = keyword_result.get("total_text") if keyword_result.get("has_powerlink") else ""
+    main_keyword_text = keyword_result.get("total_text") if include_inflow_keywords and keyword_result.get("has_powerlink") else ""
     main_general_conversion_keyword_text = (
         keyword_result.get("general_conversion_text")
         if keyword_result.get("has_powerlink") and include_general_conversion_keywords
@@ -9727,7 +9728,7 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
         if keyword_result.get("has_powerlink") and include_purchase_conversion_keywords
         else ""
     )
-    main_shopping_inflow_query_text = shopping_query_result.get("inflow_text") if base_has_shopping else ""
+    main_shopping_inflow_query_text = shopping_query_result.get("inflow_text") if include_inflow_keywords and base_has_shopping else ""
     main_shopping_general_conversion_query_text = shopping_query_result.get("general_conversion_text") if base_has_shopping and include_general_conversion_keywords else ""
     main_shopping_purchase_conversion_query_text = shopping_query_result.get("purchase_conversion_text") if base_has_shopping and include_purchase_conversion_keywords else ""
 
@@ -9743,10 +9744,10 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
             report_uses_purchase=report_uses_purchase,
             include_cart_count=include_cart_count,
             include_cart_amount=include_cart_amount,
-            keyword_text=str(main_keyword_text or ("없음" if type_filter != "SHOPPING" else "")),
+            keyword_text=str(main_keyword_text or ("없음" if include_inflow_keywords and type_filter != "SHOPPING" else "")),
             general_conversion_keyword_text=str(main_general_conversion_keyword_text or ("없음" if include_general_conversion_keywords and type_filter != "SHOPPING" else "")),
             purchase_conversion_keyword_text=str(main_purchase_conversion_keyword_text or ("없음" if include_purchase_conversion_keywords and type_filter != "SHOPPING" else "")),
-            shopping_inflow_query_text=str(main_shopping_inflow_query_text or ("없음" if base_has_shopping else "")),
+            shopping_inflow_query_text=str(main_shopping_inflow_query_text or ("없음" if include_inflow_keywords and base_has_shopping else "")),
             shopping_general_conversion_query_text=str(main_shopping_general_conversion_query_text or ("없음" if base_has_shopping and include_general_conversion_keywords else "")),
             shopping_purchase_conversion_query_text=str(main_shopping_purchase_conversion_query_text or ("없음" if base_has_shopping and include_purchase_conversion_keywords else "")),
         ),
@@ -9760,12 +9761,12 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
             report_uses_purchase=report_uses_purchase,
             include_cart_count=include_cart_count,
             include_cart_amount=include_cart_amount,
-            keyword_text_by_id=keyword_result.get("type_text_by_id") or {},
-            general_conversion_keyword_text_by_id=keyword_result.get("general_conversion_type_text_by_id") or {},
-            purchase_conversion_keyword_text_by_id=keyword_result.get("purchase_conversion_type_text_by_id") or {},
-            shopping_inflow_query_text_by_id=shopping_query_result.get("inflow_type_text_by_id") or {},
-            shopping_general_conversion_query_text_by_id=shopping_query_result.get("general_conversion_type_text_by_id") or {},
-            shopping_purchase_conversion_query_text_by_id=shopping_query_result.get("purchase_conversion_type_text_by_id") or {},
+            keyword_text_by_id=(keyword_result.get("type_text_by_id") or {}) if include_inflow_keywords else {},
+            general_conversion_keyword_text_by_id=(keyword_result.get("general_conversion_type_text_by_id") or {}) if include_general_conversion_keywords else {},
+            purchase_conversion_keyword_text_by_id=(keyword_result.get("purchase_conversion_type_text_by_id") or {}) if include_purchase_conversion_keywords else {},
+            shopping_inflow_query_text_by_id=(shopping_query_result.get("inflow_type_text_by_id") or {}) if include_inflow_keywords else {},
+            shopping_general_conversion_query_text_by_id=(shopping_query_result.get("general_conversion_type_text_by_id") or {}) if include_general_conversion_keywords else {},
+            shopping_purchase_conversion_query_text_by_id=(shopping_query_result.get("purchase_conversion_type_text_by_id") or {}) if include_purchase_conversion_keywords else {},
         )
         if type_text:
             report_parts.append(type_text)
@@ -9786,12 +9787,12 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
             report_uses_purchase=report_uses_purchase,
             include_cart_count=include_cart_count,
             include_cart_amount=include_cart_amount,
-            keyword_text_by_id=keyword_result.get("campaign_text_by_id") or {},
-            general_conversion_keyword_text_by_id=keyword_result.get("general_conversion_campaign_text_by_id") or {},
-            purchase_conversion_keyword_text_by_id=keyword_result.get("purchase_conversion_campaign_text_by_id") or {},
-            shopping_inflow_query_text_by_id=shopping_query_result.get("inflow_campaign_text_by_id") or {},
-            shopping_general_conversion_query_text_by_id=shopping_query_result.get("general_conversion_campaign_text_by_id") or {},
-            shopping_purchase_conversion_query_text_by_id=shopping_query_result.get("purchase_conversion_campaign_text_by_id") or {},
+            keyword_text_by_id=(keyword_result.get("campaign_text_by_id") or {}) if include_inflow_keywords else {},
+            general_conversion_keyword_text_by_id=(keyword_result.get("general_conversion_campaign_text_by_id") or {}) if include_general_conversion_keywords else {},
+            purchase_conversion_keyword_text_by_id=(keyword_result.get("purchase_conversion_campaign_text_by_id") or {}) if include_purchase_conversion_keywords else {},
+            shopping_inflow_query_text_by_id=(shopping_query_result.get("inflow_campaign_text_by_id") or {}) if include_inflow_keywords else {},
+            shopping_general_conversion_query_text_by_id=(shopping_query_result.get("general_conversion_campaign_text_by_id") or {}) if include_general_conversion_keywords else {},
+            shopping_purchase_conversion_query_text_by_id=(shopping_query_result.get("purchase_conversion_campaign_text_by_id") or {}) if include_purchase_conversion_keywords else {},
         )
         if campaign_text:
             report_parts.append(campaign_text)
