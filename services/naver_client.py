@@ -11,6 +11,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import time
 from typing import Any, Optional
 
@@ -18,6 +19,24 @@ import requests
 
 
 DEFAULT_OPENAPI_BASE_URL = "https://api.searchad.naver.com"
+_INVISIBLE_CHARS_RE = re.compile(r"[\u200b\u200c\u200d\ufeff]")
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def normalize_openapi_credential(value: Any) -> str:
+    """Normalize copied API credentials without changing meaningful key chars."""
+    text = _INVISIBLE_CHARS_RE.sub("", str(value or ""))
+    return _WHITESPACE_RE.sub("", text).strip()
+
+
+def normalize_customer_id(value: Any) -> str:
+    """Return a SearchAd Customer ID suitable for the X-Customer header."""
+    text = _INVISIBLE_CHARS_RE.sub("", str(value or "")).strip()
+    compact = _WHITESPACE_RE.sub("", text).replace(",", "")
+    if re.fullmatch(r"\d+\.0+", compact):
+        return compact.split(".", 1)[0]
+    digits = re.sub(r"\D+", "", compact)
+    return digits or compact
 
 
 def create_naver_session(pool_connections: int = 32, pool_maxsize: int = 64) -> requests.Session:
@@ -37,7 +56,7 @@ def make_signature(timestamp_ms: str, method: str, uri: str, secret_key: str) ->
     """Build the X-Signature value required by Naver SearchAd."""
     msg = f"{timestamp_ms}.{str(method).upper()}.{uri}"
     digest = hmac.new(
-        str(secret_key).strip().encode("utf-8"),
+        normalize_openapi_credential(secret_key).encode("utf-8"),
         msg.encode("utf-8"),
         hashlib.sha256,
     ).digest()
@@ -53,13 +72,60 @@ def build_open_headers(
 ) -> dict[str, str]:
     """Build standard SearchAd OpenAPI headers."""
     timestamp_ms = str(int(time.time() * 1000))
+    normalized_api_key = normalize_openapi_credential(api_key)
+    normalized_secret_key = normalize_openapi_credential(secret_key)
+    normalized_customer_id = normalize_customer_id(customer_id)
     return {
         "X-Timestamp": timestamp_ms,
-        "X-API-KEY": str(api_key).strip(),
-        "X-Customer": str(customer_id).strip(),
-        "X-Signature": make_signature(timestamp_ms, method, uri, secret_key),
+        "X-API-KEY": normalized_api_key,
+        "X-Customer": normalized_customer_id,
+        "X-Signature": make_signature(timestamp_ms, method, uri, normalized_secret_key),
         "Content-Type": "application/json; charset=UTF-8",
     }
+
+
+def _parse_error_payload(text: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(text or "{}")
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def format_naver_api_error(response: Any, operation: str = "네이버 API 요청") -> str:
+    """Return a safe, user-readable error message without echoing signatures."""
+    status_code = int(getattr(response, "status_code", 0) or 0)
+    raw_text = str(getattr(response, "text", "") or "").strip()
+    payload = {}
+    try:
+        parsed = response.json()
+        payload = parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        payload = _parse_error_payload(raw_text)
+
+    problem_type = str(payload.get("type") or "").strip()
+    title = str(payload.get("title") or payload.get("detail") or payload.get("message") or "").strip()
+    combined = " ".join([problem_type, title, raw_text]).lower()
+
+    if status_code == 403:
+        if "signature" in payload or "invalid" in combined or "signature" in combined:
+            return (
+                f"{operation} 인증 실패(403): 네이버가 요청 서명을 거절했습니다. "
+                "OPEN API KEY와 SECRET KEY가 같은 라이선스에서 복사된 값인지, 선택한 광고주 ID가 그 라이선스의 Customer ID인지, "
+                "PC 시간이 현재 시간과 크게 어긋나지 않았는지 확인해주세요."
+            )
+        return (
+            f"{operation} 권한 오류(403): 현재 API 라이선스가 선택한 광고주에 접근할 권한이 없습니다. "
+            "광고주 ID와 API 라이선스 계정을 확인해주세요."
+        )
+    if status_code == 401:
+        return f"{operation} 인증 실패(401): API KEY 또는 SECRET KEY를 다시 확인해주세요."
+    if status_code:
+        safe_parts = [x for x in [title, problem_type] if x]
+        if safe_parts:
+            return f"{operation} 실패({status_code}): {' | '.join(safe_parts)}"
+        return f"{operation} 실패({status_code}): {raw_text or '네이버 API 오류'}"
+    return f"{operation} 실패: {raw_text or '네이버 API 오류'}"
 
 
 class FakeResponse:

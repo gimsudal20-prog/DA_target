@@ -6,6 +6,8 @@ from typing import Any, Callable, Optional
 
 from flask import Blueprint, jsonify, request
 
+from services.naver_client import format_naver_api_error
+
 
 def create_lookup_blueprint(*, lookup_service: Any, target_object_func: Optional[Callable[..., Any]] = None) -> Blueprint:
     """Create lookup-only routes.
@@ -27,7 +29,11 @@ def create_lookup_blueprint(*, lookup_service: Any, target_object_func: Optional
         res, rows, cached = lookup_service.get_campaigns_cached(api_key, secret_key, cid, force=force)
         if cached or (res is not None and res.status_code == 200):
             return jsonify(rows)
-        return jsonify({"error": "캠페인 조회 실패", "details": getattr(res, "text", "")}), 400
+        return jsonify({
+            "error": "캠페인 조회 실패",
+            "details": format_naver_api_error(res, "캠페인 조회"),
+            "status_code": getattr(res, "status_code", None),
+        }), 400
 
     @bp.route("/get_adgroups", methods=["POST"])
     def get_adgroups():
@@ -50,7 +56,11 @@ def create_lookup_blueprint(*, lookup_service: Any, target_object_func: Optional
         )
         if cached or (res is not None and res.status_code == 200):
             return jsonify(rows)
-        return jsonify({"error": "광고그룹 조회 실패", "details": getattr(res, "text", "")}), 400
+        return jsonify({
+            "error": "광고그룹 조회 실패",
+            "details": format_naver_api_error(res, "광고그룹 조회"),
+            "status_code": getattr(res, "status_code", None),
+        }), 400
 
     @bp.route("/search_adgroups_global", methods=["POST"])
     def search_adgroups_global():
@@ -73,7 +83,11 @@ def create_lookup_blueprint(*, lookup_service: Any, target_object_func: Optional
 
         res_camps, campaigns, cached_camps = lookup_service.get_campaigns_cached(api_key, secret_key, cid, force=force)
         if not (cached_camps or (res_camps is not None and res_camps.status_code == 200)):
-            return jsonify({"error": "캠페인 조회 실패", "details": getattr(res_camps, "text", "")}), 400
+            return jsonify({
+                "error": "캠페인 조회 실패",
+                "details": format_naver_api_error(res_camps, "캠페인 조회"),
+                "status_code": getattr(res_camps, "status_code", None),
+            }), 400
 
         def normalize_search_text(value: Any) -> str:
             return " ".join(str(value or "").strip().split()).casefold()
@@ -164,6 +178,10 @@ def create_lookup_blueprint(*, lookup_service: Any, target_object_func: Optional
         res, rows, cached = lookup_service.get_channels_cached(api_key, secret_key, cid, force=force)
         if cached or (res is not None and res.status_code == 200):
             return jsonify(rows)
-        return jsonify({"error": "비즈채널 조회 실패", "details": getattr(res, "text", "")}), 400
+        return jsonify({
+            "error": "비즈채널 조회 실패",
+            "details": format_naver_api_error(res, "비즈채널 조회"),
+            "status_code": getattr(res, "status_code", None),
+        }), 400
 
     return bp

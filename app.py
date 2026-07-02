@@ -38,6 +38,8 @@ from services.naver_client import (
     create_naver_session,
     make_fake_response,
     make_signature,
+    normalize_customer_id,
+    normalize_openapi_credential,
     request_naver_api,
 )
 from services.lookup_service import (
@@ -16220,15 +16222,15 @@ def index():
         name_col = cols.get("account_name") or cols.get("name") or (df.columns[1] if len(df.columns) > 1 else df.columns[0])
         df2 = df[[cid_col, name_col]].copy()
         df2.columns = ["customer_id", "account_name"]
-        df2["customer_id"] = df2["customer_id"].astype(str).str.strip()
+        df2["customer_id"] = df2["customer_id"].apply(normalize_customer_id)
         df2["account_name"] = df2["account_name"].astype(str).str.strip()
         accounts = df2.to_dict(orient="records")
     favicon_path = os.path.join(app.static_folder or os.path.join(BASE_DIR, "static"), "favicon", "favicon.ico")
     favicon_version = int(os.path.getmtime(favicon_path)) if os.path.exists(favicon_path) else 0
     auth_defaults = {
-        "api_key": os.getenv("NAVER_API_KEY", ""),
-        "secret_key": os.getenv("NAVER_SECRET_KEY", ""),
-        "customer_id": os.getenv("NAVER_CUSTOMER_ID", ""),
+        "api_key": normalize_openapi_credential(os.getenv("NAVER_API_KEY", "")),
+        "secret_key": normalize_openapi_credential(os.getenv("NAVER_SECRET_KEY", "")),
+        "customer_id": normalize_customer_id(os.getenv("NAVER_CUSTOMER_ID", "")),
     }
     return render_template("index.html", accounts=accounts, favicon_version=favicon_version, auth_defaults=auth_defaults)
 
