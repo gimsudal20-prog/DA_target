@@ -4372,7 +4372,22 @@ def _get_time_performance_stats(api_key: str, secret_key: str, cid: str, payload
     target_campaign_ids, target_adgroup_ids, type_keys = _dimension_target_sets(target_rows)
     campaign_type_by_id = _dimension_campaign_type_map(target_rows)
     has_shopping_target = bool("SHOPPING" in type_keys or (type_filter == "SHOPPING" and target_rows))
-    report_types: List[str] = ["AD_DETAIL", "AD_CONVERSION_DETAIL"] if target_rows else []
+    requested_metric_keys = {
+        str(key or "").strip()
+        for key in (payload.get("metric_keys") or [])
+        if str(key or "").strip()
+    }
+    conversion_metric_keys = {
+        "ccnt", "convAmt", "cvr", "ror",
+        "purchaseCcnt", "purchaseConvAmt", "purchaseCvr", "purchaseRor",
+        "cartCcnt", "cartConvAmt", "cartCvr", "cartRor",
+    }
+    include_conversion_reports = _boolish(payload.get("include_conversion_metrics"), True)
+    if requested_metric_keys:
+        include_conversion_reports = bool(requested_metric_keys & conversion_metric_keys)
+    report_types: List[str] = ["AD_DETAIL"] if target_rows else []
+    if target_rows and include_conversion_reports:
+        report_types.append("AD_CONVERSION_DETAIL")
     requested_timeout = _performance_number(payload.get("fast_timeout_seconds") or payload.get("timeout_seconds"))
     if requested_timeout <= 0:
         requested_timeout = PERFORMANCE_DIMENSION_REPORT_TIMEOUT_SECONDS
@@ -4385,10 +4400,11 @@ def _get_time_performance_stats(api_key: str, secret_key: str, cid: str, payload
     report_meta: Dict[str, Any] = {}
     if report_types:
         rows_by_type, report_warnings, report_errors, report_meta = _collect_dimension_report_rows(
-            api_key, secret_key, cid, since, until, report_types, report_timeout_seconds,
+            api_key, secret_key, cid, since, until, report_types, report_timeout_seconds, worker_count=3,
         )
     activity_rows: List[Dict[str, Any]] = list(rows_by_type.get("AD_DETAIL") or [])
     conversion_rows: List[Dict[str, Any]] = list(rows_by_type.get("AD_CONVERSION_DETAIL") or [])
+    primary_pending_summary = _summarize_dimension_report_pending(report_meta)
 
     def scoped_shopping_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         return [
@@ -4397,10 +4413,12 @@ def _get_time_performance_stats(api_key: str, secret_key: str, cid: str, payload
             and _dimension_row_campaign_bucket(row, campaign_type_by_id) == "SHOPPING"
         ]
 
-    if has_shopping_target and not scoped_shopping_rows(activity_rows):
-        fallback_types = ["SHOPPINGKEYWORD_DETAIL", "SHOPPINGKEYWORD_CONVERSION_DETAIL"]
+    if has_shopping_target and not scoped_shopping_rows(activity_rows) and int(primary_pending_summary.get("pending_report_count") or 0) <= 0:
+        fallback_types = ["SHOPPINGKEYWORD_DETAIL"]
+        if include_conversion_reports:
+            fallback_types.append("SHOPPINGKEYWORD_CONVERSION_DETAIL")
         fallback_rows_by_type, fallback_warnings, fallback_errors, fallback_meta = _collect_dimension_report_rows(
-            api_key, secret_key, cid, since, until, fallback_types, report_timeout_seconds,
+            api_key, secret_key, cid, since, until, fallback_types, report_timeout_seconds, worker_count=3,
         )
         rows_by_type.update(fallback_rows_by_type)
         report_meta.update(fallback_meta)
@@ -4408,7 +4426,7 @@ def _get_time_performance_stats(api_key: str, secret_key: str, cid: str, payload
         report_errors.extend(fallback_errors)
         report_types = list(dict.fromkeys(report_types + fallback_types))
         activity_rows.extend(rows_by_type.get("SHOPPINGKEYWORD_DETAIL") or [])
-        if not scoped_shopping_rows(conversion_rows):
+        if include_conversion_reports and not scoped_shopping_rows(conversion_rows):
             conversion_rows.extend(rows_by_type.get("SHOPPINGKEYWORD_CONVERSION_DETAIL") or [])
 
     time_rows = _aggregate_time_detail_report_rows(
@@ -4469,6 +4487,7 @@ def _get_time_performance_stats(api_key: str, secret_key: str, cid: str, payload
             "parsed_time_row_count": len(time_rows or []),
             "report_meta": report_meta,
             "report_timeout_seconds": report_timeout_seconds,
+            "include_conversion_reports": include_conversion_reports,
         },
     }
 
@@ -4783,6 +4802,7 @@ def _collect_dimension_report_rows(
     until: str,
     report_types: List[str],
     timeout_seconds: float = PERFORMANCE_DIMENSION_REPORT_TIMEOUT_SECONDS,
+    worker_count: int | None = None,
 ) -> Tuple[Dict[str, List[Dict[str, Any]]], List[str], List[str], Dict[str, Any]]:
     rows_by_type: Dict[str, List[Dict[str, Any]]] = {}
     warnings: List[str] = []
@@ -4796,7 +4816,8 @@ def _collect_dimension_report_rows(
         for report_type in report_types
         for chunk_since, chunk_until in date_chunks
     ]
-    with ThreadPoolExecutor(max_workers=min(len(jobs), PERFORMANCE_DIMENSION_REPORT_WORKERS)) as executor:
+    resolved_workers = max(1, int(worker_count or PERFORMANCE_DIMENSION_REPORT_WORKERS))
+    with ThreadPoolExecutor(max_workers=min(len(jobs), resolved_workers)) as executor:
         futures = {
             executor.submit(
                 _fetch_dimension_detail_report_rows,

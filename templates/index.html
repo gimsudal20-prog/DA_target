@@ -34721,6 +34721,10 @@ function getStandaloneReportPayload(prefix) {
         showToast('좌측에서 광고그룹을 체크해주세요.', 'error');
         return null;
     }
+    const metricKeys = new Set([document.getElementById(`${prefix}_metric`)?.value || 'impCnt']);
+    getPerformanceTableMetricKeys().forEach(key => metricKeys.add(key));
+    const conversionMetricKeys = new Set(['ccnt', 'convAmt', 'cvr', 'ror', 'purchaseCcnt', 'purchaseConvAmt', 'purchaseCvr', 'purchaseRor', 'cartCcnt', 'cartConvAmt', 'cartCvr', 'cartRor']);
+    const metricKeyList = Array.from(metricKeys).filter(key => PERFORMANCE_DEMOGRAPHIC_METRICS.some(item => item.key === key));
     return {
         ...c,
         account_name: getSelectedAccountNameForReport(),
@@ -34732,6 +34736,9 @@ function getStandaloneReportPayload(prefix) {
         since: document.getElementById(`${prefix}_since`)?.value || '',
         until: document.getElementById(`${prefix}_until`)?.value || '',
         exclude_today: true,
+        metric_keys: metricKeyList,
+        include_conversion_metrics: metricKeyList.some(key => conversionMetricKeys.has(key)),
+        ...(prefix === 'time_data' ? { timeout_seconds: 4.0 } : {}),
     };
     if(prefix === 'media_data') {
         payload.include_blog_media = !!document.getElementById('media_data_include_blog_media')?.checked;
