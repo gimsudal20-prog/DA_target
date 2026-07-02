@@ -22177,7 +22177,9 @@ let timeDataBackgroundRefreshTimer = null;
 let timeDataBackgroundRefreshToken = '';
 let dimensionDataBackgroundTimers = {};
 let dimensionDataBackgroundTokens = {};
-const DETAIL_REPORT_BACKGROUND_MAX_ATTEMPTS = 18;
+const DETAIL_REPORT_BACKGROUND_MAX_ATTEMPTS = 3;
+const DETAIL_REPORT_SINGLE_PENDING_MAX_ATTEMPTS = 2;
+const DETAIL_REPORT_BACKGROUND_DELAYS_MS = [15000, 45000, 90000];
 let performanceStatsSortState = { key: null, direction: 'desc', kind: 'number' };
 let reportDataTableSortStates = {};
 const PERFORMANCE_TABLE_METRIC_STORAGE_KEY = 'naver_performance_table_metrics_v1';
@@ -34889,18 +34891,16 @@ function decorateReportPendingState(data, attempt = 0, stalled = false) {
 function renderDimensionDataPendingNotice(data) {
     if(!hasDimensionDataPending(data)) return '';
     const pendingCount = Number(data?.pending_report_count || 0);
-    const attempt = Number(data?.pending_report_attempt || 0);
     const checkedAt = String(data?.pending_report_checked_at || '').trim();
     const stalled = !!data?.pending_report_stalled;
     const title = stalled ? '상세 리포트 준비 지연' : '상세 리포트 자동 준비 중';
     const statusBits = [
         `남은 ${pendingCount.toLocaleString()}건`,
-        attempt > 0 ? `${attempt.toLocaleString()}회 확인` : '',
-        checkedAt ? `${checkedAt} 확인` : '',
+        checkedAt ? `마지막 확인 ${checkedAt}` : '',
     ].filter(Boolean).join(' · ');
     const message = stalled
         ? `네이버 리포트 생성이 오래 걸려 자동 확인을 멈췄습니다. ${statusBits || `남은 ${pendingCount.toLocaleString()}건`}. 잠시 뒤 조회 버튼을 다시 눌러주세요.`
-        : `준비된 데이터는 먼저 표시합니다. ${statusBits || `남은 ${pendingCount.toLocaleString()}건`}은 완료되는 대로 자동 갱신됩니다.`;
+        : `준비된 데이터는 먼저 표시합니다. ${statusBits || `남은 ${pendingCount.toLocaleString()}건`}은 잠시 뒤 한 번 더 확인합니다.`;
     return `
         <div class="report-data-pending${stalled ? ' is-stalled' : ''}">
           <strong>${escapeMaybe(title)}</strong>
@@ -34909,10 +34909,21 @@ function renderDimensionDataPendingNotice(data) {
     `;
 }
 
+function detailReportMaxAttemptsForData(data) {
+    const pendingCount = Number(data?.pending_report_count || 0);
+    return pendingCount <= 1 ? DETAIL_REPORT_SINGLE_PENDING_MAX_ATTEMPTS : DETAIL_REPORT_BACKGROUND_MAX_ATTEMPTS;
+}
+
+function detailReportBackgroundDelayMs(attempt) {
+    const index = Math.max(0, Math.min(DETAIL_REPORT_BACKGROUND_DELAYS_MS.length - 1, Number(attempt || 1) - 1));
+    return DETAIL_REPORT_BACKGROUND_DELAYS_MS[index] || 60000;
+}
+
 function scheduleDimensionDataBackgroundRefresh(prefix, payload, data, attempt = 1) {
     const config = DIMENSION_DATA_CONFIGS[prefix];
     if(!config || !hasDimensionDataPending(data)) return;
-    if(attempt > DETAIL_REPORT_BACKGROUND_MAX_ATTEMPTS) {
+    const maxAttempts = detailReportMaxAttemptsForData(data);
+    if(attempt > maxAttempts) {
         const stalled = decorateReportPendingState(data, attempt - 1, true);
         renderDimensionDataReport(prefix, stalled);
         setReportDataStatus(prefix, '준비 지연', 'done');
@@ -34923,7 +34934,7 @@ function scheduleDimensionDataBackgroundRefresh(prefix, payload, data, attempt =
     const token = getDimensionDataRefreshToken(prefix, payload);
     if(dimensionDataBackgroundTimers[prefix]) clearTimeout(dimensionDataBackgroundTimers[prefix]);
     dimensionDataBackgroundTokens[prefix] = token;
-    const delayMs = Math.min(9000, 1600 + (attempt * 1400));
+    const delayMs = detailReportBackgroundDelayMs(attempt);
     dimensionDataBackgroundTimers[prefix] = setTimeout(async () => {
         if(dimensionDataBackgroundTokens[prefix] !== token) return;
         if(String(currentCustomerId || '') !== String(payload?.customer_id || '')) return;
@@ -34964,7 +34975,8 @@ function clearTimeDataBackgroundRefresh() {
 
 function scheduleTimeDataBackgroundRefresh(payload, data, attempt = 1) {
     if(!hasDimensionDataPending(data)) return;
-    if(attempt > DETAIL_REPORT_BACKGROUND_MAX_ATTEMPTS) {
+    const maxAttempts = detailReportMaxAttemptsForData(data);
+    if(attempt > maxAttempts) {
         const stalled = decorateReportPendingState(data, attempt - 1, true);
         renderTimeDataReport(stalled);
         setReportDataStatus('time_data', '준비 지연', 'done');
@@ -34975,7 +34987,7 @@ function scheduleTimeDataBackgroundRefresh(payload, data, attempt = 1) {
     const token = getDimensionDataRefreshToken('time_data', payload);
     if(timeDataBackgroundRefreshTimer) clearTimeout(timeDataBackgroundRefreshTimer);
     timeDataBackgroundRefreshToken = token;
-    const delayMs = Math.min(9000, 1600 + (attempt * 1400));
+    const delayMs = detailReportBackgroundDelayMs(attempt);
     timeDataBackgroundRefreshTimer = setTimeout(async () => {
         if(timeDataBackgroundRefreshToken !== token) return;
         if(String(currentCustomerId || '') !== String(payload?.customer_id || '')) return;
