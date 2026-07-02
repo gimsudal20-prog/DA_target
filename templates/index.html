@@ -19640,16 +19640,16 @@
                     <div class="text-report-option-group">
                       <div class="text-report-option-title">유입/전환 키워드·검색어</div>
                       <div class="text-report-keyword-toggles">
-                        <label><input type="checkbox" id="text_report_include_inflow_keywords" checked> 유입</label>
-                        <label><input type="checkbox" id="text_report_include_general_conversion_keywords" checked> 일반 전환</label>
-                        <label><input type="checkbox" id="text_report_include_purchase_conversion_keywords" checked> 구매완료 전환</label>
+                        <label><input type="checkbox" id="text_report_include_inflow_keywords"> 유입</label>
+                        <label><input type="checkbox" id="text_report_include_general_conversion_keywords"> 일반 전환</label>
+                        <label><input type="checkbox" id="text_report_include_purchase_conversion_keywords"> 구매완료 전환</label>
                       </div>
                     </div>
                     <div class="text-report-option-group">
                       <div class="text-report-option-title">전환 지표</div>
                       <div class="text-report-keyword-toggles">
-                        <label><input type="checkbox" id="text_report_include_cart_count" checked> 장바구니 전환 수</label>
-                        <label><input type="checkbox" id="text_report_include_cart_amount" checked> 장바구니 전환 매출액</label>
+                        <label><input type="checkbox" id="text_report_include_cart_count"> 장바구니 전환 수</label>
+                        <label><input type="checkbox" id="text_report_include_cart_amount"> 장바구니 전환 매출액</label>
                       </div>
                     </div>
                     <div class="text-report-fixed-metrics">총비용(VAT 포함)은 기본 포함됩니다.</div>
@@ -22156,6 +22156,8 @@ let aiAnalysisProgressStartedAt = 0;
 let shoppingQueryActiveView = 'conversion';
 let shoppingQueryBackgroundRefreshTimer = null;
 let shoppingQueryBackgroundRefreshToken = '';
+let timeDataBackgroundRefreshTimer = null;
+let timeDataBackgroundRefreshToken = '';
 let dimensionDataBackgroundTimers = {};
 let dimensionDataBackgroundTokens = {};
 let performanceStatsSortState = { key: null, direction: 'desc', kind: 'number' };
@@ -34827,6 +34829,49 @@ function scheduleDimensionDataBackgroundRefresh(prefix, payload, data, attempt =
     }, delayMs);
 }
 
+function clearTimeDataBackgroundRefresh() {
+    if(timeDataBackgroundRefreshTimer) clearTimeout(timeDataBackgroundRefreshTimer);
+    timeDataBackgroundRefreshTimer = null;
+    timeDataBackgroundRefreshToken = '';
+}
+
+function scheduleTimeDataBackgroundRefresh(payload, data, attempt = 1) {
+    if(!hasDimensionDataPending(data) || attempt > 40) return;
+    const token = getDimensionDataRefreshToken('time_data', payload);
+    if(timeDataBackgroundRefreshTimer) clearTimeout(timeDataBackgroundRefreshTimer);
+    timeDataBackgroundRefreshToken = token;
+    const delayMs = Math.min(9000, 1600 + (attempt * 1400));
+    timeDataBackgroundRefreshTimer = setTimeout(async () => {
+        if(timeDataBackgroundRefreshToken !== token) return;
+        if(String(currentCustomerId || '') !== String(payload?.customer_id || '')) return;
+        try {
+            const body = { ...payload, fast_timeout_seconds: 1.2, background_refresh_probe: true };
+            const res = await fetch('/get_time_performance_stats', {
+                method: 'POST',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify(body)
+            });
+            const text = await res.text();
+            let refreshed = {};
+            try { refreshed = text ? JSON.parse(text) : {}; } catch(e) { refreshed = {}; }
+            if(!res.ok || timeDataBackgroundRefreshToken !== token) return;
+            renderTimeDataReport(refreshed);
+            if(hasDimensionDataPending(refreshed)) {
+                scheduleTimeDataBackgroundRefresh(payload, refreshed, attempt + 1);
+            } else {
+                clearTimeDataBackgroundRefresh();
+                const doneText = refreshed?.until && refreshed.until !== refreshed.since
+                    ? `${refreshed.since}~${refreshed.until}`
+                    : (refreshed?.since || refreshed?.date_label || '완료');
+                setReportDataStatus('time_data', doneText, 'done');
+                showToast('시간대별 데이터 준비 완료', 'success');
+            }
+        } catch(e) {
+            scheduleTimeDataBackgroundRefresh(payload, data, attempt + 1);
+        }
+    }, delayMs);
+}
+
 function syncAiAnalysisDatePreset() {
     const preset = document.getElementById('ai_analysis_date_preset')?.value || 'last7days';
     const custom = preset === 'custom';
@@ -37395,15 +37440,21 @@ function renderTimeDataReport(data = timeDataLastData) {
     const dateText = timeDataLastData.until && timeDataLastData.until !== timeDataLastData.since
         ? `${timeDataLastData.since}~${timeDataLastData.until}`
         : (timeDataLastData.since || timeDataLastData.date_label || '조회 완료');
-    setReportDataStatus('time_data', dateText);
+    const isPending = hasDimensionDataPending(timeDataLastData);
+    const pendingNotice = renderDimensionDataPendingNotice(timeDataLastData);
+    setReportDataStatus('time_data', isPending ? '자동 갱신 중' : dateText, isPending ? 'running' : 'done');
     if(!rows.length) {
-        result.innerHTML = `${renderReportDataAlert(timeDataLastData)}<div class="log-empty">표시할 시간대별 데이터가 없습니다.</div>`;
+        const emptyText = isPending
+            ? '준비된 시간대별 데이터가 아직 없습니다. 상세 리포트가 완료되면 자동으로 표시됩니다.'
+            : '표시할 시간대별 데이터가 없습니다.';
+        result.innerHTML = `${renderReportDataAlert(timeDataLastData)}${pendingNotice}<div class="log-empty">${escapeMaybe(emptyText)}</div>`;
         return;
     }
     const resolvedChartType = resolveReportDataChartType('time_data', 'line', rows, series, metricKey);
     const chartScopeLabel = timeDataLastData.time_breakdown_label || timeDataLastData.date_label || '';
     result.innerHTML = `
         ${renderReportDataAlert(timeDataLastData)}
+        ${pendingNotice}
         <div class="report-data-chart-panel report-data-chart-panel-time">
           <div class="report-data-chart-head">
             <div class="report-data-chart-title">
@@ -37883,13 +37934,21 @@ async function fetchTimeDataReport() {
     const payload = getStandaloneReportPayload('time_data');
     if(!payload) return;
     const requestCustomerId = String(payload.customer_id || '');
+    clearTimeDataBackgroundRefresh();
+    setReportDataStatus('time_data', '조회 중', 'running');
     try {
         const data = await postJson('/get_time_performance_stats', payload, '시간대별 데이터 조회 중...');
         if(String(currentCustomerId || '') !== requestCustomerId) return;
         renderTimeDataReport(data);
-        showToast(data?.message || '시간대별 데이터 조회 완료', Array.isArray(data?.rows) && data.rows.length ? 'success' : 'info');
+        if(hasDimensionDataPending(data)) {
+            scheduleTimeDataBackgroundRefresh(payload, data);
+            showToast(data?.pending_report_message || '상세 리포트 준비 중입니다. 완료되면 자동 갱신합니다.', 'info');
+        } else {
+            showToast(data?.message || '시간대별 데이터 조회 완료', Array.isArray(data?.rows) && data.rows.length ? 'success' : 'info');
+        }
     } catch(err) {
         if(String(currentCustomerId || '') !== requestCustomerId) return;
+        setReportDataStatus('time_data', '오류');
         showToast(`시간대별 데이터 조회 실패: ${err.message}`, 'error');
     }
 }
@@ -37934,6 +37993,7 @@ function clearAgeDataReport() {
 }
 
 function clearTimeDataReport() {
+    clearTimeDataBackgroundRefresh();
     timeDataLastData = null;
     renderReportDataSummary('time_data', null);
     const result = document.getElementById('time_data_result');

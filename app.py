@@ -4263,6 +4263,45 @@ def _sum_metrics_from_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             summary["_avgRnkWeight"] = _performance_number(summary.get("_avgRnkWeight")) + weight
     return _finalize_perf_metric(summary)
 
+def _aggregate_time_detail_report_rows(
+    activity_rows: List[Dict[str, Any]],
+    conversion_rows: List[Dict[str, Any]],
+    campaign_ids: set[str],
+    adgroup_ids: set[str],
+) -> List[Dict[str, Any]]:
+    buckets: Dict[str, Dict[str, Any]] = {}
+
+    def bucket_for(row: Dict[str, Any]) -> Dict[str, Any] | None:
+        if not _dimension_row_in_scope(row, campaign_ids, adgroup_ids):
+            return None
+        hour_code = _performance_report_hour_code((row or {}).get("hour"))
+        if not hour_code:
+            return None
+        hour_sort = int(hour_code)
+        return buckets.setdefault(hour_code, {
+            "key": hour_code,
+            "label": f"{hour_code}시",
+            "raw": hour_code,
+            "sort": hour_sort,
+            "metrics": _build_empty_perf_metric(),
+        })
+
+    for row in activity_rows or []:
+        bucket = bucket_for(row)
+        if bucket is not None:
+            _add_dimension_activity_to_metric(bucket["metrics"], row)
+    for row in conversion_rows or []:
+        bucket = bucket_for(row)
+        if bucket is not None:
+            _add_dimension_conversion_to_metric(bucket["metrics"], row)
+
+    out: List[Dict[str, Any]] = []
+    for bucket in buckets.values():
+        bucket["metrics"] = _finalize_perf_metric(bucket.get("metrics") or {})
+        if any(_performance_number(bucket["metrics"].get(key)) > 0 for key in ("impCnt", "clkCnt", "salesAmt", "ccnt", "convAmt", "purchaseCcnt")):
+            out.append(bucket)
+    return sorted(out, key=lambda item: (item.get("sort", 999), str(item.get("label") or "")))
+
 def _get_age_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     scope, requested_type_filter, since, until, date_label, campaign_ids, adgroup_ids = _standalone_report_target_payload(payload)
     date_chunks = _split_date_range_chunks(since, until, PERFORMANCE_REPORT_CHUNK_DAYS)
@@ -4315,8 +4354,10 @@ def _get_age_performance_stats(api_key: str, secret_key: str, cid: str, payload:
 
 def _get_time_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     scope, type_filter, since, until, date_label, campaign_ids, adgroup_ids = _standalone_report_target_payload(payload)
-    summary_chunks = _split_date_range_chunks(since, until, PERFORMANCE_REPORT_CHUNK_DAYS)
-    breakdown_range = _time_breakdown_supported_range(since, until)
+    day_count = _dimension_report_day_count(since, until)
+    if day_count > PERFORMANCE_DIMENSION_REPORT_MAX_DAYS:
+        raise ValueError(f"상세보고서 기반 시간대 데이터는 최대 {PERFORMANCE_DIMENSION_REPORT_MAX_DAYS}일까지 조회할 수 있습니다.")
+    date_chunks = _split_date_range_chunks(since, until, PERFORMANCE_REPORT_CHUNK_DAYS)
     level = "adgroup"
     warnings: List[str] = []
     target_rows, target_warnings = _collect_performance_targets(
@@ -4324,78 +4365,83 @@ def _get_time_performance_stats(api_key: str, secret_key: str, cid: str, payload
         include_ad_counts=False,
     )
     warnings.extend(target_warnings)
-    if len(summary_chunks) > 1:
+    if len(date_chunks) > 1:
         warnings.append(
-            f"선택 기간 {_dimension_report_day_count(since, until)}일 합계는 {PERFORMANCE_REPORT_CHUNK_DAYS}일 단위 {len(summary_chunks)}개 구간으로 나눠 조회했습니다."
+            f"선택 기간 {day_count}일 시간대별 데이터는 {PERFORMANCE_REPORT_CHUNK_DAYS}일 단위 {len(date_chunks)}개 구간으로 나눠 상세 리포트를 조회한 뒤 합산했습니다."
         )
-    if breakdown_range.get("limited"):
-        if breakdown_range.get("available"):
-            warnings.append(
-                "네이버 /stats 시간대별 상세(hh24)는 최근 7일 범위만 응답합니다. "
-                f"차트와 표는 API 지원 범위({breakdown_range.get('since')}~{breakdown_range.get('until')})의 실제 시간대 데이터로 표시하고, "
-                f"상단 합계는 선택 기간 전체({since}~{until}) 기준으로 계산했습니다."
-            )
-        else:
-            warnings.append(
-                "네이버 /stats 시간대별 상세(hh24)는 최근 7일 범위만 응답합니다. "
-                f"선택 기간({since}~{until})이 API 지원 범위({breakdown_range.get('supported_since')}~{breakdown_range.get('supported_until')}) 밖이라 "
-                "시간대 차트는 표시할 수 없고, 상단 합계만 선택 기간 전체 기준으로 계산했습니다."
-            )
-    stats_id_kind = "adgroup" if level == "adgroup" else "campaign"
-    rows: List[Dict[str, Any]] = []
-    errors: List[str] = []
-    summary_rows: List[Dict[str, Any]] = []
-    summary_errors: List[str] = []
-    if target_rows:
-        summary_rows, summary_errors = _fetch_stats_rows_for_targets(
-            api_key, secret_key, cid, target_rows, PERFORMANCE_BREAKDOWN_FIELDS, since, until,
-            id_kind=stats_id_kind,
-            time_increment="allDays",
-            parallel_workers=FAST_IO_WORKERS,
+    target_campaign_ids, target_adgroup_ids, type_keys = _dimension_target_sets(target_rows)
+    campaign_type_by_id = _dimension_campaign_type_map(target_rows)
+    has_shopping_target = bool("SHOPPING" in type_keys or (type_filter == "SHOPPING" and target_rows))
+    report_types: List[str] = ["AD_DETAIL", "AD_CONVERSION_DETAIL"] if target_rows else []
+    requested_timeout = _performance_number(payload.get("fast_timeout_seconds") or payload.get("timeout_seconds"))
+    if requested_timeout <= 0:
+        requested_timeout = PERFORMANCE_DIMENSION_REPORT_TIMEOUT_SECONDS
+    if _boolish(payload.get("background_refresh_probe"), False):
+        requested_timeout = min(requested_timeout, PERFORMANCE_DIMENSION_REPORT_PROBE_TIMEOUT_SECONDS)
+    report_timeout_seconds = min(18.0, max(PERFORMANCE_SHOPPING_QUERY_REPORT_MIN_TIMEOUT_SECONDS, requested_timeout))
+    rows_by_type: Dict[str, List[Dict[str, Any]]] = {}
+    report_warnings: List[str] = []
+    report_errors: List[str] = []
+    report_meta: Dict[str, Any] = {}
+    if report_types:
+        rows_by_type, report_warnings, report_errors, report_meta = _collect_dimension_report_rows(
+            api_key, secret_key, cid, since, until, report_types, report_timeout_seconds,
         )
-        if breakdown_range.get("available"):
-            breakdown_since = str(breakdown_range.get("since") or since)
-            breakdown_until = str(breakdown_range.get("until") or until)
-            rows, errors = _fetch_stats_rows_for_targets(
-                api_key, secret_key, cid, target_rows, PERFORMANCE_BREAKDOWN_FIELDS, breakdown_since, breakdown_until,
-                breakdown="hh24",
-                id_kind=stats_id_kind,
-                time_increment="allDays",
-                parallel_workers=FAST_IO_WORKERS,
-                recover_individual=False,
-            )
-            if not rows:
-                individual_rows, individual_errors = _fetch_stats_rows_individual_for_targets(
-                    api_key, secret_key, cid, target_rows, PERFORMANCE_BREAKDOWN_FIELDS, breakdown_since, breakdown_until,
-                    breakdown="hh24",
-                    id_kind=stats_id_kind,
-                    time_increment="allDays",
-                    parallel_workers=FAST_IO_WORKERS,
-                )
-                if individual_rows:
-                    rows, errors = individual_rows, individual_errors
-                elif individual_errors:
-                    errors.extend(individual_errors[:8])
-    time_rows = _build_time_breakdown_rows(rows)
-    summary = _sum_stat_metric_rows(summary_rows) if summary_rows else _sum_metrics_from_rows(time_rows)
-    if summary_errors:
-        errors.extend(summary_errors[:8])
-    if target_rows and not time_rows and not errors:
-        warnings.append(f"시간대별 breakdown 데이터가 없습니다. 광고그룹 ID {len(target_rows)}개를 기간 합계(allDays) 기준으로 재시도했지만 응답 행이 없었습니다.")
-    if breakdown_range.get("available"):
-        breakdown_since = str(breakdown_range.get("since") or "")
-        breakdown_until = str(breakdown_range.get("until") or "")
-        breakdown_label = f"{breakdown_since}~{breakdown_until} 실제 시간대"
-    else:
-        breakdown_since = ""
-        breakdown_until = ""
-        breakdown_label = "시간대 상세 미제공"
+    activity_rows: List[Dict[str, Any]] = list(rows_by_type.get("AD_DETAIL") or [])
+    conversion_rows: List[Dict[str, Any]] = list(rows_by_type.get("AD_CONVERSION_DETAIL") or [])
+
+    def scoped_shopping_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return [
+            row for row in (rows or [])
+            if _dimension_row_in_scope(row, target_campaign_ids, target_adgroup_ids)
+            and _dimension_row_campaign_bucket(row, campaign_type_by_id) == "SHOPPING"
+        ]
+
+    if has_shopping_target and not scoped_shopping_rows(activity_rows):
+        fallback_types = ["SHOPPINGKEYWORD_DETAIL", "SHOPPINGKEYWORD_CONVERSION_DETAIL"]
+        fallback_rows_by_type, fallback_warnings, fallback_errors, fallback_meta = _collect_dimension_report_rows(
+            api_key, secret_key, cid, since, until, fallback_types, report_timeout_seconds,
+        )
+        rows_by_type.update(fallback_rows_by_type)
+        report_meta.update(fallback_meta)
+        report_warnings.extend(fallback_warnings)
+        report_errors.extend(fallback_errors)
+        report_types = list(dict.fromkeys(report_types + fallback_types))
+        activity_rows.extend(rows_by_type.get("SHOPPINGKEYWORD_DETAIL") or [])
+        if not scoped_shopping_rows(conversion_rows):
+            conversion_rows.extend(rows_by_type.get("SHOPPINGKEYWORD_CONVERSION_DETAIL") or [])
+
+    time_rows = _aggregate_time_detail_report_rows(
+        activity_rows,
+        conversion_rows,
+        target_campaign_ids,
+        target_adgroup_ids,
+    )
+    summary = _sum_metrics_from_rows(time_rows)
+    pending_summary = _summarize_dimension_report_pending(report_meta)
+    pending_count = int(pending_summary.get("pending_report_count") or 0)
+    warnings.extend(report_warnings[:12])
+    if target_rows and not time_rows and not report_errors and not pending_count:
+        warnings.append(f"선택 기간({since}~{until})의 시간대별 상세 리포트 데이터가 없습니다.")
+    breakdown_since = since if time_rows else ""
+    breakdown_until = until if time_rows else ""
+    breakdown_label = f"{since}~{until} 상세 리포트 합산" if time_rows else "시간대 상세 리포트 준비 중"
+    type_label = "전체 유형" if type_filter == "ALL" else _performance_campaign_type_label(type_filter)
+    message = (
+        f"{date_label} {type_label} 시간대별 데이터 준비 중 · 상세 리포트 {pending_count}건 생성 중"
+        if pending_count > 0
+        else f"{date_label} 시간대별 데이터 조회 완료 · 대상 {len(target_rows)}개"
+    )
     return {
-        "message": f"{date_label} 시간대별 데이터 조회 완료 · 대상 {len(target_rows)}개",
+        "message": message,
         "rows": time_rows,
         "summary": summary,
         "warnings": warnings,
-        "errors": errors[:30],
+        "errors": report_errors[:30],
+        "pending_report_count": pending_count,
+        "background_refresh": bool(pending_summary.get("background_refresh")),
+        "pending_reports": pending_summary.get("pending_reports") or [],
+        "pending_report_message": pending_summary.get("message") or "",
         "scope": scope,
         "result_level": level,
         "campaign_type": type_filter,
@@ -4406,22 +4452,23 @@ def _get_time_performance_stats(api_key: str, secret_key: str, cid: str, payload
         "requested_until": until,
         "requested_date_label": date_label,
         "target_count": len(target_rows),
-        "time_breakdown_limited": bool(breakdown_range.get("limited")),
-        "time_breakdown_available": bool(breakdown_range.get("available") and time_rows),
+        "time_breakdown_limited": False,
+        "time_breakdown_available": bool(time_rows),
         "time_breakdown_since": breakdown_since,
         "time_breakdown_until": breakdown_until,
         "time_breakdown_label": breakdown_label,
         "summary_since": since,
         "summary_until": until,
+        "report_types": report_types,
+        "source": "stat_reports",
         "debug": {
-            "raw_breakdown_row_count": len(rows or []),
-            "raw_summary_row_count": len(summary_rows or []),
+            "day_count": day_count,
+            "date_chunks": [{"since": chunk_since, "until": chunk_until} for chunk_since, chunk_until in date_chunks],
+            "raw_activity_row_count": len(activity_rows or []),
+            "raw_conversion_row_count": len(conversion_rows or []),
             "parsed_time_row_count": len(time_rows or []),
-            "attempted_breakdown": "hh24",
-            "time_increment": "allDays",
-            "summary_range_was_chunked": len(summary_chunks) > 1,
-            "summary_chunks": [{"since": chunk_since, "until": chunk_until} for chunk_since, chunk_until in summary_chunks],
-            "time_breakdown_range": breakdown_range,
+            "report_meta": report_meta,
+            "report_timeout_seconds": report_timeout_seconds,
         },
     }
 
@@ -9578,9 +9625,9 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
     include_campaign = _boolish((payload or {}).get("include_campaign_breakdown"), False)
     include_general_conversion_keywords = _boolish((payload or {}).get("include_general_conversion_keywords"), False)
     include_purchase_conversion_keywords = _boolish((payload or {}).get("include_purchase_conversion_keywords"), False)
-    include_cart_count = _boolish((payload or {}).get("include_cart_count"), True)
-    include_cart_amount = _boolish((payload or {}).get("include_cart_amount"), True)
-    include_inflow_keywords = _boolish((payload or {}).get("include_inflow_keywords"), True)
+    include_cart_count = _boolish((payload or {}).get("include_cart_count"), False)
+    include_cart_amount = _boolish((payload or {}).get("include_cart_amount"), False)
+    include_inflow_keywords = _boolish((payload or {}).get("include_inflow_keywords"), False)
     metric_mode = str((payload or {}).get("report_metric_mode") or "").strip().lower()
     report_uses_purchase = metric_mode in {"purchase", "purchase_only", "구매완료", "구매완료 데이터"}
     report_format = str((payload or {}).get("report_format") or "media_summary").strip().lower()
