@@ -33303,6 +33303,9 @@ function renderPerformanceInlineBidMeta(row, level) {
 }
 
 function renderPerformanceBidSnapshot(row, level) {
+    if(row?.performance_detail_loading) {
+        return '<div class="performance-bid-snapshot"><span class="performance-bid-chip">현재 입찰가 불러오는 중</span></div>';
+    }
     const snapshot = getPerformanceBidSnapshot(row);
     const chips = [];
     if(snapshot.group) {
@@ -33312,7 +33315,8 @@ function renderPerformanceBidSnapshot(row, level) {
         chips.push(`<span class="performance-bid-chip">${escapeMaybe(snapshot.asset.label || '소재/키워드 입찰가')}: ${escapeMaybe(formatPerformanceBidSummary(snapshot.asset))}</span>`);
     }
     if(!chips.length) {
-        chips.push('<span class="performance-bid-chip">현재 입찰가: 확인 불가</span>');
+        const fallback = row?.performance_detail_error ? `상세 조회 실패: ${row.performance_detail_error}` : '현재 입찰가: 상세 조회 필요';
+        chips.push(`<span class="performance-bid-chip">${escapeMaybe(fallback)}</span>`);
     }
     return `<div class="performance-bid-snapshot">${chips.join('')}</div>`;
 }
@@ -33346,9 +33350,17 @@ function setPerformanceQuickPeriod(preset, rowKey = '') {
 }
 
 function renderPerformanceDailyTable(row, level = null) {
+    if(row?.performance_detail_loading) {
+        return '<div class="log-empty">기간별 성과를 불러오는 중입니다.</div>';
+    }
+    if(row?.performance_detail_error) {
+        return `<div class="log-empty">상세 조회 실패: ${escapeMaybe(row.performance_detail_error)}</div>`;
+    }
     const days = Array.isArray(row?.daily_metrics) ? row.daily_metrics : [];
     if(!days.length) {
-        return '<div class="log-empty">이 기간의 일자별 성과를 확인하지 못했습니다.</div>';
+        return row?.performance_detail_loaded
+            ? '<div class="log-empty">이 기간의 일자별 성과를 확인하지 못했습니다.</div>'
+            : '<div class="log-empty">상세를 여는 중입니다. 잠시만 기다려주세요.</div>';
     }
     const dataLevel = normalizePerformanceResultLevel(level || performanceStatsLastData?.result_level || 'type');
     const tableKey = `performance_daily_${getPerformanceRowKey(row, dataLevel) || 'row'}`;
@@ -33488,6 +33500,49 @@ function renderPerformanceBidEditorRow(row, level, colCount) {
     `;
 }
 
+async function fetchPerformanceRowDetail(rowKey) {
+    const key = String(rowKey || '').trim();
+    const level = normalizePerformanceResultLevel(performanceStatsLastData?.result_level || 'type');
+    if(!key || !isPerformanceEditableLevel(level)) return;
+    let row = getPerformanceRowByKey(key, level);
+    if(!row || row.performance_detail_loaded || row.performance_detail_loading) return;
+    const payload = getPerformanceStatsPayload();
+    if(!payload) return;
+    const requestCustomerId = String(payload.customer_id || '');
+    const requestToken = getAccountRequestToken(requestCustomerId);
+    row.performance_detail_loading = true;
+    row.performance_detail_error = '';
+    if(performanceStatsLastData) renderPerformanceStatsResult(performanceStatsLastData);
+    try {
+        const data = await postJson('/get_performance_row_detail', {
+            ...payload,
+            result_level: level,
+            target_id: getPerformanceRowId(row, level),
+            target_row: row,
+            include_daily_metrics: true,
+            include_bid_snapshot: true,
+        }, '성과 상세 조회 중...');
+        if(!isAccountRequestCurrent(requestToken, requestCustomerId)) return;
+        row = getPerformanceRowByKey(key, level);
+        if(!row) return;
+        row.daily_metrics = Array.isArray(data?.daily_metrics) ? data.daily_metrics : [];
+        row.bid_snapshot = data?.bid_snapshot && typeof data.bid_snapshot === 'object' ? data.bid_snapshot : {};
+        row.performance_detail_loaded = true;
+        row.performance_detail_loading = false;
+        row.performance_detail_error = '';
+        if(performanceStatsLastData) renderPerformanceStatsResult(performanceStatsLastData);
+    } catch(err) {
+        if(!isAccountRequestCurrent(requestToken, requestCustomerId)) return;
+        row = getPerformanceRowByKey(key, level);
+        if(row) {
+            row.performance_detail_loading = false;
+            row.performance_detail_error = err?.message || '상세 조회 실패';
+        }
+        if(performanceStatsLastData) renderPerformanceStatsResult(performanceStatsLastData);
+        showToast(`성과 상세 조회 실패: ${err.message}`, 'error');
+    }
+}
+
 function togglePerformanceBidEditor(rowKey, closeOnly = false) {
     const key = String(rowKey || '').trim();
     if(!key) return;
@@ -33496,6 +33551,7 @@ function togglePerformanceBidEditor(rowKey, closeOnly = false) {
     };
     if(performanceStatsLastData) renderPerformanceStatsResult(performanceStatsLastData);
     if(!performanceBidEditorState.key) return;
+    fetchPerformanceRowDetail(performanceBidEditorState.key).catch(() => {});
     requestAnimationFrame(() => {
         const input = document.getElementById(`performance_bid_amount_${key}`);
         if(input) input.focus();
@@ -33551,7 +33607,7 @@ async function applyPerformanceBidEditor(rowKey) {
                 await refreshAdgroups(true, { preserveSelection: true });
             }
         }
-        await fetchPerformanceStats({ silent: true });
+        await fetchPerformanceStats({ silent: true, force: true });
     } catch(err) {
         showToast(`입찰가 변경 실패: ${err.message}`, 'error');
     }
@@ -33770,7 +33826,7 @@ async function downloadPurchaseCurrentReportExcel() {
     }
 }
 
-function getPerformanceStatsPayload() {
+function getPerformanceStatsPayload(options = {}) {
     const c = ensureReady(); if(!c) return null;
     const scope = document.getElementById('performance_target_scope')?.value || 'account';
     const campaignIds = getCheckedCampaignIdsInViewOrder();
@@ -33793,6 +33849,10 @@ function getPerformanceStatsPayload() {
         date_preset: document.getElementById('performance_date_preset')?.value || 'today',
         since: document.getElementById('performance_since')?.value || '',
         until: document.getElementById('performance_until')?.value || '',
+        skip_ad_counts: true,
+        skip_bid_snapshots: true,
+        include_daily_metrics: false,
+        ...(options.force ? { force_refresh: true } : {}),
     };
 }
 
@@ -34761,7 +34821,7 @@ function getStandaloneReportPayload(prefix) {
     getPerformanceTableMetricKeys().forEach(key => metricKeys.add(key));
     const conversionMetricKeys = new Set(['ccnt', 'convAmt', 'cvr', 'ror', 'purchaseCcnt', 'purchaseConvAmt', 'purchaseCvr', 'purchaseRor', 'cartCcnt', 'cartConvAmt', 'cartCvr', 'cartRor']);
     const metricKeyList = Array.from(metricKeys).filter(key => PERFORMANCE_DEMOGRAPHIC_METRICS.some(item => item.key === key));
-    return {
+    const payload = {
         ...c,
         account_name: getSelectedAccountNameForReport(),
         target_scope: scope,
@@ -38164,7 +38224,7 @@ function downloadDimensionDataCsv(prefix) {
 }
 
 async function fetchPerformanceStats(options = {}) {
-    const payload = getPerformanceStatsPayload();
+    const payload = getPerformanceStatsPayload(options);
     if(!payload) return;
     const requestCustomerId = String(payload.customer_id || '');
     const requestToken = getAccountRequestToken(requestCustomerId);
@@ -38172,6 +38232,7 @@ async function fetchPerformanceStats(options = {}) {
         const data = await postJson('/get_performance_stats', payload, options.silent ? '성과 갱신 중...' : '검색광고 성과 조회 중...');
         if(!isAccountRequestCurrent(requestToken, requestCustomerId)) return;
         renderPerformanceStatsResult(data);
+        if(performanceBidEditorState?.key) fetchPerformanceRowDetail(performanceBidEditorState.key).catch(() => {});
         if(!options.silent) showToast(data?.message || '성과 조회 완료', 'success');
     } catch(err) {
         if(!isAccountRequestCurrent(requestToken, requestCustomerId)) return;

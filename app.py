@@ -139,7 +139,22 @@ def _cache_get(store: Dict[str, Tuple[float, Any]], key: str, ttl: float = _CACH
 def _cache_set(store: Dict[str, Tuple[float, Any]], key: str, value: Any):
     return _LOOKUP_SERVICE.cache.set(store, key, value)
 def _cache_invalidate(api_key: str, secret_key: str, cid: str):
-    return _LOOKUP_SERVICE.cache.invalidate_account(api_key, secret_key, cid)
+    result = _LOOKUP_SERVICE.cache.invalidate_account(api_key, secret_key, cid)
+    lock = globals().get("PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK")
+    stores = [
+        globals().get("PERFORMANCE_STATS_CACHE"),
+        globals().get("PERFORMANCE_ROW_DETAIL_CACHE"),
+    ]
+    if lock:
+        with lock:
+            for store in stores:
+                if isinstance(store, dict):
+                    store.clear()
+    else:
+        for store in stores:
+            if isinstance(store, dict):
+                store.clear()
+    return result
 LOG_ACTION_LABELS = {
     "/create_campaign": "캠페인 생성",
     "/create_adgroup_simple": "광고그룹 생성",
@@ -3200,6 +3215,10 @@ PERFORMANCE_BREAKDOWN_VALUE_KEYS = ("name", "value", "label", "displayName", "co
 PERFORMANCE_KEYWORD_REPORT_CACHE_TTL = 300
 PERFORMANCE_KEYWORD_REPORT_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK = threading.Lock()
+PERFORMANCE_STATS_CACHE_TTL = 45
+PERFORMANCE_STATS_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+PERFORMANCE_ROW_DETAIL_CACHE_TTL = 120
+PERFORMANCE_ROW_DETAIL_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 PERFORMANCE_KEYWORD_INVENTORY_CACHE_TTL = 600
 PERFORMANCE_KEYWORD_INVENTORY_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 PERFORMANCE_SHOPPING_QUERY_CACHE_TTL = 600
@@ -5565,6 +5584,33 @@ def _get_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dic
     adgroup_ids = [str(x or "").strip() for x in (payload.get("adgroup_ids") or []) if str(x or "").strip()]
     purchase_event_codes = _split_filter_words(payload.get("purchase_event_code") or payload.get("purchase_event_codes"))
     cart_event_codes = _split_filter_words(payload.get("cart_event_code") or payload.get("cart_event_codes"))
+    force_refresh = _boolish(payload.get("force_refresh"), False)
+    stats_cache_key = json.dumps([
+        "performance-stats-v2",
+        _stable_cache_key(api_key, secret_key, cid, "performance-stats"),
+        scope,
+        level,
+        type_filter,
+        since,
+        until,
+        sorted(campaign_ids),
+        sorted(adgroup_ids),
+        purchase_event_codes,
+        cart_event_codes,
+        _boolish(payload.get("include_cart_event_breakdown"), False),
+        _boolish(payload.get("include_demographics"), False),
+        _boolish(payload.get("skip_ad_counts"), False),
+        _boolish(payload.get("skip_bid_snapshots"), False),
+        _boolish(payload.get("include_daily_metrics"), True),
+    ], ensure_ascii=False, separators=(",", ":"))
+    now = time.monotonic()
+    if not force_refresh:
+        with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
+            cached = PERFORMANCE_STATS_CACHE.get(stats_cache_key)
+            if cached and now - cached[0] <= PERFORMANCE_STATS_CACHE_TTL:
+                cached_result = copy.deepcopy(cached[1])
+                cached_result["cache_hit"] = True
+                return cached_result
     target_rows, warnings = _collect_performance_targets(
         api_key, secret_key, cid, scope, level, type_filter, campaign_ids, adgroup_ids,
         include_ad_counts=not _boolish(payload.get("skip_ad_counts"), False),
@@ -5692,7 +5738,7 @@ def _get_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dic
         warnings.append("구매완료 이벤트를 자동 식별하지 못해 구매완료수와 구매완료 ROAS는 0으로 표시됩니다.")
     level_label = {"type": "유형별 전체", "campaign": "캠페인별", "adgroup": "광고그룹별"}.get(level, "성과")
     type_label = "전체 유형" if type_filter == "ALL" else _performance_campaign_type_label(type_filter)
-    return {
+    result = {
         "message": f"{date_label} {type_label} {level_label} 성과 조회 완료 · 대상 {len(target_rows)}개",
         "rows": rows,
         "summary": summary,
@@ -5708,6 +5754,161 @@ def _get_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dic
         "cart_event_match_count": cart_match_count,
         "demographics": demographics,
     }
+    with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
+        if len(PERFORMANCE_STATS_CACHE) >= 120:
+            PERFORMANCE_STATS_CACHE.pop(min(PERFORMANCE_STATS_CACHE, key=lambda key: PERFORMANCE_STATS_CACHE[key][0]), None)
+        PERFORMANCE_STATS_CACHE[stats_cache_key] = (time.monotonic(), copy.deepcopy(result))
+    return result
+
+def _get_performance_row_detail(api_key: str, secret_key: str, cid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    level = _normalize_performance_level(payload.get("result_level") or payload.get("level"))
+    if level not in {"campaign", "adgroup"}:
+        raise ValueError("성과 상세는 캠페인 또는 광고그룹 행에서만 조회할 수 있습니다.")
+    since, until, date_label = _performance_date_range(
+        payload.get("date_preset"),
+        payload.get("since"),
+        payload.get("until"),
+        exclude_today=_boolish(payload.get("exclude_today"), False),
+    )
+    row_payload = payload.get("target_row") if isinstance(payload.get("target_row"), dict) else {}
+    target_id = str(payload.get("target_id") or row_payload.get("id") or "").strip()
+    if level == "campaign":
+        target_id = str(row_payload.get("campaign_id") or target_id).strip()
+    else:
+        target_id = str(row_payload.get("adgroup_id") or target_id).strip()
+    if not target_id:
+        raise ValueError("상세를 조회할 대상 ID가 없습니다.")
+
+    cache_key = json.dumps([
+        "performance-row-detail-v1",
+        _stable_cache_key(api_key, secret_key, cid, "performance-row-detail"),
+        level,
+        target_id,
+        since,
+        until,
+        _boolish(payload.get("include_daily_metrics"), True),
+        _boolish(payload.get("include_bid_snapshot"), True),
+    ], ensure_ascii=False, separators=(",", ":"))
+    now = time.monotonic()
+    if not _boolish(payload.get("force_refresh"), False):
+        with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
+            cached = PERFORMANCE_ROW_DETAIL_CACHE.get(cache_key)
+            if cached and now - cached[0] <= PERFORMANCE_ROW_DETAIL_CACHE_TTL:
+                cached_result = copy.deepcopy(cached[1])
+                cached_result["cache_hit"] = True
+                return cached_result
+
+    warnings: List[str] = []
+    errors: List[str] = []
+
+    def _campaign_type_from_row(row: Dict[str, Any]) -> str:
+        return _performance_campaign_bucket(
+            row.get("campaign_type")
+            or row.get("campaignTp")
+            or row.get("campaign_type_label")
+            or ""
+        )
+
+    if level == "campaign":
+        target_row = {
+            "id": target_id,
+            "name": str(row_payload.get("name") or row_payload.get("campaign_name") or target_id),
+            "campaign_id": target_id,
+            "campaign_name": str(row_payload.get("campaign_name") or row_payload.get("name") or target_id),
+            "campaign_type": _campaign_type_from_row(row_payload),
+            "campaign_type_label": str(row_payload.get("campaign_type_label") or ""),
+        }
+        if not target_row["campaign_type"] or target_row["campaign_type"] == "ETC":
+            res_camp, campaign_rows = _fetch_campaigns(api_key, secret_key, cid)
+            if res_camp.status_code == 200:
+                for camp in campaign_rows or []:
+                    if _performance_target_id(camp, "campaign") == target_id:
+                        target_row["campaign_name"] = str(camp.get("name") or target_row["campaign_name"])
+                        target_row["name"] = target_row["campaign_name"]
+                        target_row["campaign_type"] = _performance_campaign_bucket(camp.get("campaignTp"))
+                        break
+            else:
+                warnings.append(f"캠페인 정보 확인 실패: {res_camp.text}")
+        target_row["campaign_type_label"] = _performance_campaign_type_label(target_row.get("campaign_type"))
+        stats_id_kind = "campaign"
+    else:
+        campaign_id = str(row_payload.get("campaign_id") or "").strip()
+        target_row = {
+            "id": target_id,
+            "name": str(row_payload.get("name") or row_payload.get("adgroup_name") or target_id),
+            "campaign_id": campaign_id,
+            "campaign_name": str(row_payload.get("campaign_name") or campaign_id or "-"),
+            "campaign_type": _campaign_type_from_row(row_payload),
+            "campaign_type_label": str(row_payload.get("campaign_type_label") or ""),
+            "adgroup_type": str(row_payload.get("adgroup_type") or "").upper(),
+            "adgroup_id": target_id,
+            "adgroup_name": str(row_payload.get("adgroup_name") or row_payload.get("name") or target_id),
+            "adgroup_bid": row_payload.get("adgroup_bid"),
+        }
+        if (not target_row["campaign_id"]) or (not target_row["adgroup_type"]) or target_row["adgroup_bid"] in (None, ""):
+            if campaign_id:
+                res_adg, adgroups = _fetch_adgroups(api_key, secret_key, cid, campaign_id, False)
+                if res_adg.status_code == 200:
+                    for adg in adgroups or []:
+                        if _performance_target_id(adg, "adgroup") != target_id:
+                            continue
+                        raw = adg.get("raw") if isinstance(adg.get("raw"), dict) else adg
+                        target_row["adgroup_type"] = str(adg.get("adgroupType") or (raw or {}).get("adgroupType") or "").upper()
+                        target_row["adgroup_bid"] = _first_non_empty((raw or {}).get("bidAmt"), adg.get("bidAmt"))
+                        target_row["adgroup_name"] = str(adg.get("name") or (raw or {}).get("name") or target_row["adgroup_name"])
+                        target_row["name"] = target_row["adgroup_name"]
+                        break
+                else:
+                    warnings.append(f"광고그룹 정보 확인 실패: {res_adg.text}")
+            else:
+                found_rows, found_warnings = _collect_performance_targets(
+                    api_key, secret_key, cid, "selected_adgroups", "adgroup", "ALL", [], [target_id],
+                    include_ad_counts=False,
+                )
+                warnings.extend(found_warnings)
+                if found_rows:
+                    target_row.update(found_rows[0])
+        if not target_row["campaign_type_label"]:
+            target_row["campaign_type_label"] = _performance_campaign_type_label(target_row.get("campaign_type"))
+        stats_id_kind = "adgroup"
+
+    daily_metrics: List[Dict[str, Any]] = []
+    if _boolish(payload.get("include_daily_metrics"), True):
+        daily_rows, daily_errors = _fetch_stats_rows_for_targets(
+            api_key,
+            secret_key,
+            cid,
+            [target_row],
+            PERFORMANCE_STAT_FIELDS,
+            since,
+            until,
+            id_kind=stats_id_kind,
+            time_increment="daily",
+            parallel_workers=1,
+        )
+        errors.extend(daily_errors[:10])
+        daily_metrics = _build_performance_daily_map([target_row], level, daily_rows).get(str(target_row.get("id") or ""), [])
+
+    if _boolish(payload.get("include_bid_snapshot"), True):
+        _enrich_performance_bid_snapshots(api_key, secret_key, cid, [target_row], level, warnings)
+
+    result = {
+        "message": f"{date_label} 성과 상세 조회 완료",
+        "target_id": target_id,
+        "result_level": level,
+        "daily_metrics": daily_metrics,
+        "bid_snapshot": target_row.get("bid_snapshot") or {},
+        "warnings": warnings[:20],
+        "errors": errors[:20],
+        "since": since,
+        "until": until,
+        "date_label": date_label,
+    }
+    with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
+        if len(PERFORMANCE_ROW_DETAIL_CACHE) >= 160:
+            PERFORMANCE_ROW_DETAIL_CACHE.pop(min(PERFORMANCE_ROW_DETAIL_CACHE, key=lambda key: PERFORMANCE_ROW_DETAIL_CACHE[key][0]), None)
+        PERFORMANCE_ROW_DETAIL_CACHE[cache_key] = (time.monotonic(), copy.deepcopy(result))
+    return result
 
 def _creative_status_label(ad_item: Dict[str, Any] | None) -> str:
     ad_item = ad_item or {}
@@ -16773,6 +16974,20 @@ def get_performance_stats():
         return jsonify({"ok": True, **result})
     except Exception as e:
         return jsonify({"error": "성과 조회 실패", "details": str(e)}), 400
+
+@app.route("/get_performance_row_detail", methods=["POST"])
+def get_performance_row_detail():
+    d = request.json or {}
+    api_key = str(d.get("api_key") or "").strip()
+    secret_key = str(d.get("secret_key") or "").strip()
+    cid = str(d.get("customer_id") or "").strip()
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API 정보 및 광고주를 선택해주세요."}), 400
+    try:
+        result = _get_performance_row_detail(api_key, secret_key, cid, d)
+        return jsonify({"ok": True, **result})
+    except Exception as e:
+        return jsonify({"error": "성과 상세 조회 실패", "details": str(e)}), 400
 
 @app.route("/get_age_performance_stats", methods=["POST"])
 def get_age_performance_stats():
