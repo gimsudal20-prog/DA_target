@@ -36442,13 +36442,14 @@ function renderTimeDataReport(data = timeDataLastData) {
         return;
     }
     const resolvedChartType = resolveReportDataChartType('time_data', 'line', rows, series, metricKey);
+    const chartScopeLabel = timeDataLastData.time_breakdown_label || timeDataLastData.date_label || '';
     result.innerHTML = `
         ${renderReportDataAlert(timeDataLastData)}
         <div class="report-data-chart-panel report-data-chart-panel-time">
           <div class="report-data-chart-head">
             <div class="report-data-chart-title">
               <strong>시간대별 ${escapeMaybe(metric.label)}</strong>
-              <span>${escapeMaybe(`${timeDataLastData.date_label || ''} · ${reportDataChartTypeLabel(resolvedChartType)}`)}</span>
+              <span>${escapeMaybe(`${chartScopeLabel} · ${reportDataChartTypeLabel(resolvedChartType)}`)}</span>
             </div>
             ${renderReportDataChartControls('time_data', 'line')}
           </div>

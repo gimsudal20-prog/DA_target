@@ -4186,6 +4186,45 @@ def _build_time_breakdown_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any
         out.append(bucket)
     return sorted(out, key=lambda item: (item.get("sort", 999), str(item.get("label") or "")))
 
+def _sum_stat_metric_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    summary = _build_empty_perf_metric()
+    for row in rows or []:
+        if isinstance(row, dict):
+            _add_stat_to_metric(summary, row)
+    return _finalize_perf_metric(summary)
+
+def _time_breakdown_supported_range(since: str, until: str) -> Dict[str, Any]:
+    try:
+        requested_since = date.fromisoformat(str(since or ""))
+        requested_until = date.fromisoformat(str(until or ""))
+    except Exception:
+        return {
+            "available": True,
+            "limited": False,
+            "since": since,
+            "until": until,
+            "supported_since": since,
+            "supported_until": until,
+        }
+
+    supported_until = _today_kst() - timedelta(days=1)
+    supported_since = supported_until - timedelta(days=6)
+    effective_since = max(requested_since, supported_since)
+    effective_until = min(requested_until, supported_until)
+    available = effective_since <= effective_until
+    limited = requested_since < supported_since or requested_until > supported_until
+
+    return {
+        "available": available,
+        "limited": limited,
+        "since": effective_since.isoformat() if available else "",
+        "until": effective_until.isoformat() if available else "",
+        "supported_since": supported_since.isoformat(),
+        "supported_until": supported_until.isoformat(),
+        "requested_since": requested_since.isoformat(),
+        "requested_until": requested_until.isoformat(),
+    }
+
 def _standalone_report_target_payload(payload: Dict[str, Any], *, forced_type_filter: str | None = None) -> Tuple[str, str, str, str, str, List[str], List[str]]:
     scope = _normalize_performance_scope(payload.get("target_scope") or payload.get("scope"))
     type_filter = _normalize_performance_type_filter(forced_type_filter or payload.get("campaign_type") or payload.get("type_filter"))
@@ -4266,7 +4305,8 @@ def _get_age_performance_stats(api_key: str, secret_key: str, cid: str, payload:
 
 def _get_time_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     scope, type_filter, since, until, date_label, campaign_ids, adgroup_ids = _standalone_report_target_payload(payload)
-    date_chunks = _split_date_range_chunks(since, until, PERFORMANCE_REPORT_CHUNK_DAYS)
+    summary_chunks = _split_date_range_chunks(since, until, PERFORMANCE_REPORT_CHUNK_DAYS)
+    breakdown_range = _time_breakdown_supported_range(since, until)
     level = "adgroup"
     warnings: List[str] = []
     target_rows, target_warnings = _collect_performance_targets(
@@ -4274,38 +4314,72 @@ def _get_time_performance_stats(api_key: str, secret_key: str, cid: str, payload
         include_ad_counts=False,
     )
     warnings.extend(target_warnings)
-    if len(date_chunks) > 1:
+    if len(summary_chunks) > 1:
         warnings.append(
-            f"선택 기간 {_dimension_report_day_count(since, until)}일을 {PERFORMANCE_REPORT_CHUNK_DAYS}일 단위 {len(date_chunks)}개 구간으로 나눠 조회한 뒤 시간대별로 합산했습니다."
+            f"선택 기간 {_dimension_report_day_count(since, until)}일 합계는 {PERFORMANCE_REPORT_CHUNK_DAYS}일 단위 {len(summary_chunks)}개 구간으로 나눠 조회했습니다."
         )
+    if breakdown_range.get("limited"):
+        if breakdown_range.get("available"):
+            warnings.append(
+                "네이버 /stats 시간대별 상세(hh24)는 최근 7일 범위만 응답합니다. "
+                f"차트와 표는 API 지원 범위({breakdown_range.get('since')}~{breakdown_range.get('until')})의 실제 시간대 데이터로 표시하고, "
+                f"상단 합계는 선택 기간 전체({since}~{until}) 기준으로 계산했습니다."
+            )
+        else:
+            warnings.append(
+                "네이버 /stats 시간대별 상세(hh24)는 최근 7일 범위만 응답합니다. "
+                f"선택 기간({since}~{until})이 API 지원 범위({breakdown_range.get('supported_since')}~{breakdown_range.get('supported_until')}) 밖이라 "
+                "시간대 차트는 표시할 수 없고, 상단 합계만 선택 기간 전체 기준으로 계산했습니다."
+            )
     stats_id_kind = "adgroup" if level == "adgroup" else "campaign"
     rows: List[Dict[str, Any]] = []
     errors: List[str] = []
+    summary_rows: List[Dict[str, Any]] = []
+    summary_errors: List[str] = []
     if target_rows:
-        rows, errors = _fetch_stats_rows_for_targets(
+        summary_rows, summary_errors = _fetch_stats_rows_for_targets(
             api_key, secret_key, cid, target_rows, PERFORMANCE_BREAKDOWN_FIELDS, since, until,
-            breakdown="hh24",
             id_kind=stats_id_kind,
             time_increment="allDays",
             parallel_workers=FAST_IO_WORKERS,
-            recover_individual=False,
         )
-        if not rows:
-            individual_rows, individual_errors = _fetch_stats_rows_individual_for_targets(
-                api_key, secret_key, cid, target_rows, PERFORMANCE_BREAKDOWN_FIELDS, since, until,
+        if breakdown_range.get("available"):
+            breakdown_since = str(breakdown_range.get("since") or since)
+            breakdown_until = str(breakdown_range.get("until") or until)
+            rows, errors = _fetch_stats_rows_for_targets(
+                api_key, secret_key, cid, target_rows, PERFORMANCE_BREAKDOWN_FIELDS, breakdown_since, breakdown_until,
                 breakdown="hh24",
                 id_kind=stats_id_kind,
                 time_increment="allDays",
                 parallel_workers=FAST_IO_WORKERS,
+                recover_individual=False,
             )
-            if individual_rows:
-                rows, errors = individual_rows, individual_errors
-            elif individual_errors:
-                errors.extend(individual_errors[:8])
+            if not rows:
+                individual_rows, individual_errors = _fetch_stats_rows_individual_for_targets(
+                    api_key, secret_key, cid, target_rows, PERFORMANCE_BREAKDOWN_FIELDS, breakdown_since, breakdown_until,
+                    breakdown="hh24",
+                    id_kind=stats_id_kind,
+                    time_increment="allDays",
+                    parallel_workers=FAST_IO_WORKERS,
+                )
+                if individual_rows:
+                    rows, errors = individual_rows, individual_errors
+                elif individual_errors:
+                    errors.extend(individual_errors[:8])
     time_rows = _build_time_breakdown_rows(rows)
-    summary = _sum_metrics_from_rows(time_rows)
+    summary = _sum_stat_metric_rows(summary_rows) if summary_rows else _sum_metrics_from_rows(time_rows)
+    if summary_errors:
+        errors.extend(summary_errors[:8])
     if target_rows and not time_rows and not errors:
         warnings.append(f"시간대별 breakdown 데이터가 없습니다. 광고그룹 ID {len(target_rows)}개를 기간 합계(allDays) 기준으로 재시도했지만 응답 행이 없었습니다.")
+    if breakdown_range.get("available"):
+        breakdown_since = str(breakdown_range.get("since") or "")
+        breakdown_until = str(breakdown_range.get("until") or "")
+        breakdown_label = f"{breakdown_since}~{breakdown_until} 실제 시간대"
+    else:
+        breakdown_since = ""
+        breakdown_until = ""
+        breakdown_label = "시간대 상세 미제공"
     return {
         "message": f"{date_label} 시간대별 데이터 조회 완료 · 대상 {len(target_rows)}개",
         "rows": time_rows,
@@ -4322,13 +4396,22 @@ def _get_time_performance_stats(api_key: str, secret_key: str, cid: str, payload
         "requested_until": until,
         "requested_date_label": date_label,
         "target_count": len(target_rows),
+        "time_breakdown_limited": bool(breakdown_range.get("limited")),
+        "time_breakdown_available": bool(breakdown_range.get("available") and time_rows),
+        "time_breakdown_since": breakdown_since,
+        "time_breakdown_until": breakdown_until,
+        "time_breakdown_label": breakdown_label,
+        "summary_since": since,
+        "summary_until": until,
         "debug": {
             "raw_breakdown_row_count": len(rows or []),
+            "raw_summary_row_count": len(summary_rows or []),
             "parsed_time_row_count": len(time_rows or []),
             "attempted_breakdown": "hh24",
             "time_increment": "allDays",
-            "date_range_was_chunked": len(date_chunks) > 1,
-            "date_chunks": [{"since": chunk_since, "until": chunk_until} for chunk_since, chunk_until in date_chunks],
+            "summary_range_was_chunked": len(summary_chunks) > 1,
+            "summary_chunks": [{"since": chunk_since, "until": chunk_until} for chunk_since, chunk_until in summary_chunks],
+            "time_breakdown_range": breakdown_range,
         },
     }
 
