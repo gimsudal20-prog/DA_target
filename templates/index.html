@@ -13518,6 +13518,23 @@
       color: #334155 !important;
       font-weight: 700 !important;
     }
+    body .report-data-pending.is-stalled {
+      border-color: #fbbf24 !important;
+      background: linear-gradient(90deg, #fffbeb, #fff7ed) !important;
+      color: #92400e !important;
+    }
+    body .report-data-pending.is-stalled::before {
+      border-color: #fde68a !important;
+      border-top-color: #d97706 !important;
+      animation-duration: 1.2s !important;
+    }
+    body .report-data-pending.is-stalled::after {
+      background: linear-gradient(90deg, transparent 0%, #d97706 45%, transparent 90%) !important;
+      animation-duration: 1.8s !important;
+    }
+    body .report-data-pending.is-stalled strong {
+      color: #92400e !important;
+    }
     @keyframes reportDataPendingSweep {
       0% { transform: translateX(-100%); opacity: 0.45; }
       50% { opacity: 1; }
@@ -22160,6 +22177,7 @@ let timeDataBackgroundRefreshTimer = null;
 let timeDataBackgroundRefreshToken = '';
 let dimensionDataBackgroundTimers = {};
 let dimensionDataBackgroundTokens = {};
+const DETAIL_REPORT_BACKGROUND_MAX_ATTEMPTS = 18;
 let performanceStatsSortState = { key: null, direction: 'desc', kind: 'number' };
 let reportDataTableSortStates = {};
 const PERFORMANCE_TABLE_METRIC_STORAGE_KEY = 'naver_performance_table_metrics_v1';
@@ -23043,6 +23061,17 @@ function selectAccountByCustomerId(customerId) {
     const acc = getUniqueAccountsData().find(x => String(x.customer_id || '') === key);
     if(acc) selectAccount(acc);
 }
+
+function getAccountRequestToken(customerId = currentCustomerId) {
+    return `${accountSelectionSeq}:${String(customerId || '')}`;
+}
+
+function isAccountRequestCurrent(token, customerId = '') {
+    const expectedCustomerId = String(customerId || currentCustomerId || '');
+    return token === getAccountRequestToken(expectedCustomerId)
+        && String(currentCustomerId || '') === expectedCustomerId;
+}
+
 function normalizeCampaignTypeKey(value) {
     const s = String(value || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
     if(!s || s === 'ALL') return 'ALL';
@@ -32501,6 +32530,9 @@ function clearAccountScopedResults() {
     clearShoppingQueryConversionInsights();
     clearAgeDataReport();
     clearTimeDataReport();
+    clearDimensionDataReport('area_data');
+    clearDimensionDataReport('media_data');
+    clearDimensionDataReport('region_data');
     clearAccountLookupResults();
     clearPowerlinkKeywordLookupResult();
     clearPowerlinkKeywordStatsResult();
@@ -32508,6 +32540,7 @@ function clearAccountScopedResults() {
     clearKeywordBidSearchResult();
     clearKeywordBidWeightSearchResult();
     clearKeywordAvgSearchResult();
+    clearAiAnalysis();
     clearAccountScopedReadonlyResults();
 }
 
@@ -34555,6 +34588,7 @@ function downloadShoppingQueryNonConversionCsv() {
 
 function getShoppingQueryRefreshToken(view, payload) {
     return JSON.stringify([
+        String(accountSelectionSeq || 0),
         view || 'conversion',
         String(payload?.customer_id || ''),
         String(payload?.target_scope || ''),
@@ -34613,11 +34647,12 @@ async function fetchShoppingQueryConversionInsights() {
     const payload = getShoppingQueryConversionPayload();
     if(!payload) return;
     const requestCustomerId = String(payload.customer_id || '');
+    const requestToken = getAccountRequestToken(requestCustomerId);
     const startedAt = performance.now();
     clearShoppingQueryBackgroundRefresh();
     try {
         const data = await postJson('/get_shopping_query_conversion_insights', payload, '쇼핑검색 전환 검색어 조회 중...');
-        if(String(currentCustomerId || '') !== requestCustomerId) return;
+        if(!isAccountRequestCurrent(requestToken, requestCustomerId)) return;
         const elapsedSeconds = Math.max(0.1, (performance.now() - startedAt) / 1000);
         renderShoppingQueryConversionInsights(data);
         scheduleShoppingQueryBackgroundRefresh('conversion', payload, data);
@@ -34626,7 +34661,7 @@ async function fetchShoppingQueryConversionInsights() {
         setShoppingQueryStatus(`${document.getElementById('shopping_query_status')?.textContent || '조회 완료'} · ${elapsedSeconds.toFixed(1)}초`);
         showToast(`${data?.message || '쇼핑검색 전환 검색어 조회 완료'} · ${elapsedSeconds.toFixed(1)}초${timingText}`, 'success');
     } catch(err) {
-        if(String(currentCustomerId || '') !== requestCustomerId) return;
+        if(!isAccountRequestCurrent(requestToken, requestCustomerId)) return;
         const elapsedSeconds = Math.max(0.1, (performance.now() - startedAt) / 1000);
         showToast(`쇼핑검색 전환 검색어 조회 실패 (${elapsedSeconds.toFixed(1)}초): ${err.message}`, 'error');
     }
@@ -34636,11 +34671,12 @@ async function fetchShoppingQueryNonConversionInsights() {
     const payload = getShoppingQueryConversionPayload();
     if(!payload) return;
     const requestCustomerId = String(payload.customer_id || '');
+    const requestToken = getAccountRequestToken(requestCustomerId);
     const startedAt = performance.now();
     clearShoppingQueryBackgroundRefresh();
     try {
         const data = await postJson('/get_shopping_query_non_conversion_insights', payload, '전환 없는 쇼핑검색어 조회 중...');
-        if(String(currentCustomerId || '') !== requestCustomerId) return;
+        if(!isAccountRequestCurrent(requestToken, requestCustomerId)) return;
         const elapsedSeconds = Math.max(0.1, (performance.now() - startedAt) / 1000);
         renderShoppingQueryNonConversionInsights(data);
         scheduleShoppingQueryBackgroundRefresh('non_conversion', payload, data);
@@ -34649,7 +34685,7 @@ async function fetchShoppingQueryNonConversionInsights() {
         setShoppingQueryStatus(`${document.getElementById('shopping_query_status')?.textContent || '조회 완료'} · ${elapsedSeconds.toFixed(1)}초`);
         showToast(`${data?.message || '전환 없는 쇼핑검색어 조회 완료'} · ${elapsedSeconds.toFixed(1)}초${timingText}`, 'success');
     } catch(err) {
-        if(String(currentCustomerId || '') !== requestCustomerId) return;
+        if(!isAccountRequestCurrent(requestToken, requestCustomerId)) return;
         const elapsedSeconds = Math.max(0.1, (performance.now() - startedAt) / 1000);
         showToast(`전환 없는 쇼핑검색어 조회 실패 (${elapsedSeconds.toFixed(1)}초): ${err.message}`, 'error');
     }
@@ -34748,6 +34784,7 @@ function getStandaloneReportPayload(prefix) {
 
 function getDimensionDataRefreshToken(prefix, payload) {
     return JSON.stringify([
+        String(accountSelectionSeq || 0),
         prefix || '',
         String(payload?.customer_id || ''),
         String(payload?.dimension || ''),
@@ -34780,27 +34817,49 @@ function hasDimensionDataPending(data) {
     return Number(data?.pending_report_count || 0) > 0;
 }
 
+function decorateReportPendingState(data, attempt = 0, stalled = false) {
+    return {
+        ...(data || {}),
+        pending_report_attempt: Number(attempt || 0),
+        pending_report_checked_at: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
+        pending_report_stalled: !!stalled,
+    };
+}
+
 function renderDimensionDataPendingNotice(data) {
     if(!hasDimensionDataPending(data)) return '';
     const pendingCount = Number(data?.pending_report_count || 0);
-    const reports = Array.isArray(data?.pending_reports) ? data.pending_reports : [];
-    const reportText = reports
-        .filter(item => Number(item?.pending_report_count || 0) > 0)
-        .slice(0, 4)
-        .map(item => `${item?.report_type || 'REPORT'} ${Number(item?.pending_report_count || 0).toLocaleString()}일`)
-        .join(' · ');
-    const detailText = reportText ? ` · ${reportText}` : '';
+    const attempt = Number(data?.pending_report_attempt || 0);
+    const checkedAt = String(data?.pending_report_checked_at || '').trim();
+    const stalled = !!data?.pending_report_stalled;
+    const title = stalled ? '상세 리포트 준비 지연' : '상세 리포트 자동 준비 중';
+    const statusBits = [
+        `남은 ${pendingCount.toLocaleString()}건`,
+        attempt > 0 ? `${attempt.toLocaleString()}회 확인` : '',
+        checkedAt ? `${checkedAt} 확인` : '',
+    ].filter(Boolean).join(' · ');
+    const message = stalled
+        ? `네이버 리포트 생성이 오래 걸려 자동 확인을 멈췄습니다. ${statusBits || `남은 ${pendingCount.toLocaleString()}건`}. 잠시 뒤 조회 버튼을 다시 눌러주세요.`
+        : `준비된 데이터는 먼저 표시합니다. ${statusBits || `남은 ${pendingCount.toLocaleString()}건`}은 완료되는 대로 자동 갱신됩니다.`;
     return `
-        <div class="report-data-pending">
-          <strong>상세 리포트 자동 준비 중</strong>
-          <span>${escapeMaybe(`준비된 데이터는 먼저 표시합니다. 남은 ${pendingCount.toLocaleString()}건${detailText}은 완료되는 대로 자동 갱신됩니다.`)}</span>
+        <div class="report-data-pending${stalled ? ' is-stalled' : ''}">
+          <strong>${escapeMaybe(title)}</strong>
+          <span>${escapeMaybe(message)}</span>
         </div>
     `;
 }
 
 function scheduleDimensionDataBackgroundRefresh(prefix, payload, data, attempt = 1) {
     const config = DIMENSION_DATA_CONFIGS[prefix];
-    if(!config || !hasDimensionDataPending(data) || attempt > 40) return;
+    if(!config || !hasDimensionDataPending(data)) return;
+    if(attempt > DETAIL_REPORT_BACKGROUND_MAX_ATTEMPTS) {
+        const stalled = decorateReportPendingState(data, attempt - 1, true);
+        renderDimensionDataReport(prefix, stalled);
+        setReportDataStatus(prefix, '준비 지연', 'done');
+        clearDimensionDataBackgroundRefresh(prefix);
+        showToast(`${config.shortLabel} 상세 리포트 준비가 지연되고 있습니다. 잠시 뒤 다시 조회해주세요.`, 'info');
+        return;
+    }
     const token = getDimensionDataRefreshToken(prefix, payload);
     if(dimensionDataBackgroundTimers[prefix]) clearTimeout(dimensionDataBackgroundTimers[prefix]);
     dimensionDataBackgroundTokens[prefix] = token;
@@ -34819,6 +34878,7 @@ function scheduleDimensionDataBackgroundRefresh(prefix, payload, data, attempt =
             let refreshed = {};
             try { refreshed = text ? JSON.parse(text) : {}; } catch(e) { refreshed = {}; }
             if(!res.ok || dimensionDataBackgroundTokens[prefix] !== token) return;
+            refreshed = decorateReportPendingState(refreshed, attempt, false);
             renderDimensionDataReport(prefix, refreshed);
             if(hasDimensionDataPending(refreshed)) {
                 scheduleDimensionDataBackgroundRefresh(prefix, payload, refreshed, attempt + 1);
@@ -34843,7 +34903,15 @@ function clearTimeDataBackgroundRefresh() {
 }
 
 function scheduleTimeDataBackgroundRefresh(payload, data, attempt = 1) {
-    if(!hasDimensionDataPending(data) || attempt > 40) return;
+    if(!hasDimensionDataPending(data)) return;
+    if(attempt > DETAIL_REPORT_BACKGROUND_MAX_ATTEMPTS) {
+        const stalled = decorateReportPendingState(data, attempt - 1, true);
+        renderTimeDataReport(stalled);
+        setReportDataStatus('time_data', '준비 지연', 'done');
+        clearTimeDataBackgroundRefresh();
+        showToast('시간대별 상세 리포트 준비가 지연되고 있습니다. 잠시 뒤 다시 조회해주세요.', 'info');
+        return;
+    }
     const token = getDimensionDataRefreshToken('time_data', payload);
     if(timeDataBackgroundRefreshTimer) clearTimeout(timeDataBackgroundRefreshTimer);
     timeDataBackgroundRefreshToken = token;
@@ -34862,6 +34930,7 @@ function scheduleTimeDataBackgroundRefresh(payload, data, attempt = 1) {
             let refreshed = {};
             try { refreshed = text ? JSON.parse(text) : {}; } catch(e) { refreshed = {}; }
             if(!res.ok || timeDataBackgroundRefreshToken !== token) return;
+            refreshed = decorateReportPendingState(refreshed, attempt, false);
             renderTimeDataReport(refreshed);
             if(hasDimensionDataPending(refreshed)) {
                 scheduleTimeDataBackgroundRefresh(payload, refreshed, attempt + 1);
@@ -37448,8 +37517,9 @@ function renderTimeDataReport(data = timeDataLastData) {
         ? `${timeDataLastData.since}~${timeDataLastData.until}`
         : (timeDataLastData.since || timeDataLastData.date_label || '조회 완료');
     const isPending = hasDimensionDataPending(timeDataLastData);
+    const isStalled = !!timeDataLastData?.pending_report_stalled;
     const pendingNotice = renderDimensionDataPendingNotice(timeDataLastData);
-    setReportDataStatus('time_data', isPending ? '자동 갱신 중' : dateText, isPending ? 'running' : 'done');
+    setReportDataStatus('time_data', isStalled ? '준비 지연' : (isPending ? '자동 갱신 중' : dateText), isPending && !isStalled ? 'running' : 'done');
     if(!rows.length) {
         const emptyText = isPending
             ? '준비된 시간대별 데이터가 아직 없습니다. 상세 리포트가 완료되면 자동으로 표시됩니다.'
@@ -37863,8 +37933,9 @@ function renderDimensionDataReport(prefix, data = getDimensionDataStore(prefix))
         ? `${stored.since}~${stored.until}`
         : (stored.since || stored.date_label || '조회 완료');
     const isPending = hasDimensionDataPending(stored);
+    const isStalled = !!stored?.pending_report_stalled;
     const pendingNotice = renderDimensionDataPendingNotice(stored);
-    setReportDataStatus(prefix, isPending ? '자동 갱신 중' : dateText, isPending ? 'running' : 'done');
+    setReportDataStatus(prefix, isStalled ? '준비 지연' : (isPending ? '자동 갱신 중' : dateText), isPending && !isStalled ? 'running' : 'done');
     if(!rows.length) {
         const emptyText = isPending
             ? '준비된 데이터가 아직 없습니다. 완료되면 자동으로 표시됩니다.'
@@ -37926,13 +37997,14 @@ async function fetchAgeDataReport() {
     const payload = getStandaloneReportPayload('age_data');
     if(!payload) return;
     const requestCustomerId = String(payload.customer_id || '');
+    const requestToken = getAccountRequestToken(requestCustomerId);
     try {
         const data = await postJson('/get_age_performance_stats', payload, '연령별 데이터 조회 중...');
-        if(String(currentCustomerId || '') !== requestCustomerId) return;
+        if(!isAccountRequestCurrent(requestToken, requestCustomerId)) return;
         renderAgeDataReport(data);
         showToast(data?.message || '연령별 데이터 조회 완료', data?.demographics?.available ? 'success' : 'info');
     } catch(err) {
-        if(String(currentCustomerId || '') !== requestCustomerId) return;
+        if(!isAccountRequestCurrent(requestToken, requestCustomerId)) return;
         showToast(`연령별 데이터 조회 실패: ${err.message}`, 'error');
     }
 }
@@ -37941,20 +38013,22 @@ async function fetchTimeDataReport() {
     const payload = getStandaloneReportPayload('time_data');
     if(!payload) return;
     const requestCustomerId = String(payload.customer_id || '');
+    const requestToken = getAccountRequestToken(requestCustomerId);
     clearTimeDataBackgroundRefresh();
     setReportDataStatus('time_data', '조회 중', 'running');
     try {
         const data = await postJson('/get_time_performance_stats', payload, '시간대별 데이터 조회 중...');
-        if(String(currentCustomerId || '') !== requestCustomerId) return;
-        renderTimeDataReport(data);
-        if(hasDimensionDataPending(data)) {
-            scheduleTimeDataBackgroundRefresh(payload, data);
+        if(!isAccountRequestCurrent(requestToken, requestCustomerId)) return;
+        const nextData = hasDimensionDataPending(data) ? decorateReportPendingState(data, 0, false) : data;
+        renderTimeDataReport(nextData);
+        if(hasDimensionDataPending(nextData)) {
+            scheduleTimeDataBackgroundRefresh(payload, nextData);
             showToast(data?.pending_report_message || '상세 리포트 준비 중입니다. 완료되면 자동 갱신합니다.', 'info');
         } else {
             showToast(data?.message || '시간대별 데이터 조회 완료', Array.isArray(data?.rows) && data.rows.length ? 'success' : 'info');
         }
     } catch(err) {
-        if(String(currentCustomerId || '') !== requestCustomerId) return;
+        if(!isAccountRequestCurrent(requestToken, requestCustomerId)) return;
         setReportDataStatus('time_data', '오류');
         showToast(`시간대별 데이터 조회 실패: ${err.message}`, 'error');
     }
@@ -37967,24 +38041,26 @@ async function fetchDimensionDataReport(prefix) {
     if(!payload) return;
     payload.dimension = config.dimension;
     const requestCustomerId = String(payload.customer_id || '');
+    const requestToken = getAccountRequestToken(requestCustomerId);
     clearDimensionDataBackgroundRefresh(prefix);
     setReportDataStatus(prefix, '조회 중', 'running');
     try {
         const data = await postJson('/get_dimension_performance_stats', payload, `${config.shortLabel} 데이터 조회 중...`);
-        if(String(currentCustomerId || '') !== requestCustomerId) {
+        if(!isAccountRequestCurrent(requestToken, requestCustomerId)) {
             stopAiAnalysisProgress();
             setAiAnalysisStatus('대기', '');
             return;
         }
-        renderDimensionDataReport(prefix, data);
-        if(hasDimensionDataPending(data)) {
-            scheduleDimensionDataBackgroundRefresh(prefix, payload, data);
+        const nextData = hasDimensionDataPending(data) ? decorateReportPendingState(data, 0, false) : data;
+        renderDimensionDataReport(prefix, nextData);
+        if(hasDimensionDataPending(nextData)) {
+            scheduleDimensionDataBackgroundRefresh(prefix, payload, nextData);
             showToast(data?.pending_report_message || '상세 리포트 준비 중입니다. 완료되면 자동 갱신합니다.', 'info');
         } else {
             showToast(data?.message || `${config.shortLabel} 데이터 조회 완료`, Array.isArray(data?.rows) && data.rows.length ? 'success' : 'info');
         }
     } catch(err) {
-        if(String(currentCustomerId || '') !== requestCustomerId) return;
+        if(!isAccountRequestCurrent(requestToken, requestCustomerId)) return;
         clearDimensionDataBackgroundRefresh(prefix);
         setReportDataStatus(prefix, '오류');
         showToast(`${config.shortLabel} 데이터 조회 실패: ${err.message}`, 'error');
@@ -38091,13 +38167,14 @@ async function fetchPerformanceStats(options = {}) {
     const payload = getPerformanceStatsPayload();
     if(!payload) return;
     const requestCustomerId = String(payload.customer_id || '');
+    const requestToken = getAccountRequestToken(requestCustomerId);
     try {
         const data = await postJson('/get_performance_stats', payload, options.silent ? '성과 갱신 중...' : '검색광고 성과 조회 중...');
-        if(String(currentCustomerId || '') !== requestCustomerId) return;
+        if(!isAccountRequestCurrent(requestToken, requestCustomerId)) return;
         renderPerformanceStatsResult(data);
         if(!options.silent) showToast(data?.message || '성과 조회 완료', 'success');
     } catch(err) {
-        if(String(currentCustomerId || '') !== requestCustomerId) return;
+        if(!isAccountRequestCurrent(requestToken, requestCustomerId)) return;
         if(!options.silent) showToast(`성과 조회 실패: ${err.message}`, 'error');
     }
 }
