@@ -33716,7 +33716,8 @@ function setReportDataStatus(prefix, text, state = '') {
 }
 
 function syncReportDataDatePreset(prefix) {
-    const custom = document.getElementById(`${prefix}_date_preset`)?.value === 'custom';
+    const presetSelect = document.getElementById(`${prefix}_date_preset`);
+    const custom = presetSelect?.value === 'custom';
     document.getElementById(`tab_${prefix}`)?.classList.toggle('is-custom-date', custom);
     const now = new Date();
     now.setHours(12, 0, 0, 0);
@@ -33736,6 +33737,7 @@ function syncReportDataDatePreset(prefix) {
         if(!el) return;
         el.disabled = !custom;
         el.max = maxDate;
+        el.removeAttribute('min');
     });
     if(!custom) return;
     const since = document.getElementById(`${prefix}_since`);

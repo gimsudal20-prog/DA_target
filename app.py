@@ -4264,62 +4264,20 @@ def _get_age_performance_stats(api_key: str, secret_key: str, cid: str, payload:
         "date_label": date_label,
     }
 
-def _clamp_time_breakdown_supported_range(since: str, until: str, date_label: str) -> Tuple[str, str, str, List[str], Dict[str, Any]]:
-    """
-    NAVER /stats hh24 breakdown only supports the most recent 7 days.
-    Keep the UI from surfacing repeated 11004 BAD_REQUEST errors by clamping
-    time-breakdown requests to the API-supported window.
-    """
-    warnings: List[str] = []
-    meta: Dict[str, Any] = {
-        "requested_since": since,
-        "requested_until": until,
-        "requested_date_label": date_label,
-        "time_breakdown_api_limit_days": 7,
-        "range_was_clamped": False,
-    }
-    try:
-        since_d = date.fromisoformat(str(since or ""))
-        until_d = date.fromisoformat(str(until or ""))
-    except Exception:
-        return since, until, date_label, warnings, meta
-
-    yesterday = _today_kst() - timedelta(days=1)
-    supported_since = yesterday - timedelta(days=6)
-    effective_since = max(since_d, supported_since)
-    effective_until = min(until_d, yesterday)
-
-    if effective_since > effective_until:
-        effective_since = supported_since
-        effective_until = yesterday
-
-    if effective_since != since_d or effective_until != until_d:
-        meta["range_was_clamped"] = True
-        meta["effective_since"] = effective_since.isoformat()
-        meta["effective_until"] = effective_until.isoformat()
-        warnings.append(
-            "네이버 /stats 시간대별(hh24) breakdown은 최근 7일까지만 응답되어, "
-            f"선택 기간({since_d.isoformat()}~{until_d.isoformat()}) 대신 "
-            f"API 지원 범위({effective_since.isoformat()}~{effective_until.isoformat()})로 자동 조회했습니다."
-        )
-        date_label = f"{date_label} 중 시간대 API 지원 범위"
-    else:
-        meta["effective_since"] = since
-        meta["effective_until"] = until
-
-    return effective_since.isoformat(), effective_until.isoformat(), date_label, warnings, meta
-
 def _get_time_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     scope, type_filter, since, until, date_label, campaign_ids, adgroup_ids = _standalone_report_target_payload(payload)
-    requested_since, requested_until, requested_date_label = since, until, date_label
-    since, until, date_label, range_warnings, range_meta = _clamp_time_breakdown_supported_range(since, until, date_label)
+    date_chunks = _split_date_range_chunks(since, until, PERFORMANCE_REPORT_CHUNK_DAYS)
     level = "adgroup"
-    warnings: List[str] = list(range_warnings)
+    warnings: List[str] = []
     target_rows, target_warnings = _collect_performance_targets(
         api_key, secret_key, cid, scope, level, type_filter, campaign_ids, adgroup_ids,
         include_ad_counts=False,
     )
     warnings.extend(target_warnings)
+    if len(date_chunks) > 1:
+        warnings.append(
+            f"선택 기간 {_dimension_report_day_count(since, until)}일을 {PERFORMANCE_REPORT_CHUNK_DAYS}일 단위 {len(date_chunks)}개 구간으로 나눠 조회한 뒤 시간대별로 합산했습니다."
+        )
     stats_id_kind = "adgroup" if level == "adgroup" else "campaign"
     rows: List[Dict[str, Any]] = []
     errors: List[str] = []
@@ -4360,17 +4318,17 @@ def _get_time_performance_stats(api_key: str, secret_key: str, cid: str, payload
         "since": since,
         "until": until,
         "date_label": date_label,
-        "requested_since": requested_since,
-        "requested_until": requested_until,
-        "requested_date_label": requested_date_label,
-        "range_was_clamped": bool(range_meta.get("range_was_clamped")),
+        "requested_since": since,
+        "requested_until": until,
+        "requested_date_label": date_label,
         "target_count": len(target_rows),
         "debug": {
             "raw_breakdown_row_count": len(rows or []),
             "parsed_time_row_count": len(time_rows or []),
             "attempted_breakdown": "hh24",
             "time_increment": "allDays",
-            **range_meta,
+            "date_range_was_chunked": len(date_chunks) > 1,
+            "date_chunks": [{"since": chunk_since, "until": chunk_until} for chunk_since, chunk_until in date_chunks],
         },
     }
 
