@@ -8111,6 +8111,15 @@ def _performance_report_download_error_retryable(error: Any) -> bool:
     text = str(error or "").lower()
     return "http 429" in text or " 429" in text or "rate limit" in text or "too many" in text
 
+def _performance_report_no_data_message(value: Any) -> bool:
+    text = str(value or "")
+    return (
+        "파싱 결과 0건" in text
+        or "선택하신 조건에 지표가 확인되지 않습니다" in text
+        or '"code":10004' in text
+        or "code\":10004" in text
+    )
+
 def _shopping_query_report_is_warming(cid: str, stat_date: date, report_type: str = "SHOPPINGKEYWORD_CONVERSION_DETAIL") -> bool:
     cache_key = _shopping_query_report_row_cache_key(cid, stat_date, report_type)
     with PERFORMANCE_KEYWORD_REPORT_CACHE_LOCK:
@@ -8240,6 +8249,12 @@ def _complete_shopping_query_report_jobs_async(
                                 downloaded, error = [], "download failed"
                             if error and _performance_report_download_error_retryable(error):
                                 continue
+                            if stat_date and error and _performance_report_no_data_message(error):
+                                _set_cached_shopping_query_report_rows(cid, stat_date, [], report_type)
+                                job_id = next((candidate for candidate, target in pending.items() if target == stat_date), "")
+                                if job_id:
+                                    completed.append(job_id)
+                                continue
                             if stat_date and not error:
                                 _set_cached_shopping_query_report_rows(cid, stat_date, downloaded, report_type)
                             job_id = next((candidate for candidate, target in pending.items() if target == stat_date), "")
@@ -8306,6 +8321,7 @@ def _warm_shopping_query_report_dates_async(
                     }
                     for future in as_completed(futures):
                         target = futures[future]
+                        response = None
                         try:
                             response = future.result()
                             data = _response_json_value(response)
@@ -8314,6 +8330,9 @@ def _warm_shopping_query_report_dates_async(
                             job_id = ""
                         if job_id:
                             pending[job_id] = target
+                            started_targets.add(target)
+                        elif response is not None and _performance_report_no_data_message(getattr(response, "text", "")):
+                            _set_cached_shopping_query_report_rows(cid, target, [], report_type)
                             started_targets.add(target)
                         else:
                             _shopping_query_report_mark_warming(cid, target, report_type, False)
@@ -8429,7 +8448,12 @@ def _fetch_shopping_query_conversion_rows(
                     pending[job_id] = target
                     meta["created_report_count"] += 1
                 else:
-                    errors.append(f"{target.isoformat()} 쇼핑검색어 리포트 생성 실패: {_short_log_text(response.text, 240)}")
+                    detail = _short_log_text(response.text, 240)
+                    if _performance_report_no_data_message(detail):
+                        _set_cached_shopping_query_report_rows(cid, target, [], "SHOPPINGKEYWORD_CONVERSION_DETAIL")
+                        meta["cached_date_count"] = int(meta.get("cached_date_count") or 0) + 1
+                    else:
+                        errors.append(f"{target.isoformat()} 쇼핑검색어 리포트 생성 실패: {detail}")
         except FuturesTimeoutError:
             pass
         finally:
@@ -8514,7 +8538,10 @@ def _fetch_shopping_query_conversion_rows(
                         if _performance_report_download_error_retryable(error):
                             last_status_by_job[job_id] = "DOWNLOAD_RETRY"
                             continue
-                        errors.append(error)
+                        if stat_date and _performance_report_no_data_message(error):
+                            _set_cached_shopping_query_report_rows(cid, stat_date, [], "SHOPPINGKEYWORD_CONVERSION_DETAIL")
+                        else:
+                            errors.append(error)
                     elif stat_date:
                         rows.extend(downloaded)
                         meta["downloaded_report_count"] += 1
@@ -8647,7 +8674,11 @@ def _fetch_shopping_keyword_detail_rows(
                 if response.status_code in {200, 201, 202} and job_id:
                     pending[job_id] = target
                 else:
-                    errors.append(f"{target.isoformat()} 쇼핑검색어 발생 리포트 생성 실패: {_short_log_text(response.text, 240)}")
+                    detail = _short_log_text(response.text, 240)
+                    if _performance_report_no_data_message(detail):
+                        _set_cached_shopping_query_report_rows(cid, target, [], report_type)
+                    else:
+                        errors.append(f"{target.isoformat()} 쇼핑검색어 발생 리포트 생성 실패: {detail}")
         except FuturesTimeoutError:
             pass
         finally:
@@ -8734,7 +8765,10 @@ def _fetch_shopping_keyword_detail_rows(
                         if _performance_report_download_error_retryable(error):
                             last_status_by_job[job_id] = "DOWNLOAD_RETRY"
                             continue
-                        errors.append(error)
+                        if stat_date and _performance_report_no_data_message(error):
+                            _set_cached_shopping_query_report_rows(cid, stat_date, [], report_type)
+                        else:
+                            errors.append(error)
                     elif stat_date:
                         rows.extend(downloaded)
                         _set_cached_shopping_query_report_rows(cid, stat_date, downloaded, report_type)
@@ -8810,12 +8844,21 @@ def _fetch_dimension_detail_report_rows(
         "pending_report_count": len(warming_dates),
         "background_refresh": bool(warming_dates),
     }
+    timeout_budget = _shopping_query_timeout_budget(timeout_seconds)
     if not dates:
+        if warming_dates and timeout_budget > PERFORMANCE_SHOPPING_QUERY_REPORT_MIN_TIMEOUT_SECONDS:
+            warmed_rows, warming_dates = _wait_for_warming_shopping_query_cache(
+                cid, warming_dates, report_type_norm, time.monotonic() + timeout_budget
+            )
+            rows.extend(warmed_rows)
+            cached_date_count += len({str(row.get("date") or "") for row in warmed_rows if str(row.get("date") or "").strip()})
+            meta["cached_date_count"] = cached_date_count
+            meta["pending_report_count"] = len(warming_dates)
+            meta["background_refresh"] = bool(warming_dates)
         if warming_dates:
             errors.append(f"{report_type_norm} 리포트 {len(warming_dates)}일치가 아직 파일 생성 중입니다. 준비된 날짜만 먼저 표시하고 완료되면 자동 갱신합니다.")
         return rows, errors, meta
 
-    timeout_budget = _shopping_query_timeout_budget(timeout_seconds)
     deadline = time.monotonic() + timeout_budget
     batch_size = min(max(1, len(dates)), PERFORMANCE_SHOPPING_QUERY_REPORT_WORKERS)
     pending: Dict[str, date] = {}
@@ -8870,7 +8913,11 @@ def _fetch_dimension_detail_report_rows(
                     meta["created_report_count"] += 1
                 else:
                     detail = _short_log_text(getattr(response, "text", ""), 240) or f"HTTP {getattr(response, 'status_code', '')}"
-                    errors.append(f"{target.isoformat()} {report_type_norm} 리포트 생성 실패: {detail}")
+                    if _performance_report_no_data_message(detail):
+                        _set_cached_shopping_query_report_rows(cid, target, [], report_type_norm)
+                        meta["cached_date_count"] = int(meta.get("cached_date_count") or 0) + 1
+                    else:
+                        errors.append(f"{target.isoformat()} {report_type_norm} 리포트 생성 실패: {detail}")
         except FuturesTimeoutError:
             pass
         finally:
@@ -8958,7 +9005,10 @@ def _fetch_dimension_detail_report_rows(
                         if _performance_report_download_error_retryable(error):
                             last_status_by_job[job_id] = "DOWNLOAD_429"
                             continue
-                        errors.append(error)
+                        if stat_date and _performance_report_no_data_message(error):
+                            _set_cached_shopping_query_report_rows(cid, stat_date, [], report_type_norm)
+                        else:
+                            errors.append(error)
                         completed.append(job_id)
                     elif stat_date:
                         rows.extend(downloaded)

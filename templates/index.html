@@ -34672,11 +34672,12 @@ function clearShoppingQueryBackgroundRefresh() {
 
 function scheduleShoppingQueryBackgroundRefresh(view, payload, data, attempt = 1) {
     const pendingCount = Number(data?.pending_report_count || 0);
-    if(!pendingCount || attempt > 40) return;
+    const maxAttempts = detailReportMaxAttemptsForData(data);
+    if(!pendingCount || attempt > maxAttempts) return;
     const token = getShoppingQueryRefreshToken(view, payload);
     if(shoppingQueryBackgroundRefreshTimer) clearTimeout(shoppingQueryBackgroundRefreshTimer);
     shoppingQueryBackgroundRefreshToken = token;
-    const delayMs = Math.min(12000, 2500 + (attempt * 2000));
+    const delayMs = detailReportBackgroundDelayMs(attempt);
     shoppingQueryBackgroundRefreshTimer = setTimeout(async () => {
         if(shoppingQueryBackgroundRefreshToken !== token) return;
         if(String(currentCustomerId || '') !== String(payload?.customer_id || '')) return;
