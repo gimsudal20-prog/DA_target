@@ -13475,28 +13475,53 @@
       line-height: 1.45 !important;
     }
     body .report-data-pending {
-      display: flex !important;
+      position: relative !important;
+      display: grid !important;
+      grid-template-columns: auto minmax(0, 1fr) !important;
       align-items: center !important;
-      justify-content: space-between !important;
       gap: 12px !important;
-      padding: 11px 12px !important;
+      overflow: hidden !important;
+      padding: 13px 14px 16px !important;
       border: 1px solid #bfdbfe !important;
       border-radius: 8px !important;
-      background: #eff6ff !important;
+      background: linear-gradient(90deg, #eff6ff, #f8fbff) !important;
       color: #1e3a8a !important;
       font-size: 12px !important;
       line-height: 1.45 !important;
     }
+    body .report-data-pending::before {
+      content: '' !important;
+      width: 18px !important;
+      height: 18px !important;
+      border: 3px solid #bfdbfe !important;
+      border-top-color: #2563eb !important;
+      border-radius: 999px !important;
+      animation: reportDataStatusSpin 0.7s linear infinite !important;
+    }
+    body .report-data-pending::after {
+      content: '' !important;
+      position: absolute !important;
+      left: 0 !important;
+      right: 0 !important;
+      bottom: 0 !important;
+      height: 3px !important;
+      background: linear-gradient(90deg, transparent 0%, #2563eb 45%, transparent 90%) !important;
+      animation: reportDataPendingSweep 1.15s ease-in-out infinite !important;
+    }
     body .report-data-pending strong {
-      flex: 0 0 auto !important;
       color: #1d4ed8 !important;
-      font-weight: 800 !important;
+      font-weight: 900 !important;
     }
     body .report-data-pending span {
       min-width: 0 !important;
-      text-align: right !important;
+      grid-column: 2 !important;
       color: #334155 !important;
-      font-weight: 600 !important;
+      font-weight: 700 !important;
+    }
+    @keyframes reportDataPendingSweep {
+      0% { transform: translateX(-100%); opacity: 0.45; }
+      50% { opacity: 1; }
+      100% { transform: translateX(100%); opacity: 0.45; }
     }
     body .report-data-media-lookup {
       display: grid !important;
@@ -34756,8 +34781,8 @@ function renderDimensionDataPendingNotice(data) {
     const detailText = reportText ? ` · ${reportText}` : '';
     return `
         <div class="report-data-pending">
-          <strong>상세 리포트 준비 중</strong>
-          <span>${escapeMaybe(`${pendingCount.toLocaleString()}건 생성 중${detailText}. 완료되면 자동으로 다시 조회합니다.`)}</span>
+          <strong>상세 리포트 자동 준비 중</strong>
+          <span>${escapeMaybe(`준비된 데이터는 먼저 표시합니다. 남은 ${pendingCount.toLocaleString()}건${detailText}은 완료되는 대로 자동 갱신됩니다.`)}</span>
         </div>
     `;
 }
@@ -34768,7 +34793,7 @@ function scheduleDimensionDataBackgroundRefresh(prefix, payload, data, attempt =
     const token = getDimensionDataRefreshToken(prefix, payload);
     if(dimensionDataBackgroundTimers[prefix]) clearTimeout(dimensionDataBackgroundTimers[prefix]);
     dimensionDataBackgroundTokens[prefix] = token;
-    const delayMs = Math.min(12000, 2500 + (attempt * 2000));
+    const delayMs = Math.min(9000, 1600 + (attempt * 1400));
     dimensionDataBackgroundTimers[prefix] = setTimeout(async () => {
         if(dimensionDataBackgroundTokens[prefix] !== token) return;
         if(String(currentCustomerId || '') !== String(payload?.customer_id || '')) return;
@@ -37688,7 +37713,9 @@ function renderRegionDataLookupNotice(stored, rows = []) {
 }
 
 function normalizeDimensionDataRows(prefix, rawRows = []) {
-    return (Array.isArray(rawRows) ? rawRows : []).map(row => {
+    return (Array.isArray(rawRows) ? rawRows : [])
+    .filter(row => !(prefix === 'area_data' && String(row?.key || '').toLowerCase() === 'search_contents'))
+    .map(row => {
         const metrics = normalizeReportDataMetricSet(row?.metrics || row?.total || row?.series?.total || {});
         return {
             label: String(row?.label || row?.key || '-'),
@@ -37777,7 +37804,7 @@ function renderDimensionDataReport(prefix, data = getDimensionDataStore(prefix))
         : (stored.since || stored.date_label || '조회 완료');
     const isPending = hasDimensionDataPending(stored);
     const pendingNotice = renderDimensionDataPendingNotice(stored);
-    setReportDataStatus(prefix, isPending ? '준비 중' : dateText, isPending ? 'running' : 'done');
+    setReportDataStatus(prefix, isPending ? '자동 갱신 중' : dateText, isPending ? 'running' : 'done');
     if(!rows.length) {
         const emptyText = isPending
             ? '준비된 데이터가 아직 없습니다. 완료되면 자동으로 표시됩니다.'

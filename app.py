@@ -3219,6 +3219,8 @@ PERFORMANCE_SHOPPING_QUERY_BACKGROUND_TIMEOUT_SECONDS = 600.0
 PERFORMANCE_SHOPPING_QUERY_REPORT_WARMING_TTL_SECONDS = PERFORMANCE_SHOPPING_QUERY_BACKGROUND_TIMEOUT_SECONDS + 90.0
 PERFORMANCE_SHOPPING_QUERY_REPORT_WORKERS = 3
 PERFORMANCE_DIMENSION_REPORT_WORKERS = 2
+PERFORMANCE_DIMENSION_REPORT_TIMEOUT_SECONDS = 6.0
+PERFORMANCE_DIMENSION_REPORT_PROBE_TIMEOUT_SECONDS = 2.0
 PERFORMANCE_SHOPPING_QUERY_REPORT_WARMING: Dict[str, float] = {}
 PERFORMANCE_REPORT_CHUNK_DAYS = 30
 PERFORMANCE_DIMENSION_REPORT_MAX_DAYS = 120
@@ -3236,8 +3238,8 @@ PERFORMANCE_SUPPLEMENTAL_MEDIA_CATALOG_ROWS = [
     ("335738", "Bing-PC", True, False),
     ("335739", "Bing-Mobile", True, False),
     ("424040", "네이버 검색탭 - 모바일", True, False),
-    ("341893", "네이버 통합검색 추천-모바일", True, False),
-    ("370822", "네이버 통합검색 추천 - PC", True, False),
+    ("341893", "네이버 통합검색 추천-모바일", False, True),
+    ("370822", "네이버 통합검색 추천 - PC", False, True),
     ("684924", "네이버 통합검색 네이버플러스 스토어 - 모바일", True, False),
     ("684925", "네이버 통합검색 네이버플러스 스토어 - PC", True, False),
     ("684926", "네이버플러스 스토어 - 모바일", True, False),
@@ -4733,6 +4735,7 @@ def _collect_dimension_report_rows(
     since: str,
     until: str,
     report_types: List[str],
+    timeout_seconds: float = PERFORMANCE_DIMENSION_REPORT_TIMEOUT_SECONDS,
 ) -> Tuple[Dict[str, List[Dict[str, Any]]], List[str], List[str], Dict[str, Any]]:
     rows_by_type: Dict[str, List[Dict[str, Any]]] = {}
     warnings: List[str] = []
@@ -4756,7 +4759,7 @@ def _collect_dimension_report_rows(
                 chunk_since,
                 chunk_until,
                 report_type,
-                18.0,
+                timeout_seconds,
                 background_on_timeout=True,
             ): (report_type, chunk_since, chunk_until)
             for report_type, chunk_since, chunk_until in jobs
@@ -4852,6 +4855,12 @@ def _get_dimension_performance_stats(api_key: str, secret_key: str, cid: str, pa
     if day_count > PERFORMANCE_DIMENSION_REPORT_MAX_DAYS:
         raise ValueError(f"상세보고서 기반 데이터는 최대 {PERFORMANCE_DIMENSION_REPORT_MAX_DAYS}일까지 조회할 수 있습니다.")
     date_chunks = _split_date_range_chunks(since, until, PERFORMANCE_REPORT_CHUNK_DAYS)
+    requested_timeout = _performance_number(payload.get("fast_timeout_seconds") or payload.get("timeout_seconds"))
+    if requested_timeout <= 0:
+        requested_timeout = PERFORMANCE_DIMENSION_REPORT_TIMEOUT_SECONDS
+    if _boolish(payload.get("background_refresh_probe"), False):
+        requested_timeout = min(requested_timeout, PERFORMANCE_DIMENSION_REPORT_PROBE_TIMEOUT_SECONDS)
+    report_timeout_seconds = min(18.0, max(PERFORMANCE_SHOPPING_QUERY_REPORT_MIN_TIMEOUT_SECONDS, requested_timeout))
 
     target_rows, target_warnings = _collect_performance_targets(
         api_key, secret_key, cid, scope, "adgroup", type_filter, campaign_ids, adgroup_ids,
@@ -4885,7 +4894,7 @@ def _get_dimension_performance_stats(api_key: str, secret_key: str, cid: str, pa
     if dimension in {"area", "media"}:
         media_catalog, media_warning = _load_performance_media_catalog(api_key, secret_key, cid)
     rows_by_type, report_warnings, report_errors, report_meta = _collect_dimension_report_rows(
-        api_key, secret_key, cid, since, until, report_types,
+        api_key, secret_key, cid, since, until, report_types, report_timeout_seconds,
     )
     pending_summary = _summarize_dimension_report_pending(report_meta)
     activity_rows: List[Dict[str, Any]] = []
@@ -4907,7 +4916,7 @@ def _get_dimension_performance_stats(api_key: str, secret_key: str, cid: str, pa
     # use SHOPPINGKEYWORD_DETAIL only as a last fallback when those have no rows.
     if has_shopping_target and not shopping_ad_activity_rows and ad_activity_fallback_report_type not in rows_by_type:
         ad_fallback_rows_by_type, ad_fallback_warnings, ad_fallback_errors, ad_fallback_meta = _collect_dimension_report_rows(
-            api_key, secret_key, cid, since, until, [ad_activity_fallback_report_type, ad_conversion_fallback_report_type],
+            api_key, secret_key, cid, since, until, [ad_activity_fallback_report_type, ad_conversion_fallback_report_type], report_timeout_seconds,
         )
         rows_by_type.update(ad_fallback_rows_by_type)
         report_meta.update(ad_fallback_meta)
@@ -4923,7 +4932,7 @@ def _get_dimension_performance_stats(api_key: str, secret_key: str, cid: str, pa
     needs_shopping_fallback = bool(fallback_report_types and has_shopping_target and not shopping_ad_activity_rows)
     if needs_shopping_fallback and not any(report_type in rows_by_type for report_type in fallback_report_types):
         fallback_rows_by_type, fallback_warnings, fallback_errors, fallback_meta = _collect_dimension_report_rows(
-            api_key, secret_key, cid, since, until, fallback_report_types,
+            api_key, secret_key, cid, since, until, fallback_report_types, report_timeout_seconds,
         )
         rows_by_type.update(fallback_rows_by_type)
         report_meta.update(fallback_meta)
@@ -5031,6 +5040,7 @@ def _get_dimension_performance_stats(api_key: str, secret_key: str, cid: str, pa
             "unresolved_region_count": int((region_lookup or {}).get("unresolved_count") or 0),
             "pending_report_count": pending_count,
             "report_meta": report_meta,
+            "report_timeout_seconds": report_timeout_seconds,
         },
     }
 
@@ -6721,6 +6731,8 @@ def _performance_media_name_area_key(name: Any) -> str:
     compact = re.sub(r"\s+", "", text).upper()
     if not compact:
         return ""
+    if "추천" in compact:
+        return "contents"
     if "통합검색" in compact or "검색탭" in compact:
         return "search"
     if compact.startswith(("BING-", "다음-", "ZUM-")):
@@ -7050,12 +7062,14 @@ def _performance_media_area_info(media_code: Any, media_catalog: Dict[str, Dict[
     if source_text.startswith("stat_") and name_area == "contents":
         return {"key": "contents", "label": "콘텐츠 영역", "sort": 2, "media_id": media_id, "media_name": name}
     if search_area and contents_area:
-        return {"key": "search_contents", "label": "검색+콘텐츠 공통", "sort": 3, "media_id": media_id, "media_name": name}
+        if name_area == "search":
+            return {"key": "search", "label": "검색 영역", "sort": 1, "media_id": media_id, "media_name": name}
+        return {"key": "contents", "label": "콘텐츠 영역", "sort": 2, "media_id": media_id, "media_name": name}
     if search_area:
         return {"key": "search", "label": "검색 영역", "sort": 1, "media_id": media_id, "media_name": name}
     if contents_area:
         return {"key": "contents", "label": "콘텐츠 영역", "sort": 2, "media_id": media_id, "media_name": name}
-    if media_id and (media_id in PERFORMANCE_SUPPLEMENTAL_SEARCH_MEDIA_IDS or (source_text.startswith("stat_") and media_id.startswith("341"))):
+    if media_id and media_id in PERFORMANCE_SUPPLEMENTAL_SEARCH_MEDIA_IDS:
         return {"key": "search", "label": "검색 영역", "sort": 1, "media_id": media_id, "media_name": name}
     if media_id and (media_id in PERFORMANCE_SUPPLEMENTAL_CONTENTS_MEDIA_IDS or source_text.startswith("stat_")):
         return {"key": "contents", "label": "콘텐츠 영역", "sort": 2, "media_id": media_id, "media_name": name}
