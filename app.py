@@ -13651,21 +13651,88 @@ def _resolve_age_criterion_options(api_key: str, secret_key: str, cid: str) -> T
         warning = "연령대 사전에서 일부 코드를 찾지 못해 기본 코드를 사용했습니다: " + ", ".join(missing[:4])
     return resolved, warning
 
+REGION_TOP_LEVEL_LABELS = [
+    "서울특별시",
+    "경기도",
+    "인천광역시",
+    "강원도",
+    "충청북도",
+    "충청남도",
+    "세종특별자치시",
+    "대전광역시",
+    "전라북도",
+    "전북특별자치도",
+    "전라남도",
+    "광주광역시",
+    "경상북도",
+    "대구광역시",
+    "경상남도",
+    "울산광역시",
+    "부산광역시",
+    "제주특별자치도",
+]
+REGION_TOP_LEVEL_ALIASES = {
+    "서울특별시": ["서울"],
+    "경기도": ["경기"],
+    "인천광역시": ["인천"],
+    "강원도": ["강원", "강원특별자치도"],
+    "충청북도": ["충북"],
+    "충청남도": ["충남"],
+    "세종특별자치시": ["세종"],
+    "대전광역시": ["대전"],
+    "전라북도": ["전북", "전북특별자치도"],
+    "전북특별자치도": ["전북", "전라북도"],
+    "전라남도": ["전남"],
+    "광주광역시": ["광주"],
+    "경상북도": ["경북"],
+    "대구광역시": ["대구"],
+    "경상남도": ["경남"],
+    "울산광역시": ["울산"],
+    "부산광역시": ["부산"],
+    "제주특별자치도": ["제주", "제주도"],
+}
+REGION_UNKNOWN_LABEL_MARKERS = ("상세위치확인불가", "위치확인불가", "위치미확인", "지역미확인")
+
+def _region_label_key(value: Any) -> str:
+    return re.sub(r"[\s\-_/·.,()]+", "", str(value or "").strip())
+
+def _region_top_level_order(label: Any) -> Optional[int]:
+    key = _region_label_key(label)
+    if not key:
+        return None
+    for idx, canonical in enumerate(REGION_TOP_LEVEL_LABELS):
+        aliases = [canonical] + REGION_TOP_LEVEL_ALIASES.get(canonical, [])
+        if key in {_region_label_key(alias) for alias in aliases}:
+            return idx
+    if any(marker in key for marker in REGION_UNKNOWN_LABEL_MARKERS):
+        return len(REGION_TOP_LEVEL_LABELS)
+    return None
+
+def _region_primary_label_candidates(row: Dict[str, Any], label: str) -> List[str]:
+    candidates: List[str] = []
+    for key in ("codeName", "name", "label", "description", "text"):
+        value = str(_row_first_present(row, [key], "") or "").strip()
+        if value:
+            candidates.append(value)
+    if label:
+        candidates.append(label)
+    return _unique_keep_order(candidates)
+
+def _is_top_level_region_option(row: Dict[str, Any], label: str) -> bool:
+    return any(_region_top_level_order(candidate) is not None for candidate in _region_primary_label_candidates(row, label))
+
 def _region_option_sort_key(item: Dict[str, Any]) -> Tuple[int, str, str]:
     label = str((item or {}).get("label") or "").strip()
     code = str((item or {}).get("code") or "").strip()
-    order = 10
-    if "국내" in label:
-        order = 0
-    elif any(token in label for token in ("서울", "경기", "인천")):
-        order = 1
-    elif any(token in label for token in ("강원", "충청", "대전", "세종", "전라", "광주", "경상", "대구", "울산", "부산", "제주")):
-        order = 2
+    order = _region_top_level_order(label)
+    if order is None:
+        order = 100
     return (order, label, code)
 
 def _resolve_region_criterion_options(api_key: str, secret_key: str, cid: str) -> Tuple[List[Dict[str, str]], str]:
     warnings: List[str] = []
     options: List[Dict[str, str]] = []
+    hidden_detail_count = 0
     seen: set[Tuple[str, str]] = set()
     for criterion_type in ("RL",):
         res, rows = _fetch_criterion_dictionary_entries(api_key, secret_key, cid, criterion_type)
@@ -13677,6 +13744,9 @@ def _resolve_region_criterion_options(api_key: str, secret_key: str, cid: str) -
             if not code:
                 continue
             label = _criterion_option_label_from_row(row, code)
+            if not _is_top_level_region_option(row, label):
+                hidden_detail_count += 1
+                continue
             key = (criterion_type, code)
             if key in seen:
                 continue
@@ -13692,6 +13762,8 @@ def _resolve_region_criterion_options(api_key: str, secret_key: str, cid: str) -
                 ),
             })
     options.sort(key=_region_option_sort_key)
+    if hidden_detail_count:
+        warnings.append(f"상세 지역 {hidden_detail_count}개는 네이버 화면과 맞춰 시/도 선택 목록에서 숨겼습니다.")
     warning = " / ".join([w for w in warnings if w])
     return options, warning
 
@@ -21672,7 +21744,7 @@ def get_region_target_options():
         "options": options,
         "count": len(options),
         "warning": warning,
-        "message": f"지역 타겟팅 옵션 {len(options)}개를 불러왔습니다." + (f"\n{warning}" if warning else ""),
+        "message": f"시/도 지역 타겟팅 옵션 {len(options)}개를 불러왔습니다." + (f"\n{warning}" if warning else ""),
     })
 
 def update_region_targets_bulk():

@@ -21287,7 +21287,7 @@
                             <div class="form-group">
                                 <label>지역 검색</label>
                                 <input type="search" id="bulk_region_search" placeholder="예: 서울, 경기, 인천" oninput="renderBulkRegionTargetOptions()">
-                                <div class="field-note">지역 목록은 현재 광고주 API의 네이버 지역 사전 기준으로 불러옵니다.</div>
+                                <div class="field-note">네이버 화면과 맞춰 시/도 단위 지역만 표시합니다.</div>
                             </div>
                             <div class="form-group">
                                 <label>선택 상태</label>
@@ -21304,7 +21304,7 @@
                             <div id="bulk_region_target_options" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:8px 12px; max-height:280px; overflow:auto; padding:12px; border:1px solid var(--line); border-radius:12px; background:#fff; font-size:12px;">
                                 <div class="field-note">지역 목록 불러오기를 누르면 선택 가능한 지역이 표시됩니다.</div>
                             </div>
-                            <div class="field-note">네이버 기준 지역은 최대 100개까지 선택할 수 있습니다. 시/도보다 좁은 지역은 정확도가 낮을 수 있습니다.</div>
+                            <div class="field-note">네이버 기준 지역은 최대 100개까지 선택할 수 있습니다. 시/군/구 같은 상세 지역은 목록에서 제외합니다.</div>
                         </div>
                         <div class="grid-2">
                             <div class="form-group">
