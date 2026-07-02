@@ -16924,6 +16924,451 @@
     body #b_age .change-scope-common,
     body #b_region .change-scope-common { order: 20 !important; }
 
+    body #b_region .bulk-region-card {
+      overflow: visible !important;
+      padding: 0 !important;
+      border-radius: 8px !important;
+    }
+
+    body #b_region .bulk-region-shell {
+      display: grid;
+      gap: 16px;
+    }
+
+    body #b_region .bulk-region-head {
+      padding: 20px 20px 0;
+    }
+
+    body #b_region .bulk-region-head .card-title {
+      margin-bottom: 8px;
+    }
+
+    body #b_region .bulk-region-control-grid {
+      display: grid;
+      grid-template-columns: minmax(260px, 0.85fr) minmax(420px, 1.15fr);
+      gap: 12px;
+      padding: 0 20px;
+    }
+
+    body #b_region .bulk-region-control-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 12px;
+      min-width: 0;
+    }
+
+    body #b_region .bulk-region-control-title {
+      margin-bottom: 10px;
+      color: #0f172a;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    body #b_region .bulk-region-radio-stack {
+      display: grid;
+      gap: 8px;
+    }
+
+    body #b_region .bulk-region-radio-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    body #b_region .bulk-region-radio {
+      display: flex !important;
+      align-items: center;
+      gap: 8px;
+      min-height: 38px;
+      margin: 0 !important;
+      padding: 9px 12px;
+      border: 1px solid #dbe3ef;
+      border-radius: 8px;
+      background: #f8fafc;
+      color: #0f172a !important;
+      font-size: 13px !important;
+      font-weight: 800 !important;
+      cursor: pointer;
+    }
+
+    body #b_region .bulk-region-radio input {
+      margin: 0;
+      accent-color: #2563eb;
+    }
+
+    body #b_region .bulk-region-picker-wrap {
+      position: relative;
+      padding: 0 20px 20px;
+      overflow: visible;
+    }
+
+    body #b_region .bulk-region-searchbar {
+      position: relative;
+      z-index: 45;
+      display: grid;
+      grid-template-columns: 118px minmax(0, 1fr) 44px;
+      align-items: center;
+      min-height: 56px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: #f8fafc;
+      color: #0f172a;
+      transition: border 0.18s ease, box-shadow 0.18s ease, background 0.18s ease, opacity 0.18s ease;
+    }
+
+    body #b_region .bulk-region-searchbar:focus-within,
+    body #b_region .bulk-region-searchbar.is-open {
+      border-color: #93c5fd;
+      background: #fff;
+      box-shadow: 0 0 0 4px rgba(37,99,235,0.10);
+    }
+
+    body #b_region .bulk-region-searchbar.is-disabled {
+      opacity: 0.58;
+      background: #f1f5f9;
+    }
+
+    body #b_region .bulk-region-search-type,
+    body #b_region .bulk-region-dropdown-toggle {
+      width: 100%;
+      height: 100%;
+      min-height: 54px;
+      border: 0;
+      background: transparent;
+      color: #0f172a;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    body #b_region .bulk-region-search-type {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border-right: 1px solid #e5e7eb;
+      font-size: 14px;
+    }
+
+    body #b_region #bulk_region_search {
+      height: 54px;
+      border: 0 !important;
+      border-radius: 0 !important;
+      background: transparent !important;
+      box-shadow: none !important;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    body #b_region #bulk_region_search::placeholder {
+      color: #334155;
+      font-weight: 600;
+    }
+
+    body #b_region .bulk-region-dropdown-toggle {
+      font-size: 18px;
+    }
+
+    body #b_region .bulk-region-dropdown {
+      position: absolute;
+      z-index: 50;
+      top: 60px;
+      left: 20px;
+      right: 20px;
+      display: none;
+      max-height: 360px;
+      overflow: auto;
+      padding: 4px 0;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 18px 48px rgba(15,23,42,0.16);
+    }
+
+    body #b_region .bulk-region-dropdown.is-open {
+      display: block;
+    }
+
+    body #b_region .bulk-region-option,
+    body #b_region .bulk-region-dropdown-note {
+      min-height: 50px;
+      padding: 0 16px;
+    }
+
+    body #b_region .bulk-region-option {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      width: 100%;
+      border: 0;
+      border-radius: 0;
+      background: #fff;
+      color: #0f172a;
+      font-size: 15px;
+      font-weight: 700;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    body #b_region .bulk-region-option:hover {
+      background: #f3f4f6;
+    }
+
+    body #b_region .bulk-region-option:disabled {
+      cursor: default;
+      color: #94a3b8;
+      background: #f8fafc;
+    }
+
+    body #b_region .bulk-region-option small {
+      color: #64748b;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    body #b_region .bulk-region-dropdown-note {
+      display: flex;
+      align-items: center;
+      color: #64748b;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    body #b_region .bulk-region-workspace {
+      display: grid;
+      grid-template-columns: minmax(320px, 380px) minmax(360px, 1fr);
+      gap: 8px;
+      margin-top: 20px;
+      align-items: stretch;
+    }
+
+    body #b_region .bulk-region-selected-panel,
+    body #b_region .bulk-region-map-panel {
+      min-height: 380px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      background: #fff;
+      overflow: hidden;
+    }
+
+    body #b_region .bulk-region-selected-panel {
+      display: flex;
+      flex-direction: column;
+    }
+
+    body #b_region .bulk-region-selected-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-height: 42px;
+      padding: 10px 14px;
+      border-bottom: 1px solid #e5e7eb;
+      color: #0f172a;
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    body #b_region .bulk-region-clear {
+      border: 0;
+      background: transparent;
+      color: #94a3b8;
+      font-size: 12px;
+      font-weight: 900;
+      cursor: pointer;
+    }
+
+    body #b_region .bulk-region-clear:not(:disabled):hover {
+      color: #2563eb;
+    }
+
+    body #b_region .bulk-region-clear:disabled {
+      cursor: default;
+      opacity: 0.5;
+    }
+
+    body #b_region .bulk-region-selected-list {
+      flex: 1;
+      overflow: auto;
+      background: #fff;
+    }
+
+    body #b_region .bulk-region-selected-empty {
+      height: 100%;
+      min-height: 300px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      color: #94a3b8;
+      font-size: 13px;
+      font-weight: 800;
+      text-align: center;
+    }
+
+    body #b_region .bulk-region-selected-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-height: 50px;
+      padding: 0 14px;
+      border-bottom: 1px solid #e5e7eb;
+      color: #0f172a;
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    body #b_region .bulk-region-selected-row.is-active {
+      background: #eef4ff;
+    }
+
+    body #b_region .bulk-region-selected-row button {
+      border: 0;
+      background: transparent;
+      color: #2563eb;
+      font-size: 12px;
+      font-weight: 900;
+      cursor: pointer;
+    }
+
+    body #b_region .bulk-region-map-panel {
+      position: relative;
+      background:
+        radial-gradient(circle at 42% 58%, rgba(54,126,68,0.32) 0 15%, transparent 16%),
+        radial-gradient(circle at 66% 36%, rgba(54,126,68,0.26) 0 14%, transparent 15%),
+        radial-gradient(circle at 75% 70%, rgba(54,126,68,0.20) 0 12%, transparent 13%),
+        linear-gradient(135deg, #b8d7ec 0 34%, #d8ead8 35% 55%, #a8d1ef 56% 100%);
+    }
+
+    body #b_region .bulk-region-map-label {
+      position: absolute;
+      color: #334155;
+      font-size: 12px;
+      font-weight: 900;
+      text-shadow: 0 1px 0 rgba(255,255,255,0.75);
+    }
+
+    body #b_region .bulk-region-map-label.korea { left: 48%; top: 48%; font-size: 18px; }
+    body #b_region .bulk-region-map-label.seoul { left: 47%; top: 40%; }
+    body #b_region .bulk-region-map-label.incheon { left: 42%; top: 43%; }
+    body #b_region .bulk-region-map-label.east { right: 20%; top: 48%; color: #64748b; }
+    body #b_region .bulk-region-map-label.west { left: 18%; top: 60%; color: #64748b; }
+    body #b_region .bulk-region-map-label.north { left: 48%; top: 28%; }
+
+    body #b_region .bulk-region-map-controls {
+      position: absolute;
+      right: 10px;
+      top: 10px;
+      display: grid;
+      gap: 1px;
+      overflow: hidden;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      background: #fff;
+    }
+
+    body #b_region .bulk-region-map-controls span {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      color: #334155;
+      font-size: 18px;
+      font-weight: 900;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    body #b_region .bulk-region-map-controls span:last-child {
+      border-bottom: 0;
+    }
+
+    body #b_region .bulk-region-map-scale {
+      position: absolute;
+      right: 14px;
+      bottom: 10px;
+      padding-top: 2px;
+      border-top: 2px solid #334155;
+      color: #334155;
+      font-size: 10px;
+      font-weight: 900;
+    }
+
+    body #b_region .bulk-region-map-copy {
+      position: absolute;
+      left: 10px;
+      bottom: 8px;
+      color: #475569;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    body #b_region .bulk-region-selection-note {
+      margin-top: 12px;
+      color: #0f172a;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    body #b_region .bulk-region-help {
+      margin: 8px 0 0;
+      color: #334155;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    body #b_region .bulk-region-footer {
+      display: grid;
+      grid-template-columns: minmax(280px, 1fr) minmax(260px, 0.7fr);
+      gap: 12px;
+      padding: 0 20px 20px;
+    }
+
+    body #b_region .bulk-region-apply-note {
+      min-height: 82px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: #475569;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.5;
+    }
+
+    body #b_region .bulk-region-footer .btn {
+      width: 100%;
+      margin-top: 10px;
+    }
+
+    @media (max-width: 1100px) {
+      body #b_region .bulk-region-control-grid,
+      body #b_region .bulk-region-workspace,
+      body #b_region .bulk-region-footer {
+        grid-template-columns: 1fr;
+      }
+
+      body #b_region .bulk-region-map-panel {
+        min-height: 300px;
+      }
+    }
+
+    @media (max-width: 720px) {
+      body #b_region .bulk-region-searchbar {
+        grid-template-columns: 96px minmax(0, 1fr) 40px;
+      }
+
+      body #b_region .bulk-region-search-type,
+      body #b_region #bulk_region_search {
+        font-size: 13px;
+      }
+
+      body #b_region .bulk-region-dropdown {
+        max-height: 300px;
+      }
+    }
+
     body #b_bid .change-scope-powerlink-divider,
     body #b_status .change-scope-powerlink-divider { order: 30 !important; }
 
@@ -21262,61 +21707,80 @@
             <div id="b_region" class="tab-content">
                 <div class="grid-2">
                     <div class="change-scope-divider change-scope-common-divider" data-scope="common">공통 작업 <span>선택 범위의 지역 노출/제외 설정</span></div>
-                    <div class="card change-scope-common" style="grid-column:1/-1;">
-                        <div class="card-title">지역 타겟팅 직접 일괄 설정 <span class="scope-badge scope-badge-gray">공통</span></div>
-                        <div class="field-note" style="margin-bottom:12px;">네이버 지역 타겟팅처럼 모든 지역, 선택 지역 노출, 선택 지역 제외 중 하나를 골라 체크한 캠페인/광고그룹에 일괄 적용합니다.</div>
-                        <div class="grid-2">
-                            <div class="form-group">
-                                <label>적용 범위</label>
-                                <div style="display:flex; flex-direction:column; gap:8px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:#fff;">
-                                    <label style="display:flex; align-items:center; gap:8px; margin:0; font-weight:500;"><input type="radio" name="bulk_region_scope" id="bulk_region_scope_adgroup" value="adgroup" checked> 선택 광고그룹</label>
-                                    <label style="display:flex; align-items:center; gap:8px; margin:0; font-weight:500;"><input type="radio" name="bulk_region_scope" id="bulk_region_scope_campaign" value="campaign"> 선택 캠페인 하위 광고그룹 전체</label>
+                    <div class="card change-scope-common bulk-region-card" style="grid-column:1/-1;">
+                        <div class="bulk-region-shell">
+                            <div class="bulk-region-head">
+                                <div class="card-title">지역 타겟팅 직접 일괄 설정 <span class="scope-badge scope-badge-gray">공통</span></div>
+                                <div class="field-note">네이버 지역 타겟팅과 같은 흐름으로 지역을 검색해 추가한 뒤, 체크한 캠페인/광고그룹에 한 번에 적용합니다.</div>
+                            </div>
+
+                            <div class="bulk-region-control-grid">
+                                <section class="bulk-region-control-card">
+                                    <div class="bulk-region-control-title">적용 범위</div>
+                                    <div class="bulk-region-radio-stack">
+                                        <label class="bulk-region-radio"><input type="radio" name="bulk_region_scope" id="bulk_region_scope_adgroup" value="adgroup" checked onchange="updateBulkRegionSelectedSummary()"> 선택 광고그룹</label>
+                                        <label class="bulk-region-radio"><input type="radio" name="bulk_region_scope" id="bulk_region_scope_campaign" value="campaign" onchange="updateBulkRegionSelectedSummary()"> 선택 캠페인 하위 광고그룹 전체</label>
+                                    </div>
+                                </section>
+                                <section class="bulk-region-control-card">
+                                    <div class="bulk-region-control-title">노출 방식</div>
+                                    <div class="bulk-region-radio-row">
+                                        <label class="bulk-region-radio"><input type="radio" name="bulk_region_mode" value="all" onchange="syncBulkRegionMode()"> 모든 지역</label>
+                                        <label class="bulk-region-radio"><input type="radio" name="bulk_region_mode" value="exclude_selected" onchange="syncBulkRegionMode()"> 광고 노출 제외 지역 설정</label>
+                                        <label class="bulk-region-radio" title="네이버의 '광고 노출 지역 설정'과 같은 방식입니다."><input type="radio" name="bulk_region_mode" value="include_selected" checked onchange="syncBulkRegionMode()"> 광고 노출 지역 설정</label>
+                                    </div>
+                                    <div class="field-note" id="bulk_region_mode_note">선택한 지역에만 광고를 노출합니다. 선택하지 않은 지역은 네이버 타겟팅 기준에서 제외됩니다.</div>
+                                </section>
+                            </div>
+
+                            <div class="bulk-region-picker-wrap" id="bulk_region_picker_wrap">
+                                <div class="bulk-region-searchbar" id="bulk_region_searchbar">
+                                    <button type="button" class="bulk-region-search-type" onclick="toggleBulkRegionDropdown()">지역 이름 <span aria-hidden="true">⌄</span></button>
+                                    <input type="search" id="bulk_region_search" autocomplete="off" placeholder="광고 노출을 원하는 지역을 검색해서 추가하세요." onfocus="openBulkRegionDropdown()" oninput="renderBulkRegionTargetOptions()" onkeydown="handleBulkRegionSearchKeydown(event)">
+                                    <button type="button" class="bulk-region-dropdown-toggle" aria-label="지역 목록 열기" onclick="toggleBulkRegionDropdown()">⌄</button>
+                                </div>
+                                <div id="bulk_region_target_options" class="bulk-region-dropdown" role="listbox">
+                                    <div class="bulk-region-dropdown-note">지역 설정 탭을 열면 시/도 목록을 자동으로 불러옵니다.</div>
+                                </div>
+
+                                <div class="bulk-region-workspace">
+                                    <section class="bulk-region-selected-panel">
+                                        <div class="bulk-region-selected-head">
+                                            <strong id="bulk_region_selected_title">광고 노출 지역 <span id="bulk_region_option_count">0/100</span></strong>
+                                            <button type="button" class="bulk-region-clear" id="bulk_region_clear_button" onclick="clearBulkRegionTargets()">전체 삭제</button>
+                                        </div>
+                                        <div id="bulk_region_selected_summary" class="bulk-region-selected-list">
+                                            <div class="bulk-region-selected-empty">선택한 지역이 없습니다.</div>
+                                        </div>
+                                    </section>
+                                    <section class="bulk-region-map-panel" aria-label="지역 지도 미리보기">
+                                        <span class="bulk-region-map-label north">평양직할시</span>
+                                        <span class="bulk-region-map-label seoul">서울</span>
+                                        <span class="bulk-region-map-label incheon">인천</span>
+                                        <span class="bulk-region-map-label korea">대한민국</span>
+                                        <span class="bulk-region-map-label east">동해</span>
+                                        <span class="bulk-region-map-label west">황해</span>
+                                        <div class="bulk-region-map-controls" aria-hidden="true"><span>+</span><span>-</span><span>↶</span></div>
+                                        <div class="bulk-region-map-scale">300 km</div>
+                                        <div class="bulk-region-map-copy">© NAVER Corp. / OpenStreetMap</div>
+                                    </section>
+                                </div>
+
+                                <div class="bulk-region-selection-note" id="bulk_region_selection_note">선택한 0개 지역에 광고가 노출됩니다.</div>
+                                <p class="bulk-region-help">범위가 너무 좁은 특정 지역보다 관심 가능성이 있는 더 넓은 지역을 타게팅하는 것이 사용자 반응과 광고 효율을 분석하는 데 도움이 됩니다.</p>
+                            </div>
+
+                            <div class="bulk-region-footer">
+                                <div class="form-group">
+                                    <label>처리 결과</label>
+                                    <textarea id="bulk_region_target_result" rows="5" readonly placeholder="지역 타겟 일괄 설정 결과가 여기에 표시됩니다."></textarea>
+                                </div>
+                                <div>
+                                    <div class="bulk-region-apply-note" id="bulk_region_apply_preview">좌측 목록에서 캠페인 또는 광고그룹을 체크한 뒤 실행하세요. 기존 지역 타겟팅은 선택한 노출 방식으로 덮어쓰기 됩니다.</div>
+                                    <button class="btn btn-primary" onclick="updateRegionTargetsBulk()">선택 범위에 지역 타겟팅 일괄 설정</button>
                                 </div>
                             </div>
-                            <div class="form-group">
-                                <label>노출 방식</label>
-                                <div style="display:flex; flex-direction:column; gap:8px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:#fff;">
-                                    <label style="display:flex; align-items:center; gap:8px; margin:0; font-weight:500;"><input type="radio" name="bulk_region_mode" value="all" onchange="syncBulkRegionMode()"> 모든 지역</label>
-                                    <label style="display:flex; align-items:center; gap:8px; margin:0; font-weight:500;"><input type="radio" name="bulk_region_mode" value="exclude_selected" onchange="syncBulkRegionMode()"> 광고 노출 제외 지역 설정</label>
-                                    <label style="display:flex; align-items:center; gap:8px; margin:0; font-weight:500;" title="스크린샷의 '광고 노출 지역 설정'과 같은 방식입니다."><input type="radio" name="bulk_region_mode" value="include_selected" checked onchange="syncBulkRegionMode()"> 광고 노출 지역 설정</label>
-                                </div>
-                                <div class="field-note" id="bulk_region_mode_note">선택한 지역에만 광고를 노출합니다. 선택하지 않은 지역은 네이버 타겟팅 기준에서 제외됩니다.</div>
-                            </div>
                         </div>
-                        <div class="grid-2">
-                            <div class="form-group">
-                                <label>지역 검색</label>
-                                <input type="search" id="bulk_region_search" placeholder="예: 서울, 경기, 인천" oninput="renderBulkRegionTargetOptions()">
-                                <div class="field-note">네이버 화면과 맞춰 시/도 단위 지역만 표시합니다.</div>
-                            </div>
-                            <div class="form-group">
-                                <label>선택 상태</label>
-                                <div id="bulk_region_selected_summary" style="min-height:40px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:#fff; font-size:12px; color:var(--muted);">선택한 지역 0개</div>
-                            </div>
-                        </div>
-                        <div class="btn-row" style="margin-bottom:10px;">
-                            <button type="button" class="btn btn-sub" onclick="loadBulkRegionTargetOptions(true)">지역 목록 새로고침</button>
-                            <button type="button" class="btn btn-sub" onclick="setBulkRegionTargetSelection(true)">현재 검색 결과 전체 선택</button>
-                            <button type="button" class="btn btn-sub" onclick="setBulkRegionTargetSelection(false)">선택 해제</button>
-                        </div>
-                        <div class="form-group">
-                            <label>지역 목록 <span id="bulk_region_option_count" style="font-weight:500; color:var(--muted);"></span></label>
-                            <div id="bulk_region_target_options" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:8px 12px; max-height:280px; overflow:auto; padding:12px; border:1px solid var(--line); border-radius:12px; background:#fff; font-size:12px;">
-                                <div class="field-note">지역 설정 탭을 열면 시/도 목록을 자동으로 불러옵니다.</div>
-                            </div>
-                            <div class="field-note">네이버 기준 지역은 최대 100개까지 선택할 수 있습니다. 시/군/구 같은 상세 지역은 목록에서 제외합니다.</div>
-                        </div>
-                        <div class="grid-2">
-                            <div class="form-group">
-                                <label>처리 결과</label>
-                                <textarea id="bulk_region_target_result" rows="6" readonly placeholder="지역 타겟 일괄 설정 결과가 여기에 표시됩니다."></textarea>
-                            </div>
-                            <div class="form-group">
-                                <label>적용 전 확인</label>
-                                <div class="field-note" style="padding:12px; border:1px solid var(--line); border-radius:10px; background:#fff;">좌측 목록에서 캠페인 또는 광고그룹을 체크한 뒤 실행하세요. 기존 지역 타겟팅은 선택한 노출 방식으로 덮어쓰기 됩니다.</div>
-                            </div>
-                        </div>
-                        <button class="btn btn-primary" style="width:100%;" onclick="updateRegionTargetsBulk()">선택 범위에 지역 타겟팅 일괄 설정</button>
                     </div>
                 </div>
             </div>
@@ -28781,6 +29245,16 @@ function getBulkRegionMode() {
     return document.querySelector('input[name="bulk_region_mode"]:checked')?.value || 'include_selected';
 }
 
+function bulkRegionModeSelectionTitle(mode = getBulkRegionMode()) {
+    if(mode === 'all') return '모든 지역';
+    return mode === 'exclude_selected' ? '광고 노출 제외 지역' : '광고 노출 지역';
+}
+
+function bulkRegionModeSelectionVerb(mode = getBulkRegionMode()) {
+    if(mode === 'all') return '전체 지역에 광고가 노출됩니다.';
+    return mode === 'exclude_selected' ? '지역에서 광고 노출이 제외됩니다.' : '지역에 광고가 노출됩니다.';
+}
+
 function bulkRegionFilteredOptions() {
     const query = String(document.getElementById('bulk_region_search')?.value || '').trim().toLowerCase();
     if(!query) return bulkRegionTargetOptions;
@@ -28790,38 +29264,150 @@ function bulkRegionFilteredOptions() {
     });
 }
 
+let bulkRegionDropdownOpen = false;
+
+function setBulkRegionDropdownOpen(open) {
+    const mode = getBulkRegionMode();
+    bulkRegionDropdownOpen = !!open && mode !== 'all';
+    const dropdown = document.getElementById('bulk_region_target_options');
+    const searchbar = document.getElementById('bulk_region_searchbar');
+    dropdown?.classList.toggle('is-open', bulkRegionDropdownOpen);
+    searchbar?.classList.toggle('is-open', bulkRegionDropdownOpen);
+}
+
+function openBulkRegionDropdown() {
+    if(getBulkRegionMode() === 'all') return;
+    setBulkRegionDropdownOpen(true);
+    renderBulkRegionTargetOptions();
+}
+
+function closeBulkRegionDropdown() {
+    setBulkRegionDropdownOpen(false);
+}
+
+function toggleBulkRegionDropdown() {
+    if(getBulkRegionMode() === 'all') return;
+    setBulkRegionDropdownOpen(!bulkRegionDropdownOpen);
+    renderBulkRegionTargetOptions();
+}
+
+function getBulkRegionOptionByCode(code) {
+    const normalized = String(code || '').toUpperCase();
+    return bulkRegionTargetOptions.find(item => String(item.code || '').toUpperCase() === normalized) || null;
+}
+
 function updateBulkRegionSelectedSummary() {
     const summary = document.getElementById('bulk_region_selected_summary');
-    const countEl = document.getElementById('bulk_region_option_count');
+    const title = document.getElementById('bulk_region_selected_title');
+    const clearButton = document.getElementById('bulk_region_clear_button');
+    const note = document.getElementById('bulk_region_selection_note');
+    const preview = document.getElementById('bulk_region_apply_preview');
+    const search = document.getElementById('bulk_region_search');
+    const searchbar = document.getElementById('bulk_region_searchbar');
+    const searchButtons = searchbar ? Array.from(searchbar.querySelectorAll('button')) : [];
+    const mode = getBulkRegionMode();
     const selected = bulkRegionTargetOptions.filter(item => bulkRegionSelectedCodes.has(String(item.code || '').toUpperCase()));
-    if(countEl) {
-        const filteredCount = bulkRegionFilteredOptions().length;
-        countEl.textContent = bulkRegionTargetOptions.length ? `전체 ${bulkRegionTargetOptions.length.toLocaleString()}개 · 표시 ${filteredCount.toLocaleString()}개` : '';
+    const disabled = mode === 'all';
+    if(title) {
+        const countText = disabled ? '' : ` <span id="bulk_region_option_count">${selected.length.toLocaleString()}/100</span>`;
+        title.innerHTML = `${escapeMaybe(bulkRegionModeSelectionTitle(mode))}${countText}`;
+    }
+    if(clearButton) clearButton.disabled = disabled || selected.length === 0;
+    if(search) {
+        search.disabled = disabled;
+        if(disabled) search.value = '';
+    }
+    searchButtons.forEach(button => { button.disabled = disabled; });
+    searchbar?.classList.toggle('is-disabled', disabled);
+    if(note) {
+        note.textContent = disabled
+            ? bulkRegionModeSelectionVerb(mode)
+            : `선택한 ${selected.length.toLocaleString()}개 ${bulkRegionModeSelectionVerb(mode)}`;
+    }
+    if(preview) {
+        const useCampaignScope = !!document.getElementById('bulk_region_scope_campaign')?.checked;
+        const targetCount = useCampaignScope ? getCheckedCampaignIdsInViewOrder().length : getCheckedAdgroupIdsInViewOrder().length;
+        const targetLabel = useCampaignScope ? '선택 캠페인 하위 광고그룹' : '선택 광고그룹';
+        const regionLabel = disabled
+            ? '모든 지역'
+            : (selected.length ? selected.slice(0, 8).map(item => item.label || item.code).join(', ') + (selected.length > 8 ? ` 외 ${selected.length - 8}개` : '') : '지역 미선택');
+        preview.textContent = `${targetLabel} ${targetCount.toLocaleString()}개 대상 · 방식: ${bulkRegionModeSelectionTitle(mode)} · 지역: ${regionLabel}`;
     }
     if(!summary) return;
-    if(getBulkRegionMode() === 'all') {
-        summary.textContent = '모든 지역에 광고가 노출됩니다.';
+    if(disabled) {
+        summary.innerHTML = '<div class="bulk-region-selected-empty">모든 지역에 광고가 노출됩니다.</div>';
+        closeBulkRegionDropdown();
         return;
     }
-    const names = selected.slice(0, 8).map(item => item.label || item.code);
-    const more = selected.length > names.length ? ` 외 ${(selected.length - names.length).toLocaleString()}개` : '';
-    summary.textContent = selected.length ? `선택한 지역 ${selected.length}/100개 · ${names.join(', ')}${more}` : '선택한 지역 0개';
+    if(!selected.length) {
+        summary.innerHTML = '<div class="bulk-region-selected-empty">선택한 지역이 없습니다.</div>';
+        return;
+    }
+    summary.innerHTML = selected.map((item, index) => {
+        const code = String(item.code || '').toUpperCase();
+        return `
+            <div class="bulk-region-selected-row ${index === selected.length - 1 ? 'is-active' : ''}">
+                <span>${escapeMaybe(item.label || code)}</span>
+                <button type="button" data-code="${escapeAttr(code)}" onclick="removeBulkRegionTarget(this.dataset.code)">삭제</button>
+            </div>
+        `;
+    }).join('');
+}
+
+function addBulkRegionTarget(code) {
+    if(getBulkRegionMode() === 'all') {
+        showToast('모든 지역 모드에서는 지역을 따로 추가하지 않습니다.', 'info');
+        return;
+    }
+    const item = getBulkRegionOptionByCode(code);
+    const normalized = String(item?.code || code || '').toUpperCase();
+    if(!item || !normalized) return;
+    if(bulkRegionSelectedCodes.has(normalized)) {
+        renderBulkRegionTargetOptions();
+        return;
+    }
+    if(bulkRegionSelectedCodes.size >= 100) {
+        showToast('지역은 최대 100개까지 선택할 수 있습니다.', 'error');
+        return;
+    }
+    bulkRegionSelectedCodes.add(normalized);
+    const search = document.getElementById('bulk_region_search');
+    if(search) search.value = '';
+    renderBulkRegionTargetOptions();
+}
+
+function removeBulkRegionTarget(code) {
+    const normalized = String(code || '').toUpperCase();
+    if(!normalized) return;
+    bulkRegionSelectedCodes.delete(normalized);
+    renderBulkRegionTargetOptions();
+}
+
+function clearBulkRegionTargets() {
+    if(getBulkRegionMode() === 'all') return;
+    bulkRegionSelectedCodes.clear();
+    renderBulkRegionTargetOptions();
+}
+
+function handleBulkRegionSearchKeydown(event) {
+    if(event.key === 'Escape') {
+        closeBulkRegionDropdown();
+        return;
+    }
+    if(event.key !== 'Enter') return;
+    event.preventDefault();
+    const first = bulkRegionFilteredOptions().find(item => !bulkRegionSelectedCodes.has(String(item.code || '').toUpperCase()));
+    if(first) addBulkRegionTarget(first.code);
 }
 
 function handleBulkRegionTargetToggle(input) {
     const code = String(input?.value || '').toUpperCase();
     if(!code) return;
     if(input.checked) {
-        if(bulkRegionSelectedCodes.size >= 100 && !bulkRegionSelectedCodes.has(code)) {
-            input.checked = false;
-            showToast('지역은 최대 100개까지 선택할 수 있습니다.', 'error');
-            return;
-        }
-        bulkRegionSelectedCodes.add(code);
+        addBulkRegionTarget(code);
     } else {
-        bulkRegionSelectedCodes.delete(code);
+        removeBulkRegionTarget(code);
     }
-    updateBulkRegionSelectedSummary();
 }
 
 function renderBulkRegionTargetOptions() {
@@ -28830,29 +29416,38 @@ function renderBulkRegionTargetOptions() {
     const mode = getBulkRegionMode();
     const disabled = mode === 'all';
     const options = bulkRegionFilteredOptions();
+    const search = document.getElementById('bulk_region_search');
+    if(document.activeElement === search && !disabled) bulkRegionDropdownOpen = true;
+    box.classList.toggle('is-open', bulkRegionDropdownOpen && !disabled);
+    document.getElementById('bulk_region_searchbar')?.classList.toggle('is-open', bulkRegionDropdownOpen && !disabled);
     if(bulkRegionOptionsLoading && !bulkRegionTargetOptions.length) {
-        box.innerHTML = '<div class="field-note">시/도 지역 목록을 불러오는 중입니다.</div>';
+        box.innerHTML = '<div class="bulk-region-dropdown-note">시/도 지역 목록을 불러오는 중입니다.</div>';
         updateBulkRegionSelectedSummary();
         return;
     }
     if(!bulkRegionTargetOptions.length) {
-        box.innerHTML = '<div class="field-note">지역 설정 탭을 열면 시/도 목록을 자동으로 불러옵니다.</div>';
+        box.innerHTML = '<div class="bulk-region-dropdown-note">지역 설정 탭을 열면 시/도 목록을 자동으로 불러옵니다.</div>';
+        updateBulkRegionSelectedSummary();
+        return;
+    }
+    if(disabled) {
+        box.innerHTML = '<div class="bulk-region-dropdown-note">모든 지역 모드에서는 지역 검색을 사용하지 않습니다.</div>';
         updateBulkRegionSelectedSummary();
         return;
     }
     if(!options.length) {
-        box.innerHTML = '<div class="field-note">검색 결과가 없습니다.</div>';
+        box.innerHTML = '<div class="bulk-region-dropdown-note">검색 결과가 없습니다.</div>';
         updateBulkRegionSelectedSummary();
         return;
     }
     box.innerHTML = options.map(item => {
         const code = String(item.code || '').toUpperCase();
-        const checked = bulkRegionSelectedCodes.has(code);
+        const selected = bulkRegionSelectedCodes.has(code);
         return `
-            <label style="display:flex; align-items:center; gap:8px; min-width:0; color:${disabled ? '#94a3b8' : 'inherit'};">
-                <input type="checkbox" class="bulk-region-target-code" value="${escapeAttr(code)}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''} onchange="handleBulkRegionTargetToggle(this)">
-                <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeAttr(`${item.label || code} · ${code}`)}">${escapeMaybe(item.label || code)}</span>
-            </label>
+            <button type="button" class="bulk-region-option" data-code="${escapeAttr(code)}" onclick="addBulkRegionTarget(this.dataset.code)" ${selected ? 'disabled' : ''} role="option" aria-selected="${selected ? 'true' : 'false'}">
+                <span>${escapeMaybe(item.label || code)}</span>
+                ${selected ? '<small>추가됨</small>' : ''}
+            </button>
         `;
     }).join('');
     updateBulkRegionSelectedSummary();
@@ -28865,7 +29460,8 @@ function resetBulkRegionTargetOptions(message = '지역 설정 탭을 열면 시
     bulkRegionOptionsLoading = false;
     bulkRegionLoadedCustomerId = '';
     const box = document.getElementById('bulk_region_target_options');
-    if(box) box.innerHTML = `<div class="field-note">${escapeMaybe(message)}</div>`;
+    if(box) box.innerHTML = `<div class="bulk-region-dropdown-note">${escapeMaybe(message)}</div>`;
+    closeBulkRegionDropdown();
     updateBulkRegionSelectedSummary();
 }
 
@@ -28961,8 +29557,13 @@ function syncBulkRegionMode() {
                 ? '선택한 지역에는 광고가 노출되지 않도록 제외 지역으로 저장합니다.'
                 : '선택한 지역에만 광고가 노출되도록 저장합니다.');
     }
+    if(mode === 'all') closeBulkRegionDropdown();
     renderBulkRegionTargetOptions();
 }
+
+document.addEventListener('click', event => {
+    if(!event.target?.closest?.('#bulk_region_picker_wrap')) closeBulkRegionDropdown();
+});
 
 function getBulkRegionTargetSelections() {
     const selectedSet = new Set(Array.from(bulkRegionSelectedCodes).map(code => String(code || '').toUpperCase()));
