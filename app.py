@@ -4977,6 +4977,10 @@ def _get_dimension_performance_stats(api_key: str, secret_key: str, cid: str, pa
     if dimension not in dimension_labels:
         raise ValueError("dimension은 area, media, region 중 하나여야 합니다.")
     scope, type_filter, since, until, date_label, campaign_ids, adgroup_ids = _standalone_report_target_payload(payload)
+    region_type_forced_to_powerlink = False
+    if dimension == "region" and type_filter != "WEB_SITE":
+        type_filter = "WEB_SITE"
+        region_type_forced_to_powerlink = True
     day_count = _dimension_report_day_count(since, until)
     if day_count > PERFORMANCE_DIMENSION_REPORT_MAX_DAYS:
         raise ValueError(f"상세보고서 기반 데이터는 최대 {PERFORMANCE_DIMENSION_REPORT_MAX_DAYS}일까지 조회할 수 있습니다.")
@@ -5023,6 +5027,7 @@ def _get_dimension_performance_stats(api_key: str, secret_key: str, cid: str, pa
         api_key, secret_key, cid, since, until, report_types, report_timeout_seconds,
     )
     pending_summary = _summarize_dimension_report_pending(report_meta)
+    primary_pending_count = int(pending_summary.get("pending_report_count") or 0)
     activity_rows: List[Dict[str, Any]] = []
     conversion_rows: List[Dict[str, Any]] = []
     ad_activity_rows = list(rows_by_type.get(ad_activity_report_type) or [])
@@ -5040,7 +5045,12 @@ def _get_dimension_performance_stats(api_key: str, secret_key: str, cid: str, pa
     # SHOPPINGKEYWORD reports are keyword/search-term based and can omit shopping
     # content placements. Prefer AD/AD_DETAIL reports for dimension views and
     # use SHOPPINGKEYWORD_DETAIL only as a last fallback when those have no rows.
-    if has_shopping_target and not shopping_ad_activity_rows and ad_activity_fallback_report_type not in rows_by_type:
+    if (
+        primary_pending_count <= 0
+        and has_shopping_target
+        and not shopping_ad_activity_rows
+        and ad_activity_fallback_report_type not in rows_by_type
+    ):
         ad_fallback_rows_by_type, ad_fallback_warnings, ad_fallback_errors, ad_fallback_meta = _collect_dimension_report_rows(
             api_key, secret_key, cid, since, until, [ad_activity_fallback_report_type, ad_conversion_fallback_report_type], report_timeout_seconds,
         )
@@ -5055,7 +5065,7 @@ def _get_dimension_performance_stats(api_key: str, secret_key: str, cid: str, pa
         ad_conversion_rows.extend(fallback_conversion_rows)
         shopping_ad_activity_rows = scoped_shopping_rows(ad_activity_rows)
         shopping_ad_conversion_rows = scoped_shopping_rows(ad_conversion_rows)
-    needs_shopping_fallback = bool(fallback_report_types and has_shopping_target and not shopping_ad_activity_rows)
+    needs_shopping_fallback = bool(primary_pending_count <= 0 and fallback_report_types and has_shopping_target and not shopping_ad_activity_rows)
     if needs_shopping_fallback and not any(report_type in rows_by_type for report_type in fallback_report_types):
         fallback_rows_by_type, fallback_warnings, fallback_errors, fallback_meta = _collect_dimension_report_rows(
             api_key, secret_key, cid, since, until, fallback_report_types, report_timeout_seconds,
@@ -5066,6 +5076,7 @@ def _get_dimension_performance_stats(api_key: str, secret_key: str, cid: str, pa
         report_errors.extend(fallback_errors)
         report_types = list(dict.fromkeys(report_types + fallback_report_types))
         report_warnings.append("쇼핑검색 광고효과 리포트에서 대상 행을 받지 못해 키워드 상세 리포트로 대체했습니다. 이 경우 콘텐츠 지면은 일부 누락될 수 있습니다.")
+    pending_summary = _summarize_dimension_report_pending(report_meta)
     activity_rows.extend(ad_activity_rows)
     conversion_rows.extend(ad_conversion_rows)
     if needs_shopping_fallback:
@@ -5115,6 +5126,8 @@ def _get_dimension_performance_stats(api_key: str, secret_key: str, cid: str, pa
         )
     summary = _sum_metrics_from_rows(rows)
     warnings = list(target_warnings or [])
+    if region_type_forced_to_powerlink:
+        warnings.append("지역별 데이터는 파워링크만 조회합니다. 쇼핑검색은 지역별 데이터 대상에서 제외했습니다.")
     if len(date_chunks) > 1:
         warnings.append(
             f"선택 기간 {day_count}일을 {PERFORMANCE_REPORT_CHUNK_DAYS}일 단위 {len(date_chunks)}개 구간으로 나눠 조회한 뒤 합산했습니다."

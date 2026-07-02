@@ -20092,9 +20092,7 @@
                 <div class="form-group">
                   <label>광고 유형</label>
                   <select id="region_data_type_filter">
-                    <option value="all" selected>파워링크 + 쇼핑검색</option>
-                    <option value="WEB_SITE">파워링크</option>
-                    <option value="SHOPPING">쇼핑검색</option>
+                    <option value="WEB_SITE" selected>파워링크</option>
                   </select>
                 </div>
                 <div class="form-group">
@@ -32555,13 +32553,76 @@ function ensurePerformanceStatsCardInLookup() {
     syncPerformanceDatePreset();
 }
 
+function formatDateInputValue(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function resolvePresetDateInputRange(preset, options = {}) {
+    const todayAllowed = options.todayAllowed === true;
+    const now = new Date();
+    now.setHours(12, 0, 0, 0);
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const norm = String(preset || (todayAllowed ? 'today' : 'yesterday')).trim().toLowerCase();
+    const endBase = todayAllowed && norm === 'today' ? now : yesterday;
+    const makeRange = (start, end) => ({ since: formatDateInputValue(start), until: formatDateInputValue(end) });
+    if(norm === 'today') return makeRange(endBase, endBase);
+    if(norm === 'yesterday') return makeRange(yesterday, yesterday);
+    if(['last7days', 'last_7_days', '7days'].includes(norm)) {
+        const start = new Date(yesterday);
+        start.setDate(start.getDate() - 6);
+        return makeRange(start, yesterday);
+    }
+    if(['last30days', 'last_30_days', '30days'].includes(norm)) {
+        const start = new Date(yesterday);
+        start.setDate(start.getDate() - 29);
+        return makeRange(start, yesterday);
+    }
+    if(['last90days', 'last_90_days', '90days'].includes(norm)) {
+        const start = new Date(yesterday);
+        start.setDate(start.getDate() - 89);
+        return makeRange(start, yesterday);
+    }
+    if(['thismonth', 'this_month', 'currentmonth', 'current_month'].includes(norm)) {
+        const start = new Date(now.getFullYear(), now.getMonth(), 1);
+        if(start > yesterday) return makeRange(yesterday, yesterday);
+        return makeRange(start, yesterday);
+    }
+    if(['lastmonth', 'last_month', 'previousmonth', 'previous_month'].includes(norm)) {
+        const firstOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const lastOfPreviousMonth = new Date(firstOfThisMonth);
+        lastOfPreviousMonth.setDate(0);
+        const firstOfPreviousMonth = new Date(lastOfPreviousMonth.getFullYear(), lastOfPreviousMonth.getMonth(), 1);
+        return makeRange(firstOfPreviousMonth, lastOfPreviousMonth);
+    }
+    return makeRange(endBase, endBase);
+}
+
 function syncPerformanceDatePreset() {
-    const custom = document.getElementById('performance_date_preset')?.value === 'custom';
+    const preset = document.getElementById('performance_date_preset')?.value || 'today';
+    const custom = preset === 'custom';
     document.querySelector('.performance-stats-card')?.classList.toggle('is-custom-date', custom);
+    const range = resolvePresetDateInputRange(preset, { todayAllowed: true });
+    const maxDate = formatDateInputValue(new Date(new Date().setHours(12, 0, 0, 0)));
     ['performance_since', 'performance_until'].forEach(id => {
         const el = document.getElementById(id);
-        if(el) el.disabled = !custom;
+        if(!el) return;
+        el.disabled = !custom;
+        el.max = maxDate;
     });
+    const since = document.getElementById('performance_since');
+    const until = document.getElementById('performance_until');
+    if(!custom) {
+        if(since) since.value = range.since;
+        if(until) until.value = range.until;
+        return;
+    }
+    if(until && (!until.value || until.value > maxDate)) until.value = maxDate;
+    if(since && (!since.value || since.value > maxDate)) since.value = range.since;
+    if(since && until && since.value > until.value) since.value = until.value;
 }
 
 function formatMetricNumber(value) {
@@ -33957,31 +34018,29 @@ function setPerformanceTextReportStatus(text) {
 }
 
 function syncTextReportDatePreset() {
-    const custom = document.getElementById('text_report_date_preset')?.value === 'custom';
+    const preset = document.getElementById('text_report_date_preset')?.value || 'yesterday';
+    const custom = preset === 'custom';
     document.getElementById('tab_report')?.classList.toggle('is-custom-date', custom);
     const yesterday = new Date();
     yesterday.setHours(12, 0, 0, 0);
     yesterday.setDate(yesterday.getDate() - 1);
-    const localDateText = date => {
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-    };
-    const maxDate = localDateText(yesterday);
-    const defaultSince = new Date(yesterday);
-    defaultSince.setDate(defaultSince.getDate() - 6);
+    const maxDate = formatDateInputValue(yesterday);
+    const range = resolvePresetDateInputRange(preset);
     ['text_report_since', 'text_report_until'].forEach(id => {
         const el = document.getElementById(id);
         if(!el) return;
         el.disabled = !custom;
         el.max = maxDate;
     });
-    if(!custom) return;
     const since = document.getElementById('text_report_since');
     const until = document.getElementById('text_report_until');
+    if(!custom) {
+        if(since) since.value = range.since;
+        if(until) until.value = range.until;
+        return;
+    }
     if(until && (!until.value || until.value > maxDate)) until.value = maxDate;
-    if(since && (!since.value || since.value > maxDate)) since.value = localDateText(defaultSince);
+    if(since && (!since.value || since.value > maxDate)) since.value = range.since;
     if(since && until && since.value > until.value) since.value = until.value;
 }
 
@@ -34137,31 +34196,29 @@ function downloadShoppingQueryActiveCsv() {
 }
 
 function syncShoppingQueryDatePreset() {
-    const custom = document.getElementById('shopping_query_date_preset')?.value === 'custom';
+    const preset = document.getElementById('shopping_query_date_preset')?.value || 'last7days';
+    const custom = preset === 'custom';
     document.getElementById('tab_shopping_query')?.classList.toggle('is-custom-date', custom);
     const yesterday = new Date();
     yesterday.setHours(12, 0, 0, 0);
     yesterday.setDate(yesterday.getDate() - 1);
-    const localDateText = date => {
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-    };
-    const maxDate = localDateText(yesterday);
-    const defaultSince = new Date(yesterday);
-    defaultSince.setDate(defaultSince.getDate() - 6);
+    const maxDate = formatDateInputValue(yesterday);
+    const range = resolvePresetDateInputRange(preset);
     ['shopping_query_since', 'shopping_query_until'].forEach(id => {
         const el = document.getElementById(id);
         if(!el) return;
         el.disabled = !custom;
         el.max = maxDate;
     });
-    if(!custom) return;
     const since = document.getElementById('shopping_query_since');
     const until = document.getElementById('shopping_query_until');
+    if(!custom) {
+        if(since) since.value = range.since;
+        if(until) until.value = range.until;
+        return;
+    }
     if(until && (!until.value || until.value > maxDate)) until.value = maxDate;
-    if(since && (!since.value || since.value > maxDate)) since.value = localDateText(defaultSince);
+    if(since && (!since.value || since.value > maxDate)) since.value = range.since;
     if(since && until && since.value > until.value) since.value = until.value;
 }
 
@@ -34777,21 +34834,15 @@ function setReportDataStatus(prefix, text, state = '') {
 
 function syncReportDataDatePreset(prefix) {
     const presetSelect = document.getElementById(`${prefix}_date_preset`);
-    const custom = presetSelect?.value === 'custom';
+    const preset = presetSelect?.value || 'last7days';
+    const custom = preset === 'custom';
     document.getElementById(`tab_${prefix}`)?.classList.toggle('is-custom-date', custom);
     const now = new Date();
     now.setHours(12, 0, 0, 0);
     const maxBase = new Date(now);
     maxBase.setDate(maxBase.getDate() - 1);
-    const localDateText = date => {
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-    };
-    const maxDate = localDateText(maxBase);
-    const defaultSince = new Date(maxBase);
-    defaultSince.setDate(defaultSince.getDate() - 6);
+    const maxDate = formatDateInputValue(maxBase);
+    const range = resolvePresetDateInputRange(preset);
     [`${prefix}_since`, `${prefix}_until`].forEach(id => {
         const el = document.getElementById(id);
         if(!el) return;
@@ -34799,11 +34850,15 @@ function syncReportDataDatePreset(prefix) {
         el.max = maxDate;
         el.removeAttribute('min');
     });
-    if(!custom) return;
     const since = document.getElementById(`${prefix}_since`);
     const until = document.getElementById(`${prefix}_until`);
+    if(!custom) {
+        if(since) since.value = range.since;
+        if(until) until.value = range.until;
+        return;
+    }
     if(until && (!until.value || until.value > maxDate)) until.value = maxDate;
-    if(since && (!since.value || since.value > maxDate)) since.value = localDateText(defaultSince);
+    if(since && (!since.value || since.value > maxDate)) since.value = range.since;
     if(since && until && since.value > until.value) since.value = until.value;
 }
 
@@ -34830,7 +34885,7 @@ function getStandaloneReportPayload(prefix) {
         target_scope: scope,
         campaign_ids: campaignIds,
         adgroup_ids: adgroupIds,
-        campaign_type: document.getElementById(`${prefix}_type_filter`)?.value || 'all',
+        campaign_type: prefix === 'region_data' ? 'WEB_SITE' : (document.getElementById(`${prefix}_type_filter`)?.value || 'all'),
         date_preset: document.getElementById(`${prefix}_date_preset`)?.value || 'last7days',
         since: document.getElementById(`${prefix}_since`)?.value || '',
         until: document.getElementById(`${prefix}_until`)?.value || '',
