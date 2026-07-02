@@ -5443,6 +5443,7 @@ def _get_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dic
         payload.get("until"),
         exclude_today=_boolish(payload.get("exclude_today"), False),
     )
+    date_chunks = _split_date_range_chunks(since, until, PERFORMANCE_REPORT_CHUNK_DAYS)
     campaign_ids = [str(x or "").strip() for x in (payload.get("campaign_ids") or []) if str(x or "").strip()]
     adgroup_ids = [str(x or "").strip() for x in (payload.get("adgroup_ids") or []) if str(x or "").strip()]
     purchase_event_codes = _split_filter_words(payload.get("purchase_event_code") or payload.get("purchase_event_codes"))

@@ -21295,14 +21295,14 @@
                             </div>
                         </div>
                         <div class="btn-row" style="margin-bottom:10px;">
-                            <button type="button" class="btn btn-sub" onclick="loadBulkRegionTargetOptions(true)">지역 목록 불러오기</button>
+                            <button type="button" class="btn btn-sub" onclick="loadBulkRegionTargetOptions(true)">지역 목록 새로고침</button>
                             <button type="button" class="btn btn-sub" onclick="setBulkRegionTargetSelection(true)">현재 검색 결과 전체 선택</button>
                             <button type="button" class="btn btn-sub" onclick="setBulkRegionTargetSelection(false)">선택 해제</button>
                         </div>
                         <div class="form-group">
                             <label>지역 목록 <span id="bulk_region_option_count" style="font-weight:500; color:var(--muted);"></span></label>
                             <div id="bulk_region_target_options" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:8px 12px; max-height:280px; overflow:auto; padding:12px; border:1px solid var(--line); border-radius:12px; background:#fff; font-size:12px;">
-                                <div class="field-note">지역 목록 불러오기를 누르면 선택 가능한 지역이 표시됩니다.</div>
+                                <div class="field-note">지역 설정 탭을 열면 시/도 목록을 자동으로 불러옵니다.</div>
                             </div>
                             <div class="field-note">네이버 기준 지역은 최대 100개까지 선택할 수 있습니다. 시/군/구 같은 상세 지역은 목록에서 제외합니다.</div>
                         </div>
@@ -25233,7 +25233,10 @@ async function selectAccount(acc) {
     adgroupUiOverrides.clear();
     campaigns = []; adgroups = []; channels = [];
     clearGlobalAdgroupSearchResults();
-    if(accountChanged) clearAccountScopedResults();
+    if(accountChanged) {
+        clearAccountScopedResults();
+        if(typeof resetBulkRegionTargetOptions === 'function') resetBulkRegionTargetOptions('지역 설정 탭을 열면 시/도 목록을 자동으로 불러옵니다.');
+    }
 
     renderAccounts();
     syncActiveAccountDom();
@@ -25241,6 +25244,7 @@ async function selectAccount(acc) {
     await Promise.all([refreshCampaigns(), loadChannels()]);
     if(selectionSeq !== accountSelectionSeq) return;
     syncActiveAccountDom();
+    if(typeof maybeAutoLoadBulkRegionTargets === 'function') maybeAutoLoadBulkRegionTargets();
 }
 
 async function refreshCampaigns(force=false) {
@@ -26163,6 +26167,7 @@ function switchSubTab(tabId, btn, parentId) {
     document.querySelectorAll(`${parentId} > .tab-content`).forEach(el => el.classList.remove('active'));
     btn.classList.add('active'); document.getElementById(tabId).classList.add('active');
     requestAnimationFrame(() => { if (typeof refreshUiPolish === 'function') refreshUiPolish(); });
+    if(tabId === 'b_region') window.setTimeout(() => { if(typeof maybeAutoLoadBulkRegionTargets === 'function') maybeAutoLoadBulkRegionTargets(); }, 0);
 }
 
 function toggleDetailSubTab(tabId, btn) {
@@ -26270,6 +26275,7 @@ function workflowActivateSubTab(parentId, subId) {
     } else {
         const el = document.getElementById(subId);
         if (el) el.classList.add('active');
+        if(subId === 'b_region') window.setTimeout(() => { if(typeof maybeAutoLoadBulkRegionTargets === 'function') maybeAutoLoadBulkRegionTargets(); }, 0);
     }
 }
 
@@ -28768,6 +28774,8 @@ async function applyBulkTargetSettings() {
 let bulkRegionTargetOptions = [];
 let bulkRegionSelectedCodes = new Set();
 let bulkRegionOptionsLoaded = false;
+let bulkRegionOptionsLoading = false;
+let bulkRegionLoadedCustomerId = '';
 
 function getBulkRegionMode() {
     return document.querySelector('input[name="bulk_region_mode"]:checked')?.value || 'include_selected';
@@ -28822,8 +28830,13 @@ function renderBulkRegionTargetOptions() {
     const mode = getBulkRegionMode();
     const disabled = mode === 'all';
     const options = bulkRegionFilteredOptions();
+    if(bulkRegionOptionsLoading && !bulkRegionTargetOptions.length) {
+        box.innerHTML = '<div class="field-note">시/도 지역 목록을 불러오는 중입니다.</div>';
+        updateBulkRegionSelectedSummary();
+        return;
+    }
     if(!bulkRegionTargetOptions.length) {
-        box.innerHTML = '<div class="field-note">지역 목록 불러오기를 누르면 선택 가능한 지역이 표시됩니다.</div>';
+        box.innerHTML = '<div class="field-note">지역 설정 탭을 열면 시/도 목록을 자동으로 불러옵니다.</div>';
         updateBulkRegionSelectedSummary();
         return;
     }
@@ -28845,27 +28858,70 @@ function renderBulkRegionTargetOptions() {
     updateBulkRegionSelectedSummary();
 }
 
-async function loadBulkRegionTargetOptions(force = false) {
+function resetBulkRegionTargetOptions(message = '지역 설정 탭을 열면 시/도 목록을 자동으로 불러옵니다.') {
+    bulkRegionTargetOptions = [];
+    bulkRegionSelectedCodes = new Set();
+    bulkRegionOptionsLoaded = false;
+    bulkRegionOptionsLoading = false;
+    bulkRegionLoadedCustomerId = '';
+    const box = document.getElementById('bulk_region_target_options');
+    if(box) box.innerHTML = `<div class="field-note">${escapeMaybe(message)}</div>`;
+    updateBulkRegionSelectedSummary();
+}
+
+function bulkRegionCredsReady() {
+    const c = creds();
+    return c.api_key && c.secret_key && c.customer_id ? c : null;
+}
+
+function isBulkRegionTabActive() {
+    return !!document.getElementById('b_region')?.classList.contains('active');
+}
+
+function maybeAutoLoadBulkRegionTargets(force = false) {
+    if(!isBulkRegionTabActive()) return;
+    const c = bulkRegionCredsReady();
+    if(!c) return;
+    const cid = String(c.customer_id || '');
+    if(force || !bulkRegionOptionsLoaded || bulkRegionLoadedCustomerId !== cid) {
+        loadBulkRegionTargetOptions(force || bulkRegionLoadedCustomerId !== cid, { silent: true });
+    }
+}
+
+async function loadBulkRegionTargetOptions(force = false, options = {}) {
     const c = ensureReady(); if(!c) return false;
-    if(bulkRegionOptionsLoaded && !force) {
+    const requestCustomerId = String(c.customer_id || '');
+    if(bulkRegionOptionsLoading) return false;
+    if(bulkRegionOptionsLoaded && !force && bulkRegionLoadedCustomerId === requestCustomerId) {
         renderBulkRegionTargetOptions();
         return true;
     }
+    bulkRegionOptionsLoading = true;
+    if(force || bulkRegionLoadedCustomerId !== requestCustomerId) {
+        bulkRegionTargetOptions = [];
+        bulkRegionSelectedCodes = new Set();
+    }
+    renderBulkRegionTargetOptions();
     try {
         const data = await postJson('/get_region_target_options', { ...c }, '지역 목록 불러오는 중...');
+        if(String(currentCustomerId || '') !== requestCustomerId) return false;
         bulkRegionTargetOptions = Array.isArray(data?.options) ? data.options : [];
         bulkRegionOptionsLoaded = true;
+        bulkRegionLoadedCustomerId = requestCustomerId;
         const validCodes = new Set(bulkRegionTargetOptions.map(item => String(item.code || '').toUpperCase()));
         bulkRegionSelectedCodes = new Set(Array.from(bulkRegionSelectedCodes).filter(code => validCodes.has(code)));
         renderBulkRegionTargetOptions();
-        showToast(data?.message || `지역 옵션 ${bulkRegionTargetOptions.length.toLocaleString()}개를 불러왔습니다.`, data?.warning ? 'info' : 'success');
+        if(!options.silent) showToast(data?.message || `지역 옵션 ${bulkRegionTargetOptions.length.toLocaleString()}개를 불러왔습니다.`, data?.warning ? 'info' : 'success');
         return true;
     } catch(err) {
         bulkRegionOptionsLoaded = false;
         const resultBox = document.getElementById('bulk_region_target_result');
         if(resultBox) resultBox.value = `지역 목록 조회 실패: ${err.message}`;
-        showToast(`지역 목록 조회 실패: ${err.message}`, 'error');
+        if(!options.silent) showToast(`지역 목록 조회 실패: ${err.message}`, 'error');
         return false;
+    } finally {
+        bulkRegionOptionsLoading = false;
+        renderBulkRegionTargetOptions();
     }
 }
 
