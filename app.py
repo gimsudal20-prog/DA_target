@@ -4850,11 +4850,11 @@ def _collect_dimension_report_rows(
             for message in item_errors or []:
                 if _dimension_report_is_pending_message(message):
                     continue
-                prefix = f"{report_type} {chunk_since}~{chunk_until}: " if len(date_chunks) > 1 else ""
+                user_message = _dimension_report_user_message(report_type, chunk_since, chunk_until, message)
                 if "파싱 결과 0건" in str(message):
-                    warnings.append(f"{prefix}{message}")
+                    warnings.append(user_message)
                 else:
-                    errors.append(f"{prefix}{message}")
+                    errors.append(user_message)
     return rows_by_type, warnings, errors, meta_by_type
 
 def _dimension_report_is_pending_message(message: Any) -> bool:
@@ -4867,6 +4867,45 @@ def _dimension_report_is_pending_message(message: Any) -> bool:
         "준비되는 대로 자동 갱신",
         "준비된 데이터만 먼저",
     ))
+
+def _dimension_report_user_message(report_type: str, chunk_since: str, chunk_until: str, message: Any) -> str:
+    text = _short_log_text(message, 500)
+    date_match = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", text)
+    date_text = date_match.group(1) if date_match else ""
+
+    detail = ""
+    json_match = re.search(r"(\{.*\})", text)
+    if json_match:
+        try:
+            parsed = json.loads(json_match.group(1))
+            if isinstance(parsed, dict):
+                detail = str(parsed.get("message") or parsed.get("error") or parsed.get("details") or "").strip()
+        except Exception:
+            detail = ""
+    if not detail and ":" in text:
+        detail = text.rsplit(":", 1)[-1].strip()
+    if not detail:
+        detail = text
+
+    detail = re.sub(
+        r"\b(?:AD|AD_DETAIL|AD_CONVERSION|AD_CONVERSION_DETAIL|SHOPPINGKEYWORD_DETAIL|SHOPPINGKEYWORD_CONVERSION_DETAIL)\b",
+        "",
+        detail,
+    )
+    detail = detail.replace("리포트 생성 실패", "").replace("리포트 조회 실패", "").strip(" :·-/")
+    if "선택하신 조건에 지표가 확인되지 않습니다" in text or '"code":10004' in text or "code\":10004" in text:
+        detail = "지표가 확인되지 않습니다."
+    elif "파싱 결과 0건" in text:
+        detail = "리포트 데이터가 없습니다."
+    elif not detail:
+        detail = "리포트 확인이 필요합니다."
+
+    if date_text:
+        return f"{date_text}: {detail}"
+    if chunk_since and chunk_until:
+        range_text = chunk_since if chunk_since == chunk_until else f"{chunk_since}~{chunk_until}"
+        return f"{range_text}: {detail}"
+    return detail
 
 def _summarize_dimension_report_pending(report_meta: Dict[str, Any]) -> Dict[str, Any]:
     pending_reports: List[Dict[str, Any]] = []
