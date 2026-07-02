@@ -9580,7 +9580,7 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
     include_purchase_conversion_keywords = _boolish((payload or {}).get("include_purchase_conversion_keywords"), False)
     include_cart_count = _boolish((payload or {}).get("include_cart_count"), True)
     include_cart_amount = _boolish((payload or {}).get("include_cart_amount"), True)
-    include_inflow_keywords = _boolish((payload or {}).get("include_inflow_keywords"), False)
+    include_inflow_keywords = _boolish((payload or {}).get("include_inflow_keywords"), True)
     metric_mode = str((payload or {}).get("report_metric_mode") or "").strip().lower()
     report_uses_purchase = metric_mode in {"purchase", "purchase_only", "구매완료", "구매완료 데이터"}
     report_format = str((payload or {}).get("report_format") or "media_summary").strip().lower()
@@ -9685,6 +9685,11 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
             include_cart_amount=include_cart_amount,
         )
         media_extra_lines: List[str] = []
+        if include_inflow_keywords:
+            if type_filter != "SHOPPING":
+                media_extra_lines.append(_performance_report_line("주요 유입 키워드", str(keyword_result.get("total_text") or "없음")))
+            if type_filter != "WEB_SITE":
+                media_extra_lines.append(_performance_report_line("주요 쇼핑검색 유입 검색어", str(shopping_query_result.get("inflow_text") or "없음")))
         if include_general_conversion_keywords:
             if type_filter != "SHOPPING":
                 media_extra_lines.append(_performance_report_line("주요 일반 전환 키워드", str(keyword_result.get("general_conversion_text") or "없음")))
@@ -9696,7 +9701,7 @@ def _build_performance_text_report(api_key: str, secret_key: str, cid: str, payl
             if type_filter != "WEB_SITE":
                 media_extra_lines.append(_performance_report_line("주요 쇼핑검색 구매완료 전환 검색어", str(shopping_query_result.get("purchase_conversion_text") or "없음")))
         if media_extra_lines:
-            media_keyword_text = "\n".join(["■ 전환 키워드/검색어", *media_extra_lines])
+            media_keyword_text = "\n".join(["■ 주요 키워드/검색어", *media_extra_lines])
             media_text = "\n\n\n".join(part for part in (media_text, media_keyword_text) if part)
         media_text = _append_missing_performance_cart_lines(
             media_text,

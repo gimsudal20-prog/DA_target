@@ -19638,8 +19638,9 @@
                       </select>
                     </div>
                     <div class="text-report-option-group">
-                      <div class="text-report-option-title">전환 키워드/검색어</div>
+                      <div class="text-report-option-title">유입/전환 키워드·검색어</div>
                       <div class="text-report-keyword-toggles">
+                        <label><input type="checkbox" id="text_report_include_inflow_keywords" checked> 유입</label>
                         <label><input type="checkbox" id="text_report_include_general_conversion_keywords" checked> 일반 전환</label>
                         <label><input type="checkbox" id="text_report_include_purchase_conversion_keywords" checked> 구매완료 전환</label>
                       </div>
@@ -33837,6 +33838,7 @@ function getPerformanceTextReportPayload() {
         report_metric_mode: document.getElementById('text_report_metric')?.value || 'conversion',
         include_type_breakdown: summaryDepth !== 'account',
         include_campaign_breakdown: summaryDepth === 'campaign',
+        include_inflow_keywords: !!document.getElementById('text_report_include_inflow_keywords')?.checked,
         include_general_conversion_keywords: !!document.getElementById('text_report_include_general_conversion_keywords')?.checked,
         include_purchase_conversion_keywords: !!document.getElementById('text_report_include_purchase_conversion_keywords')?.checked,
         include_cart_count: !!document.getElementById('text_report_include_cart_count')?.checked,
