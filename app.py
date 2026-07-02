@@ -170,6 +170,7 @@ LOG_ACTION_LABELS = {
     "/update_adgroup_search_options": "파워링크 검색옵션 변경",
     "/update_adgroup_bid_amt": "광고그룹 입찰가 변경",
     "/update_age_targets_bulk": "연령대 타겟 일괄 변경",
+    "/update_region_targets_bulk": "지역 타겟 일괄 변경",
     "/update_budget": "예산 변경",
     "/update_schedule": "시간대 설정 변경",
     "/update_schedule_campaign_bulk": "캠페인 시간대 일괄 변경",
@@ -215,7 +216,7 @@ LOG_ACTION_LABELS = {
 }
 ACTION_LOG_EXCLUDED_PATHS = {
     "/get_campaigns", "/get_adgroups", "/get_biz_channels", "/get_keywords", "/get_ads",
-    "/get_ad_extensions", "/get_restricted_keywords", "/find_powerlink_duplicate_keywords", "/find_account_powerlink_duplicate_keywords", "/get_powerlink_keyword_stats", "/get_shopping_query_conversion_insights", "/get_shopping_query_non_conversion_insights", "/get_dimension_performance_stats", "/search_powerlink_keywords", "/search_adgroups_global", "/export_powerlink_keywords_excel", "/query_account_ads", "/query_account_extensions", "/query_account_keywords", "/export_account_ads_excel", "/export_account_extensions_excel", "/export_account_keywords_excel", "/api/ai-analysis/chat", "/get_purchase_report_current", "/export_purchase_report_current_excel", "/get_action_logs", "/health", "/favicon.ico", "/",
+    "/get_ad_extensions", "/get_restricted_keywords", "/find_powerlink_duplicate_keywords", "/find_account_powerlink_duplicate_keywords", "/get_powerlink_keyword_stats", "/get_region_target_options", "/get_shopping_query_conversion_insights", "/get_shopping_query_non_conversion_insights", "/get_dimension_performance_stats", "/search_powerlink_keywords", "/search_adgroups_global", "/export_powerlink_keywords_excel", "/query_account_ads", "/query_account_extensions", "/query_account_keywords", "/export_account_ads_excel", "/export_account_extensions_excel", "/export_account_keywords_excel", "/api/ai-analysis/chat", "/get_purchase_report_current", "/export_purchase_report_current_excel", "/get_action_logs", "/health", "/favicon.ico", "/",
     "/sample_headers", "/delete_sample_headers", "/clear_action_logs",
 }
 def _safe_json_body() -> Dict[str, Any]:
@@ -338,7 +339,7 @@ def _action_summary(path: str, payload: Dict[str, Any]) -> str:
             adg_ids = [adg_ids] if adg_ids else []
         enabled_label = "ON" if _boolish(payload.get('enabled'), True) else "OFF"
         return f"{enabled_label} | 캠페인={len(camp_ids)} | 그룹={len(adg_ids)}"
-    if path in {"/update_budget", "/set_campaign_state", "/set_adgroup_state_by_scope", "/update_media", "/add_restricted_media_ids", "/copy_restricted_media_settings", "/update_adgroup_options", "/update_adgroup_search_options", "/update_adgroup_bid_amt", "/update_age_targets_bulk", "/update_schedule", "/update_schedule_campaign_bulk", "/update_non_search_keyword_exclusion", "/update_keyword_bids", "/update_bid_mode_by_scope", "/update_keyword_bids_by_search", "/update_keyword_bid_weights_by_search", "/adjust_keyword_bids_by_threshold", "/update_keyword_bids_avg_position", "/preview_keyword_avg_position_by_search", "/update_keyword_avg_position_by_search", "/update_powerlink_device_bid_weights", "/update_contents_network_bid_amt", "/set_keywords_state_by_scope", "/set_ads_state_by_scope", "/set_ad_extensions_state_by_scope", "/set_asset_state_by_ids"}:
+    if path in {"/update_budget", "/set_campaign_state", "/set_adgroup_state_by_scope", "/update_media", "/add_restricted_media_ids", "/copy_restricted_media_settings", "/update_adgroup_options", "/update_adgroup_search_options", "/update_adgroup_bid_amt", "/update_age_targets_bulk", "/update_region_targets_bulk", "/update_schedule", "/update_schedule_campaign_bulk", "/update_non_search_keyword_exclusion", "/update_keyword_bids", "/update_bid_mode_by_scope", "/update_keyword_bids_by_search", "/update_keyword_bid_weights_by_search", "/adjust_keyword_bids_by_threshold", "/update_keyword_bids_avg_position", "/preview_keyword_avg_position_by_search", "/update_keyword_avg_position_by_search", "/update_powerlink_device_bid_weights", "/update_contents_network_bid_amt", "/set_keywords_state_by_scope", "/set_ads_state_by_scope", "/set_ad_extensions_state_by_scope", "/set_asset_state_by_ids"}:
         ids = payload.get('entity_ids') or payload.get('campaign_ids') or payload.get('adgroup_ids') or []
         if not isinstance(ids, list):
             ids = [ids] if ids else []
@@ -366,6 +367,13 @@ def _action_summary(path: str, payload: Dict[str, Any]) -> str:
             extra.append(f"연령={mode_label}:{len(age_codes)}개")
             if str(payload.get("bid_weight") or "").strip():
                 extra.append(f"가중치={payload.get('bid_weight')}%")
+        if path == "/update_region_targets_bulk":
+            region_mode = str(payload.get("mode") or "include_selected")
+            mode_label = {"all": "모든지역", "include_selected": "선택노출", "exclude_selected": "선택제외"}.get(region_mode, region_mode)
+            region_codes = payload.get("region_codes") or []
+            if not isinstance(region_codes, list):
+                region_codes = [region_codes] if region_codes else []
+            extra.append(f"지역={mode_label}:{len(region_codes)}개")
         overrides = payload.get('keyword_bid_overrides') or payload.get('bid_overrides') or []
         if isinstance(overrides, list) and overrides:
             extra.append(f"개별입찰가={len(overrides)}건")
@@ -13643,6 +13651,50 @@ def _resolve_age_criterion_options(api_key: str, secret_key: str, cid: str) -> T
         warning = "연령대 사전에서 일부 코드를 찾지 못해 기본 코드를 사용했습니다: " + ", ".join(missing[:4])
     return resolved, warning
 
+def _region_option_sort_key(item: Dict[str, Any]) -> Tuple[int, str, str]:
+    label = str((item or {}).get("label") or "").strip()
+    code = str((item or {}).get("code") or "").strip()
+    order = 10
+    if "국내" in label:
+        order = 0
+    elif any(token in label for token in ("서울", "경기", "인천")):
+        order = 1
+    elif any(token in label for token in ("강원", "충청", "대전", "세종", "전라", "광주", "경상", "대구", "울산", "부산", "제주")):
+        order = 2
+    return (order, label, code)
+
+def _resolve_region_criterion_options(api_key: str, secret_key: str, cid: str) -> Tuple[List[Dict[str, str]], str]:
+    warnings: List[str] = []
+    options: List[Dict[str, str]] = []
+    seen: set[Tuple[str, str]] = set()
+    for criterion_type in ("RL",):
+        res, rows = _fetch_criterion_dictionary_entries(api_key, secret_key, cid, criterion_type)
+        if res.status_code != 200 or not rows:
+            warnings.append(f"{criterion_type} 지역 사전 조회 실패: {_response_detail_text(res)}")
+            continue
+        for row in rows:
+            code = str(_row_first_present(row, ["dictionaryCode", "code", "criterionCode", "targetCode"], "") or "").strip().upper()
+            if not code:
+                continue
+            label = _criterion_option_label_from_row(row, code)
+            key = (criterion_type, code)
+            if key in seen:
+                continue
+            seen.add(key)
+            options.append({
+                "type": criterion_type,
+                "code": code,
+                "label": label,
+                "search": " ".join(
+                    str(_row_first_present(row, [k], "") or "")
+                    for k in ("codeName", "name", "label", "description", "text", "parentName")
+                    if str(_row_first_present(row, [k], "") or "").strip()
+                ),
+            })
+    options.sort(key=_region_option_sort_key)
+    warning = " / ".join([w for w in warnings if w])
+    return options, warning
+
 def _extract_criterion_codes_from_payload(payload: Any, prefixes: List[str]) -> Dict[str, List[str]]:
     """Extract criterion dictionary codes from adgroup detail/attr JSON fallbacks.
 
@@ -13721,6 +13773,24 @@ def _row_first_present(row: Dict[str, Any], keys: List[str], default: Any = None
     return default
 
 
+def _criterion_flag_int(value: Any, default: int = 0) -> int:
+    if value in (None, ""):
+        return int(default)
+    if isinstance(value, bool):
+        return 1 if value else 0
+    if isinstance(value, (int, float)):
+        return 1 if int(value) else 0
+    text = str(value).strip().lower()
+    if text in {"1", "true", "t", "y", "yes", "on"}:
+        return 1
+    if text in {"0", "false", "f", "n", "no", "off"}:
+        return 0
+    try:
+        return 1 if int(float(text)) else 0
+    except Exception:
+        return int(default)
+
+
 def _criterion_rows_to_state_map(rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     out: Dict[str, Dict[str, Any]] = {}
     for row in rows or []:
@@ -13733,14 +13803,8 @@ def _criterion_rows_to_state_map(rows: List[Dict[str, Any]]) -> Dict[str, Dict[s
             bid_weight = int(_row_first_present(row, ["bidWeight", "bid_weight", "weight"], 100) or 100)
         except Exception:
             bid_weight = 100
-        try:
-            negative = int(_row_first_present(row, ["negative", "negativeYn", "exclude", "excluded"], 0) or 0)
-        except Exception:
-            negative = 0
-        try:
-            onoff = int(_row_first_present(row, ["onOff", "onoff", "enabled", "enable", "on"], 1) or 1)
-        except Exception:
-            onoff = 1
+        negative = _criterion_flag_int(_row_first_present(row, ["negative", "negativeYn", "exclude", "excluded"], 0), 0)
+        onoff = _criterion_flag_int(_row_first_present(row, ["onOff", "onoff", "enabled", "enable", "on"], 1), 1)
         state = {
             "dictionaryCode": code,
             "bidWeight": bid_weight,
@@ -21469,6 +21533,253 @@ def _verify_age_target_state(
         return False, " / ".join(pieces)
     return True, ""
 
+def _resolve_bulk_region_target_codes(raw_codes: Any, options: List[Dict[str, str]]) -> List[str]:
+    if isinstance(raw_codes, str):
+        candidates = re.split(r"[\s,]+", raw_codes)
+    else:
+        try:
+            candidates = list(raw_codes or [])
+        except Exception:
+            candidates = []
+    valid_codes = {str((item or {}).get("code") or "").strip().upper() for item in (options or [])}
+    resolved: List[str] = []
+    for code in candidates:
+        raw_code = str(code or "").strip().upper()
+        if raw_code and raw_code in valid_codes:
+            resolved.append(raw_code)
+    return _unique_keep_order(resolved)
+
+def _build_region_target_state_map(selected_codes: List[str], mode: str) -> Dict[str, Dict[str, Any]]:
+    if mode == "all":
+        return {}
+    negative = 1 if mode == "exclude_selected" else 0
+    return {
+        str(code).strip().upper(): {
+            "dictionaryCode": str(code).strip().upper(),
+            "bidWeight": 100,
+            "negative": negative,
+            "onOff": 1,
+        }
+        for code in (selected_codes or [])
+        if str(code or "").strip()
+    }
+
+def _put_region_target_state_map(api_key: str, secret_key: str, cid: str, owner_id: str, final_map: Dict[str, Dict[str, Any]]):
+    owner_id = str(owner_id or "").strip()
+    states = [v for _, v in sorted((final_map or {}).items()) if isinstance(v, dict) and str(v.get("dictionaryCode") or "").strip()]
+
+    def _build_body(use_official_keys: bool = False) -> List[Dict[str, Any]]:
+        body: List[Dict[str, Any]] = []
+        for state in states:
+            item = {
+                "customerId": int(cid),
+                "ownerId": owner_id,
+                "dictionaryCode": str(state.get("dictionaryCode") or "").strip().upper(),
+                "type": "RL",
+            }
+            try:
+                bid_weight = int(state.get("bidWeight") or 100)
+            except Exception:
+                bid_weight = 100
+            negative_value = _criterion_flag_int(state.get("negative"), 0)
+            enabled_value = _criterion_flag_int(_row_first_present(state, ["onOff", "enable", "enabled"], 1), 1)
+            item["bidWeight"] = bid_weight
+            item["negative"] = bool(negative_value) if use_official_keys else negative_value
+            item["enable" if use_official_keys else "onOff"] = bool(enabled_value) if use_official_keys else enabled_value
+            body.append(item)
+        return body
+
+    put_variants = [
+        (f"/ncc/criterion/{owner_id}/RL", None),
+        (f"/ncc/criterion/{owner_id}", {"type": "RL"}),
+        ("/ncc/criterion", {"ownerId": owner_id, "type": "RL"}),
+        (f"/ncc/criteria/{owner_id}/RL", None),
+        ("/ncc/criteria", {"ownerId": owner_id, "type": "RL"}),
+    ]
+    attempts: List[str] = []
+    response_snippets: List[str] = []
+    for body_label, body in [("official", _build_body(True)), ("legacy", _build_body(False))]:
+        for uri, params in put_variants:
+            put_res = _do_req("PUT", api_key, secret_key, cid, uri, params=params, json_body=body)
+            attempts.append(f"PUT {uri}{'?' + urlencode(params) if params else ''} [{body_label}] -> {put_res.status_code}")
+            text = str(put_res.text or "").strip()[:260]
+            if text:
+                response_snippets.append(f"{put_res.status_code}: {text}")
+            if put_res.status_code in {200, 201, 204}:
+                return True, "", ""
+    shown_attempts = attempts[:3] + (["..."] if len(attempts) > 6 else []) + attempts[-3:]
+    snippets = _unique_keep_order(response_snippets[:2] + response_snippets[-2:])
+    detail = " / ".join(shown_attempts)
+    if snippets:
+        detail += " | 응답 " + " / ".join(snippets)
+    return False, "region_criterion_put", detail
+
+def _verify_region_target_state(
+    api_key: str,
+    secret_key: str,
+    cid: str,
+    adgroup_id: str,
+    expected_map: Dict[str, Dict[str, Any]],
+    mode: str,
+) -> Tuple[bool, str]:
+    res_get, rows = _fetch_criterion_entries(api_key, secret_key, cid, adgroup_id, "RL")
+    if res_get.status_code != 200:
+        return False, f"검증 조회 실패: {_response_detail_text(res_get)}"
+    actual_map = _criterion_rows_to_state_map(rows or [])
+    if mode == "all":
+        active = [code for code, row in actual_map.items() if int(row.get("onOff") or 1) != 0]
+        if active:
+            return False, "지역 criterion 잔여 " + ", ".join(active[:5])
+        return True, ""
+    missing = [code for code in expected_map.keys() if code not in actual_map]
+    mismatched: List[str] = []
+    for code, expected in expected_map.items():
+        actual = actual_map.get(code)
+        if not actual:
+            continue
+        try:
+            expected_negative = int(expected.get("negative") or 0)
+            actual_negative = int(actual.get("negative") or 0)
+        except Exception:
+            expected_negative = 0
+            actual_negative = 0
+        if expected_negative != actual_negative:
+            mismatched.append(f"{code} 노출/제외 불일치")
+    if missing or mismatched:
+        pieces: List[str] = []
+        if missing:
+            pieces.append("누락 " + ", ".join(missing[:5]))
+        if mismatched:
+            pieces.append("불일치 " + ", ".join(mismatched[:5]))
+        return False, " / ".join(pieces)
+    return True, ""
+
+def get_region_target_options():
+    d = request.get_json(silent=True) or {}
+    api_key = d.get("api_key")
+    secret_key = d.get("secret_key")
+    cid = d.get("customer_id")
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API Key / Secret Key / Customer ID가 필요합니다."}), 400
+    options, warning = _resolve_region_criterion_options(api_key, secret_key, cid)
+    if not options:
+        msg = "지역 타겟팅 사전을 불러오지 못했습니다."
+        if warning:
+            msg += "\n" + warning
+        return jsonify({"error": msg, "options": [], "warning": warning}), 400
+    return jsonify({
+        "ok": True,
+        "options": options,
+        "count": len(options),
+        "warning": warning,
+        "message": f"지역 타겟팅 옵션 {len(options)}개를 불러왔습니다." + (f"\n{warning}" if warning else ""),
+    })
+
+def update_region_targets_bulk():
+    d = request.get_json(silent=True) or {}
+    api_key = d.get("api_key")
+    secret_key = d.get("secret_key")
+    cid = d.get("customer_id")
+    if not api_key or not secret_key or not cid:
+        return jsonify({"error": "API Key / Secret Key / Customer ID가 필요합니다."}), 400
+
+    mode = str(d.get("mode") or "include_selected").strip().lower()
+    if mode not in {"all", "exclude_selected", "include_selected"}:
+        return jsonify({"error": "mode는 all, exclude_selected, include_selected 중 하나여야 합니다."}), 400
+
+    raw_scopes = d.get("target_scopes")
+    if isinstance(raw_scopes, list):
+        target_scopes = [str(x or "").strip().lower() for x in raw_scopes if str(x or "").strip()]
+    else:
+        target_scopes = [str(d.get("target_scope") or "adgroup").strip().lower()]
+    target_scopes = _unique_keep_order([x for x in target_scopes if x in {"campaign", "adgroup"}]) or ["adgroup"]
+    if len(target_scopes) > 1:
+        return jsonify({"error": "지역 타겟 설정 적용 범위는 선택 광고그룹 또는 선택 캠페인 중 하나만 선택할 수 있습니다."}), 400
+
+    options, option_warning = _resolve_region_criterion_options(api_key, secret_key, cid)
+    if not options:
+        msg = "지역 타겟팅 사전을 불러오지 못해 적용할 수 없습니다."
+        if option_warning:
+            msg += "\n" + option_warning
+        return jsonify({"error": msg}), 400
+
+    selected_codes = _resolve_bulk_region_target_codes(d.get("region_codes"), options)
+    if mode != "all" and not selected_codes:
+        return jsonify({"error": "설정할 지역을 1개 이상 선택해주세요."}), 400
+    if len(selected_codes) > 100:
+        return jsonify({"error": "지역은 최대 100개까지 선택할 수 있습니다."}), 400
+
+    campaign_ids = [str(x).strip() for x in (d.get("campaign_ids") or []) if str(x).strip()]
+    adgroup_ids = [str(x).strip() for x in (d.get("adgroup_ids") or []) if str(x).strip()]
+    target_adgroup_ids: List[str] = []
+    warnings: List[str] = [option_warning] if option_warning else []
+    if "campaign" in target_scopes:
+        resolved, warn = _resolve_bulk_target_adgroup_ids(api_key, secret_key, cid, "campaign", campaign_ids, [])
+        target_adgroup_ids.extend(resolved)
+        warnings.extend(warn)
+    if "adgroup" in target_scopes:
+        resolved, warn = _resolve_bulk_target_adgroup_ids(api_key, secret_key, cid, "adgroup", [], adgroup_ids)
+        target_adgroup_ids.extend(resolved)
+        warnings.extend(warn)
+    target_adgroup_ids = _unique_keep_order([x for x in target_adgroup_ids if x])
+    if not target_adgroup_ids:
+        msg = "적용할 대상 광고그룹이 없습니다."
+        if warnings:
+            msg += "\n" + "\n".join(warnings[:10])
+        return jsonify({"error": msg}), 400
+
+    state_map = _build_region_target_state_map(selected_codes, mode)
+    option_label_map = {str(item.get("code") or "").strip().upper(): str(item.get("label") or item.get("code") or "") for item in options}
+    selected_labels = [option_label_map.get(code, code) for code in selected_codes]
+    mode_label = {
+        "all": "모든 지역",
+        "include_selected": "선택 지역만 광고 노출",
+        "exclude_selected": "선택 지역 노출 제외",
+    }[mode]
+
+    success = 0
+    fail = 0
+    details: List[str] = [w for w in warnings if w]
+    results: List[Dict[str, Any]] = []
+    for adgroup_id in target_adgroup_ids:
+        ok_put, step, detail = _put_region_target_state_map(api_key, secret_key, cid, adgroup_id, state_map)
+        if not ok_put:
+            fail += 1
+            msg = f"{step}: {str(detail or '')[:700]}"
+            details.append(f"[{adgroup_id}] 변경 실패: {msg}")
+            results.append({"ok": False, "adgroup_id": adgroup_id, "detail": msg})
+            continue
+        ok_verify, verify_msg = _verify_region_target_state(api_key, secret_key, cid, adgroup_id, state_map, mode)
+        if ok_verify:
+            success += 1
+            detail_msg = f"{mode_label} · {len(selected_codes)}개"
+            results.append({"ok": True, "adgroup_id": adgroup_id, "detail": detail_msg})
+        else:
+            fail += 1
+            msg = verify_msg or "적용 후 검증 실패"
+            details.append(f"[{adgroup_id}] 검증 실패: {msg}")
+            results.append({"ok": False, "adgroup_id": adgroup_id, "detail": msg})
+
+    if success > 0:
+        _cache_invalidate(api_key, secret_key, cid)
+    scope_label = "+".join(["캠페인" if s == "campaign" else "광고그룹" for s in target_scopes])
+    target_label = ", ".join(selected_labels[:8]) + (f" 외 {len(selected_labels) - 8}개" if len(selected_labels) > 8 else "")
+    message = (
+        f"지역 타겟 일괄 설정 완료 · 범위 {scope_label} · {mode_label}"
+        + (f" ({target_label})" if target_label else "")
+        + f" · 성공 {success}개 / 실패 {fail}개"
+    )
+    if details:
+        message += "\n" + "\n".join(details[:20])
+    return jsonify({
+        "ok": success > 0,
+        "message": message,
+        "success": success,
+        "fail": fail,
+        "details": details[:80],
+        "results": results[:300],
+        "patch": "bulk-region-target-direct-v1-20260702",
+    }), (200 if success > 0 else 400)
 
 def update_age_targets_bulk():
     d = request.get_json(silent=True) or {}
@@ -27034,7 +27345,9 @@ _CHANGE_SERVICE = ChangeService({
     "bulk_update_shopping_ad_bids": bulk_update_shopping_ad_bids,
     "bulk_update_shopping_product_ad_bids": bulk_update_shopping_product_ad_bids,
     "apply_target_settings_bulk": apply_target_settings_bulk,
+    "get_region_target_options": get_region_target_options,
     "update_age_targets_bulk": update_age_targets_bulk,
+    "update_region_targets_bulk": update_region_targets_bulk,
     "update_budget": update_budget,
     "update_schedule": update_schedule,
     "update_schedule_campaign_bulk": update_schedule_campaign_bulk,

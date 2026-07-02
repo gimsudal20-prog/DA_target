@@ -15582,16 +15582,16 @@
       color: #ffffff !important;
     }
 
-    body .workspace-content :is(#tab_data, #tab_report, #tab_create, #tab_bulk, #tab_change, #tab_copy, #tab_delete, #b_keyword_inspect, #b_bid, #b_time, #b_age, #b_status, #b_copy, #b_delete) .btn.btn-primary,
-    body .workspace-content :is(#tab_data, #tab_report, #tab_create, #tab_bulk, #tab_change, #tab_copy, #tab_delete, #b_keyword_inspect, #b_bid, #b_time, #b_age, #b_status, #b_copy, #b_delete) button.btn.btn-primary {
+    body .workspace-content :is(#tab_data, #tab_report, #tab_create, #tab_bulk, #tab_change, #tab_copy, #tab_delete, #b_keyword_inspect, #b_bid, #b_time, #b_age, #b_region, #b_status, #b_copy, #b_delete) .btn.btn-primary,
+    body .workspace-content :is(#tab_data, #tab_report, #tab_create, #tab_bulk, #tab_change, #tab_copy, #tab_delete, #b_keyword_inspect, #b_bid, #b_time, #b_age, #b_region, #b_status, #b_copy, #b_delete) button.btn.btn-primary {
       border-color: transparent !important;
       background: var(--ui-primary) !important;
       color: #ffffff !important;
       box-shadow: none !important;
     }
 
-    body .workspace-content :is(#tab_data, #tab_report, #tab_create, #tab_bulk, #tab_change, #tab_copy, #tab_delete, #b_keyword_inspect, #b_bid, #b_time, #b_age, #b_status, #b_copy, #b_delete) .btn.btn-primary:hover:not(:disabled),
-    body .workspace-content :is(#tab_data, #tab_report, #tab_create, #tab_bulk, #tab_change, #tab_copy, #tab_delete, #b_keyword_inspect, #b_bid, #b_time, #b_age, #b_status, #b_copy, #b_delete) button.btn.btn-primary:hover:not(:disabled) {
+    body .workspace-content :is(#tab_data, #tab_report, #tab_create, #tab_bulk, #tab_change, #tab_copy, #tab_delete, #b_keyword_inspect, #b_bid, #b_time, #b_age, #b_region, #b_status, #b_copy, #b_delete) .btn.btn-primary:hover:not(:disabled),
+    body .workspace-content :is(#tab_data, #tab_report, #tab_create, #tab_bulk, #tab_change, #tab_copy, #tab_delete, #b_keyword_inspect, #b_bid, #b_time, #b_age, #b_region, #b_status, #b_copy, #b_delete) button.btn.btn-primary:hover:not(:disabled) {
       border-color: transparent !important;
       background: var(--ui-primary-hover) !important;
       color: #ffffff !important;
@@ -16915,12 +16915,14 @@
     body #b_bid .change-scope-common-divider,
     body #b_status .change-scope-common-divider,
     body #b_time .change-scope-common-divider,
-    body #b_age .change-scope-common-divider { order: 10 !important; }
+    body #b_age .change-scope-common-divider,
+    body #b_region .change-scope-common-divider { order: 10 !important; }
 
     body #b_bid .change-scope-common,
     body #b_status .change-scope-common,
     body #b_time .change-scope-common,
-    body #b_age .change-scope-common { order: 20 !important; }
+    body #b_age .change-scope-common,
+    body #b_region .change-scope-common { order: 20 !important; }
 
     body #b_bid .change-scope-powerlink-divider,
     body #b_status .change-scope-powerlink-divider { order: 30 !important; }
@@ -20008,6 +20010,7 @@
                 <button class="tab-btn active" data-workflow-group="change" onclick="switchSubTab('b_bid', this, '#tab_bulk')">입찰가</button>
                 <button class="tab-btn" data-workflow-group="change" onclick="switchSubTab('b_time', this, '#tab_bulk')">시간대 설정</button>
                 <button class="tab-btn" data-workflow-group="change" onclick="switchSubTab('b_age', this, '#tab_bulk')">연령대 설정</button>
+                <button class="tab-btn" data-workflow-group="change" onclick="switchSubTab('b_region', this, '#tab_bulk')">지역 설정</button>
                 <button class="tab-btn" data-workflow-group="lookup" onclick="switchSubTab('b_keyword_inspect', this, '#tab_bulk')">키워드 진단</button>
                 <button class="tab-btn" data-workflow-group="copy" onclick="switchSubTab('b_copy', this, '#tab_bulk')">복사</button>
                 <button class="tab-btn" data-workflow-group="create" onclick="switchWorkflowTab('bulkad')">대량 등록</button>
@@ -21252,6 +21255,68 @@
                             </div>
                         </div>
                         <button class="btn btn-primary" style="width:100%;" onclick="updateAgeTargetsBulk()">선택 범위에 연령대 일괄 설정</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="b_region" class="tab-content">
+                <div class="grid-2">
+                    <div class="change-scope-divider change-scope-common-divider" data-scope="common">공통 작업 <span>선택 범위의 지역 노출/제외 설정</span></div>
+                    <div class="card change-scope-common" style="grid-column:1/-1;">
+                        <div class="card-title">지역 타겟팅 직접 일괄 설정 <span class="scope-badge scope-badge-gray">공통</span></div>
+                        <div class="field-note" style="margin-bottom:12px;">네이버 지역 타겟팅처럼 모든 지역, 선택 지역 노출, 선택 지역 제외 중 하나를 골라 체크한 캠페인/광고그룹에 일괄 적용합니다.</div>
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label>적용 범위</label>
+                                <div style="display:flex; flex-direction:column; gap:8px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:#fff;">
+                                    <label style="display:flex; align-items:center; gap:8px; margin:0; font-weight:500;"><input type="radio" name="bulk_region_scope" id="bulk_region_scope_adgroup" value="adgroup" checked> 선택 광고그룹</label>
+                                    <label style="display:flex; align-items:center; gap:8px; margin:0; font-weight:500;"><input type="radio" name="bulk_region_scope" id="bulk_region_scope_campaign" value="campaign"> 선택 캠페인 하위 광고그룹 전체</label>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>노출 방식</label>
+                                <div style="display:flex; flex-direction:column; gap:8px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:#fff;">
+                                    <label style="display:flex; align-items:center; gap:8px; margin:0; font-weight:500;"><input type="radio" name="bulk_region_mode" value="all" onchange="syncBulkRegionMode()"> 모든 지역</label>
+                                    <label style="display:flex; align-items:center; gap:8px; margin:0; font-weight:500;"><input type="radio" name="bulk_region_mode" value="exclude_selected" onchange="syncBulkRegionMode()"> 광고 노출 제외 지역 설정</label>
+                                    <label style="display:flex; align-items:center; gap:8px; margin:0; font-weight:500;" title="스크린샷의 '광고 노출 지역 설정'과 같은 방식입니다."><input type="radio" name="bulk_region_mode" value="include_selected" checked onchange="syncBulkRegionMode()"> 광고 노출 지역 설정</label>
+                                </div>
+                                <div class="field-note" id="bulk_region_mode_note">선택한 지역에만 광고를 노출합니다. 선택하지 않은 지역은 네이버 타겟팅 기준에서 제외됩니다.</div>
+                            </div>
+                        </div>
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label>지역 검색</label>
+                                <input type="search" id="bulk_region_search" placeholder="예: 서울, 경기, 인천" oninput="renderBulkRegionTargetOptions()">
+                                <div class="field-note">지역 목록은 현재 광고주 API의 네이버 지역 사전 기준으로 불러옵니다.</div>
+                            </div>
+                            <div class="form-group">
+                                <label>선택 상태</label>
+                                <div id="bulk_region_selected_summary" style="min-height:40px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:#fff; font-size:12px; color:var(--muted);">선택한 지역 0개</div>
+                            </div>
+                        </div>
+                        <div class="btn-row" style="margin-bottom:10px;">
+                            <button type="button" class="btn btn-sub" onclick="loadBulkRegionTargetOptions(true)">지역 목록 불러오기</button>
+                            <button type="button" class="btn btn-sub" onclick="setBulkRegionTargetSelection(true)">현재 검색 결과 전체 선택</button>
+                            <button type="button" class="btn btn-sub" onclick="setBulkRegionTargetSelection(false)">선택 해제</button>
+                        </div>
+                        <div class="form-group">
+                            <label>지역 목록 <span id="bulk_region_option_count" style="font-weight:500; color:var(--muted);"></span></label>
+                            <div id="bulk_region_target_options" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:8px 12px; max-height:280px; overflow:auto; padding:12px; border:1px solid var(--line); border-radius:12px; background:#fff; font-size:12px;">
+                                <div class="field-note">지역 목록 불러오기를 누르면 선택 가능한 지역이 표시됩니다.</div>
+                            </div>
+                            <div class="field-note">네이버 기준 지역은 최대 100개까지 선택할 수 있습니다. 시/도보다 좁은 지역은 정확도가 낮을 수 있습니다.</div>
+                        </div>
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label>처리 결과</label>
+                                <textarea id="bulk_region_target_result" rows="6" readonly placeholder="지역 타겟 일괄 설정 결과가 여기에 표시됩니다."></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>적용 전 확인</label>
+                                <div class="field-note" style="padding:12px; border:1px solid var(--line); border-radius:10px; background:#fff;">좌측 목록에서 캠페인 또는 광고그룹을 체크한 뒤 실행하세요. 기존 지역 타겟팅은 선택한 노출 방식으로 덮어쓰기 됩니다.</div>
+                            </div>
+                        </div>
+                        <button class="btn btn-primary" style="width:100%;" onclick="updateRegionTargetsBulk()">선택 범위에 지역 타겟팅 일괄 설정</button>
                     </div>
                 </div>
             </div>
@@ -24158,6 +24223,7 @@ const WORKFLOW_COMMANDS = [
     { label: '입찰가 변경', desc: '고정 입찰가, 기기별 가중치, 순위 기준 변경', action: 'change-bid', group: '변경', keywords: '입찰가 변경 bid pc 모바일 순위 가중치' },
     { label: '시간대 설정', desc: '요일/시간대 노출 및 입찰 가중치 설정', action: 'change-time', group: '변경', keywords: '시간대 요일 스케줄 노출 가중치 설정' },
     { label: '연령대 설정', desc: '연령대별 광고 노출/제외 및 입찰 가중치 일괄 설정', action: 'change-age', group: '변경', keywords: '연령대 나이 age 노출 제외 타겟 가중치 설정' },
+    { label: '지역 설정', desc: '지역별 광고 노출/제외 타겟팅 일괄 설정', action: 'change-region', group: '변경', keywords: '지역 타겟팅 노출 제외 location region area 설정' },
     { label: '상태/예산 변경', desc: 'ON/OFF, 예산, 타겟 설정 변경', action: 'change-status', group: '변경', keywords: '상태 예산 on off 타겟 변경' },
     { label: '매체/노출제한', desc: '매체별 설정과 파워링크 제한 매체를 한 곳에서 변경', action: 'change-restricted-media', group: '변경', keywords: '매체 노출 제한 파워링크 media name check black media 추가' },
     { label: '복사 작업', desc: '캠페인/그룹/키워드/소재/확장소재 복사', action: 'copy', group: '복사', keywords: '복사 캠페인 그룹 키워드 소재 확장소재 제외키워드' },
@@ -24583,6 +24649,7 @@ function updateWorkflowNextActionCard(forcedWorkflow=null) {
                     { label: '입찰가', action: 'change-bid', primary: true },
                     { label: '시간대', action: 'change-time' },
                     { label: '연령대', action: 'change-age' },
+                    { label: '지역', action: 'change-region' },
                     { label: '상태/예산', action: 'change-status' },
                     { label: '매체/노출제한', action: 'change-restricted-media' }
                 ]
@@ -26065,12 +26132,13 @@ function openWorkspaceTab(mainTabId, subTabId=null) {
         b_bid: 'change',
         b_time: 'change',
         b_age: 'change',
+        b_region: 'change',
         b_status: 'change',
         b_media_restrict: 'change'
     };
     if (mainTabId === 'tab_bulk' && subTabId && workflowBySub[subTabId]) {
         switchWorkflowTab(workflowBySub[subTabId]);
-        if (['b_time', 'b_age', 'b_status', 'b_media_restrict'].includes(subTabId)) {
+        if (['b_time', 'b_age', 'b_region', 'b_status', 'b_media_restrict'].includes(subTabId)) {
             const subBtn = document.querySelector(`#tab_bulk > .workflow-sub-tabs .tab-btn[onclick*="${subTabId}"]`);
             if (subBtn) switchSubTab(subTabId, subBtn, '#tab_bulk');
         }
@@ -26336,6 +26404,10 @@ function openWorkflowQuick(action, targetSelector=null) {
             switchWorkflowTab('change');
             runAfterSwitch(() => { workflowActivateSubTab('#tab_bulk', 'b_age'); workflowFocusTarget('#b_age'); });
             break;
+        case 'change-region':
+            switchWorkflowTab('change');
+            runAfterSwitch(() => { workflowActivateSubTab('#tab_bulk', 'b_region'); workflowFocusTarget('#b_region'); });
+            break;
         case 'change-status':
             switchWorkflowTab('change');
             runAfterSwitch(() => { workflowActivateSubTab('#tab_bulk', 'b_status'); workflowFocusTarget('#b_status'); });
@@ -26458,6 +26530,7 @@ function updateWorkflowQuickCards(workflow) {
                 ['입찰가', '고정 입찰가·기기별 가중치·순위 기준 변경', 'change-bid', 'change'],
                 ['시간대 설정', '요일/시간대 노출 및 입찰 가중치 설정', 'change-time', 'change'],
                 ['연령대 설정', '연령대별 광고 노출/제외 및 입찰 가중치 설정', 'change-age', 'change'],
+                ['지역 설정', '지역별 광고 노출/제외 타겟팅 설정', 'change-region', 'change'],
                 ['상태/예산', 'ON/OFF·예산·타겟 설정 변경', 'change-status', 'change'],
                 ['매체/노출제한', '매체별 설정·파워링크 제한 매체 추가·복사', 'change-restricted-media', 'change']
             ]
@@ -26626,6 +26699,7 @@ function switchWorkflowTab(workflow, btn=null) {
         create: { parent: 'tab_create', sub: null, main: 'create' },
         change: { parent: 'tab_bulk', sub: 'b_bid', main: 'change' },
         'change-age': { parent: 'tab_bulk', sub: 'b_age', main: 'change' },
+        'change-region': { parent: 'tab_bulk', sub: 'b_region', main: 'change' },
         'change-restricted-media': { parent: 'tab_bulk', sub: 'b_media_restrict', main: 'change' },
         copy: { parent: 'tab_bulk', sub: 'b_copy', main: 'copy' },
         delete: { parent: 'tab_bulk', sub: 'b_delete', main: 'delete' },
@@ -28689,6 +28763,207 @@ async function applyBulkTargetSettings() {
         showToast(data.message, Number(data?.fail || 0) > 0 ? 'info' : 'success');
         if(useAdgroupScope && currentAdgroupId && adgroupIds.includes(currentAdgroupId)) await loadAdgroupDetails();
     } catch(err) { showToast(err.message, 'error'); }
+}
+
+let bulkRegionTargetOptions = [];
+let bulkRegionSelectedCodes = new Set();
+let bulkRegionOptionsLoaded = false;
+
+function getBulkRegionMode() {
+    return document.querySelector('input[name="bulk_region_mode"]:checked')?.value || 'include_selected';
+}
+
+function bulkRegionFilteredOptions() {
+    const query = String(document.getElementById('bulk_region_search')?.value || '').trim().toLowerCase();
+    if(!query) return bulkRegionTargetOptions;
+    return bulkRegionTargetOptions.filter(item => {
+        const haystack = `${item.label || ''} ${item.code || ''} ${item.search || ''}`.toLowerCase();
+        return haystack.includes(query);
+    });
+}
+
+function updateBulkRegionSelectedSummary() {
+    const summary = document.getElementById('bulk_region_selected_summary');
+    const countEl = document.getElementById('bulk_region_option_count');
+    const selected = bulkRegionTargetOptions.filter(item => bulkRegionSelectedCodes.has(String(item.code || '').toUpperCase()));
+    if(countEl) {
+        const filteredCount = bulkRegionFilteredOptions().length;
+        countEl.textContent = bulkRegionTargetOptions.length ? `전체 ${bulkRegionTargetOptions.length.toLocaleString()}개 · 표시 ${filteredCount.toLocaleString()}개` : '';
+    }
+    if(!summary) return;
+    if(getBulkRegionMode() === 'all') {
+        summary.textContent = '모든 지역에 광고가 노출됩니다.';
+        return;
+    }
+    const names = selected.slice(0, 8).map(item => item.label || item.code);
+    const more = selected.length > names.length ? ` 외 ${(selected.length - names.length).toLocaleString()}개` : '';
+    summary.textContent = selected.length ? `선택한 지역 ${selected.length}/100개 · ${names.join(', ')}${more}` : '선택한 지역 0개';
+}
+
+function handleBulkRegionTargetToggle(input) {
+    const code = String(input?.value || '').toUpperCase();
+    if(!code) return;
+    if(input.checked) {
+        if(bulkRegionSelectedCodes.size >= 100 && !bulkRegionSelectedCodes.has(code)) {
+            input.checked = false;
+            showToast('지역은 최대 100개까지 선택할 수 있습니다.', 'error');
+            return;
+        }
+        bulkRegionSelectedCodes.add(code);
+    } else {
+        bulkRegionSelectedCodes.delete(code);
+    }
+    updateBulkRegionSelectedSummary();
+}
+
+function renderBulkRegionTargetOptions() {
+    const box = document.getElementById('bulk_region_target_options');
+    if(!box) return;
+    const mode = getBulkRegionMode();
+    const disabled = mode === 'all';
+    const options = bulkRegionFilteredOptions();
+    if(!bulkRegionTargetOptions.length) {
+        box.innerHTML = '<div class="field-note">지역 목록 불러오기를 누르면 선택 가능한 지역이 표시됩니다.</div>';
+        updateBulkRegionSelectedSummary();
+        return;
+    }
+    if(!options.length) {
+        box.innerHTML = '<div class="field-note">검색 결과가 없습니다.</div>';
+        updateBulkRegionSelectedSummary();
+        return;
+    }
+    box.innerHTML = options.map(item => {
+        const code = String(item.code || '').toUpperCase();
+        const checked = bulkRegionSelectedCodes.has(code);
+        return `
+            <label style="display:flex; align-items:center; gap:8px; min-width:0; color:${disabled ? '#94a3b8' : 'inherit'};">
+                <input type="checkbox" class="bulk-region-target-code" value="${escapeAttr(code)}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''} onchange="handleBulkRegionTargetToggle(this)">
+                <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeAttr(`${item.label || code} · ${code}`)}">${escapeMaybe(item.label || code)}</span>
+            </label>
+        `;
+    }).join('');
+    updateBulkRegionSelectedSummary();
+}
+
+async function loadBulkRegionTargetOptions(force = false) {
+    const c = ensureReady(); if(!c) return false;
+    if(bulkRegionOptionsLoaded && !force) {
+        renderBulkRegionTargetOptions();
+        return true;
+    }
+    try {
+        const data = await postJson('/get_region_target_options', { ...c }, '지역 목록 불러오는 중...');
+        bulkRegionTargetOptions = Array.isArray(data?.options) ? data.options : [];
+        bulkRegionOptionsLoaded = true;
+        const validCodes = new Set(bulkRegionTargetOptions.map(item => String(item.code || '').toUpperCase()));
+        bulkRegionSelectedCodes = new Set(Array.from(bulkRegionSelectedCodes).filter(code => validCodes.has(code)));
+        renderBulkRegionTargetOptions();
+        showToast(data?.message || `지역 옵션 ${bulkRegionTargetOptions.length.toLocaleString()}개를 불러왔습니다.`, data?.warning ? 'info' : 'success');
+        return true;
+    } catch(err) {
+        bulkRegionOptionsLoaded = false;
+        const resultBox = document.getElementById('bulk_region_target_result');
+        if(resultBox) resultBox.value = `지역 목록 조회 실패: ${err.message}`;
+        showToast(`지역 목록 조회 실패: ${err.message}`, 'error');
+        return false;
+    }
+}
+
+function setBulkRegionTargetSelection(checked) {
+    if(getBulkRegionMode() === 'all') {
+        showToast('모든 지역 모드에서는 지역을 따로 선택하지 않습니다.', 'info');
+        return;
+    }
+    if(!bulkRegionTargetOptions.length) {
+        showToast('먼저 지역 목록을 불러와주세요.', 'info');
+        return;
+    }
+    if(checked) {
+        const options = bulkRegionFilteredOptions();
+        for(const item of options) {
+            const code = String(item.code || '').toUpperCase();
+            if(!code || bulkRegionSelectedCodes.has(code)) continue;
+            if(bulkRegionSelectedCodes.size >= 100) {
+                showToast('지역은 최대 100개까지 선택할 수 있습니다. 100개까지만 선택했습니다.', 'info');
+                break;
+            }
+            bulkRegionSelectedCodes.add(code);
+        }
+    } else {
+        bulkRegionSelectedCodes.clear();
+    }
+    renderBulkRegionTargetOptions();
+}
+
+function syncBulkRegionMode() {
+    const mode = getBulkRegionMode();
+    const note = document.getElementById('bulk_region_mode_note');
+    if(note) {
+        note.textContent = mode === 'all'
+            ? '기존 지역 타겟팅을 비우고 모든 지역에 광고를 노출합니다.'
+            : (mode === 'exclude_selected'
+                ? '선택한 지역에는 광고가 노출되지 않도록 제외 지역으로 저장합니다.'
+                : '선택한 지역에만 광고가 노출되도록 저장합니다.');
+    }
+    renderBulkRegionTargetOptions();
+}
+
+function getBulkRegionTargetSelections() {
+    const selectedSet = new Set(Array.from(bulkRegionSelectedCodes).map(code => String(code || '').toUpperCase()));
+    return bulkRegionTargetOptions
+        .filter(item => selectedSet.has(String(item.code || '').toUpperCase()))
+        .map(item => ({ code: String(item.code || '').toUpperCase(), label: item.label || item.code }))
+        .filter(item => item.code);
+}
+
+async function updateRegionTargetsBulk() {
+    const c = ensureReady(); if(!c) return;
+    const mode = getBulkRegionMode();
+    if(mode !== 'all' && (!bulkRegionOptionsLoaded || !bulkRegionTargetOptions.length)) {
+        const loaded = await loadBulkRegionTargetOptions(false);
+        if(!loaded) return;
+    }
+    const useCampaignScope = !!document.getElementById('bulk_region_scope_campaign')?.checked;
+    const useAdgroupScope = !useCampaignScope;
+    const campaignIds = useCampaignScope ? getCheckedCampaignIdsInViewOrder() : [];
+    const adgroupIds = useAdgroupScope ? getCheckedAdgroupIdsInViewOrder() : [];
+    if(useCampaignScope && !campaignIds.length) { showToast('좌측 체크박스에서 캠페인을 선택해주세요.', 'error'); return; }
+    if(useAdgroupScope && !adgroupIds.length) { showToast('좌측 체크박스에서 광고그룹을 선택해주세요.', 'error'); return; }
+
+    const selections = mode === 'all' ? [] : getBulkRegionTargetSelections();
+    if(mode !== 'all' && !selections.length) { showToast('설정할 지역을 1개 이상 선택해주세요.', 'error'); return; }
+    if(selections.length > 100) { showToast('지역은 최대 100개까지 선택할 수 있습니다.', 'error'); return; }
+
+    const targetScopes = [useCampaignScope ? 'campaign' : 'adgroup'];
+    const targetCountText = useCampaignScope
+        ? `캠페인 ${campaignIds.length.toLocaleString()}개 하위 광고그룹`
+        : `광고그룹 ${adgroupIds.length.toLocaleString()}개`;
+    const modeLabel = mode === 'all' ? '모든 지역' : (mode === 'exclude_selected' ? '선택 지역 노출 제외' : '선택 지역만 광고 노출');
+    const selectedLabelText = selections.length ? selections.slice(0, 12).map(x => x.label).join(', ') + (selections.length > 12 ? ` 외 ${selections.length - 12}개` : '') : '-';
+    if(!await showAppConfirm(`${targetCountText}에 지역 타겟팅을 적용할까요?\n\n방식: ${modeLabel}\n지역: ${selectedLabelText}\n\n기존 지역 타겟팅은 이 설정으로 덮어쓰기 됩니다.`, {
+        title: '지역 타겟팅 일괄 설정 확인',
+        confirmText: '일괄 설정',
+        tone: mode === 'exclude_selected' ? 'danger' : 'default'
+    })) return;
+
+    const resultBox = document.getElementById('bulk_region_target_result');
+    try {
+        const data = await postJson('/update_region_targets_bulk', {
+            ...c,
+            target_scopes: targetScopes,
+            target_scope: targetScopes[0],
+            campaign_ids: campaignIds,
+            adgroup_ids: adgroupIds,
+            region_codes: selections.map(x => x.code),
+            mode
+        }, '지역 타겟팅 일괄 설정 중...');
+        if(resultBox) resultBox.value = data?.message || '지역 타겟팅 일괄 설정 완료';
+        showToast(data?.message || '지역 타겟팅 일괄 설정 완료', Number(data?.fail || 0) > 0 ? 'info' : 'success');
+        if(useAdgroupScope && currentAdgroupId && adgroupIds.includes(currentAdgroupId)) await loadAdgroupDetails();
+    } catch(err) {
+        if(resultBox) resultBox.value = `실패: ${err.message}`;
+        showToast(`지역 타겟팅 일괄 설정 실패: ${err.message}`, 'error');
+    }
 }
 
 function getBulkAgeTargetSelections() {
