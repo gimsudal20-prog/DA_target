@@ -36115,6 +36115,21 @@ function drawReportDataHeatmap(ctx, rows, series, metricKey, cssWidth, cssHeight
     return areas;
 }
 
+function getReportDataRegionMapHeight(rows = []) {
+    const specialRows = (Array.isArray(rows) ? rows : []).filter(row => reportDataRegionSeparateType(row));
+    const specialGroupCount = [
+        specialRows.some(row => reportDataRegionSeparateType(row) === 'overseas'),
+        specialRows.some(row => reportDataRegionSeparateType(row) === 'unknown'),
+    ].filter(Boolean).length;
+    const sideY = 34;
+    const topRowCount = 5;
+    const topRowsBottom = sideY + 64 + topRowCount * (50 + 6);
+    const sectionStart = topRowsBottom + 6 + 20;
+    const specialRowsHeight = specialGroupCount ? specialGroupCount * (46 + 7) : 14;
+    const contentBottom = sectionStart + specialRowsHeight + 14;
+    return Math.max(520, Math.ceil(contentBottom + 34));
+}
+
 function drawReportDataChart(canvasId, rows, series, metricKey, emptyText = '표시할 데이터가 없습니다.', chartType = 'bar') {
     const canvas = document.getElementById(canvasId);
     if(!canvas) return;
@@ -36122,10 +36137,10 @@ function drawReportDataChart(canvasId, rows, series, metricKey, emptyText = '표
     const shell = canvas.parentElement;
     const minWidth = chartType === 'map' ? 900 : (chartType === 'donut' ? 820 : (chartType === 'heatmap' ? 780 : 720));
     const cssWidth = Math.max(minWidth, Math.floor(shell?.clientWidth || canvas.clientWidth || minWidth));
-    const cssHeight = chartType === 'map' ? 520 : (chartType === 'donut' ? 360 : (chartType === 'heatmap' && series?.length > 1 ? Math.max(336, 100 + (rows?.length || 0) * 38) : 336));
+    const cssHeight = chartType === 'map' ? getReportDataRegionMapHeight(rows) : (chartType === 'donut' ? 360 : (chartType === 'heatmap' && series?.length > 1 ? Math.max(336, 100 + (rows?.length || 0) * 38) : 336));
     const dpr = Math.max(1, window.devicePixelRatio || 1);
-    canvas.style.width = `${cssWidth}px`;
-    canvas.style.height = `${cssHeight}px`;
+    canvas.style.setProperty('width', `${cssWidth}px`, 'important');
+    canvas.style.setProperty('height', `${cssHeight}px`, 'important');
     canvas.width = Math.floor(cssWidth * dpr);
     canvas.height = Math.floor(cssHeight * dpr);
     const ctx = canvas.getContext('2d');
