@@ -1939,6 +1939,8 @@ class AIAnalysisService:
             return yesterday.isoformat(), yesterday.isoformat(), "어제"
         if preset in {"last30days", "last_30_days"}:
             return (yesterday - timedelta(days=29)).isoformat(), yesterday.isoformat(), "최근 30일"
+        if preset in {"last90days", "last_90_days", "90days", "최근90일"}:
+            return (yesterday - timedelta(days=89)).isoformat(), yesterday.isoformat(), "최근 90일"
         if preset in {"lastmonth", "last_month", "previousmonth", "previous_month", "지난달", "전월"}:
             until = today.replace(day=1) - timedelta(days=1)
             since = until.replace(day=1)

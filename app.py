@@ -3212,7 +3212,8 @@ PERFORMANCE_SHOPPING_QUERY_REPORT_WARMING_TTL_SECONDS = PERFORMANCE_SHOPPING_QUE
 PERFORMANCE_SHOPPING_QUERY_REPORT_WORKERS = 3
 PERFORMANCE_DIMENSION_REPORT_WORKERS = 2
 PERFORMANCE_SHOPPING_QUERY_REPORT_WARMING: Dict[str, float] = {}
-PERFORMANCE_DIMENSION_REPORT_MAX_DAYS = 45
+PERFORMANCE_REPORT_CHUNK_DAYS = 30
+PERFORMANCE_DIMENSION_REPORT_MAX_DAYS = 120
 PERFORMANCE_MEDIA_CATALOG_URL = "https://manage.searchad.naver.com/file/static/naver_ad_media.xlsx"
 PERFORMANCE_MEDIA_CATALOG_CACHE_TTL = 24 * 60 * 60
 PERFORMANCE_MEDIA_CATALOG_CACHE: Dict[str, Tuple[float, Dict[str, Dict[str, Any]]]] = {}
@@ -3427,6 +3428,23 @@ def _performance_date_range(preset: str, since: Any = "", until: Any = "", *, ex
         return yesterday.isoformat(), yesterday.isoformat(), "어제"
     return today.isoformat(), today.isoformat(), "오늘"
 
+def _split_date_range_chunks(since: str, until: str, max_days: int = PERFORMANCE_REPORT_CHUNK_DAYS) -> List[Tuple[str, str]]:
+    try:
+        since_d = date.fromisoformat(str(since or ""))
+        until_d = date.fromisoformat(str(until or ""))
+    except Exception:
+        return [(str(since or ""), str(until or ""))]
+    if since_d > until_d:
+        return [(since_d.isoformat(), until_d.isoformat())]
+    chunk_days = max(1, int(max_days or PERFORMANCE_REPORT_CHUNK_DAYS or 30))
+    chunks: List[Tuple[str, str]] = []
+    cursor = since_d
+    while cursor <= until_d:
+        chunk_until = min(until_d, cursor + timedelta(days=chunk_days - 1))
+        chunks.append((cursor.isoformat(), chunk_until.isoformat()))
+        cursor = chunk_until + timedelta(days=1)
+    return chunks
+
 def _normalize_performance_scope(value: Any) -> str:
     s = str(value or "account").strip().lower()
     if s in {"campaign", "campaigns", "selected_campaign", "selected_campaigns"}:
@@ -3549,6 +3567,29 @@ def _stat_row_id(row: Dict[str, Any]) -> str:
     return ""
 
 def _fetch_stats_rows(api_key: str, secret_key: str, cid: str, ids: List[str], fields: List[str], since: str, until: str, breakdown: str = "", id_kind: str = "", time_increment: str = "allDays", parallel_workers: int = 1, recover_individual: bool = True):
+    date_chunks = _split_date_range_chunks(since, until, PERFORMANCE_REPORT_CHUNK_DAYS)
+    if len(date_chunks) > 1:
+        combined_rows: List[Dict[str, Any]] = []
+        combined_errors: List[str] = []
+        for chunk_since, chunk_until in date_chunks:
+            chunk_rows, chunk_errors = _fetch_stats_rows(
+                api_key,
+                secret_key,
+                cid,
+                ids,
+                fields,
+                chunk_since,
+                chunk_until,
+                breakdown=breakdown,
+                id_kind=id_kind,
+                time_increment=time_increment,
+                parallel_workers=parallel_workers,
+                recover_individual=recover_individual,
+            )
+            combined_rows.extend(chunk_rows)
+            combined_errors.extend([f"{chunk_since}~{chunk_until}: {message}" for message in chunk_errors])
+        return combined_rows, combined_errors
+
     rows: List[Dict[str, Any]] = []
     errors: List[str] = []
     invalid_ids: List[str] = []
@@ -4175,12 +4216,17 @@ def _sum_metrics_from_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def _get_age_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     scope, requested_type_filter, since, until, date_label, campaign_ids, adgroup_ids = _standalone_report_target_payload(payload)
+    date_chunks = _split_date_range_chunks(since, until, PERFORMANCE_REPORT_CHUNK_DAYS)
     type_filter = requested_type_filter
     level = "adgroup"
     target_rows, warnings = _collect_performance_targets(
         api_key, secret_key, cid, scope, level, type_filter, campaign_ids, adgroup_ids,
         include_ad_counts=False,
     )
+    if len(date_chunks) > 1:
+        warnings.append(
+            f"선택 기간 {_dimension_report_day_count(since, until)}일을 {PERFORMANCE_REPORT_CHUNK_DAYS}일 단위 {len(date_chunks)}개 구간으로 나눠 조회한 뒤 합산했습니다."
+        )
     stats_id_kind = "adgroup" if level == "adgroup" else "campaign"
     if not target_rows:
         demographics = {
@@ -4645,36 +4691,50 @@ def _collect_dimension_report_rows(
     meta_by_type: Dict[str, Any] = {}
     if not report_types:
         return rows_by_type, warnings, errors, meta_by_type
-    with ThreadPoolExecutor(max_workers=min(len(report_types), PERFORMANCE_DIMENSION_REPORT_WORKERS)) as executor:
+    date_chunks = _split_date_range_chunks(since, until, PERFORMANCE_REPORT_CHUNK_DAYS)
+    jobs = [
+        (report_type, chunk_since, chunk_until)
+        for report_type in report_types
+        for chunk_since, chunk_until in date_chunks
+    ]
+    with ThreadPoolExecutor(max_workers=min(len(jobs), PERFORMANCE_DIMENSION_REPORT_WORKERS)) as executor:
         futures = {
             executor.submit(
                 _fetch_dimension_detail_report_rows,
                 api_key,
                 secret_key,
                 cid,
-                since,
-                until,
+                chunk_since,
+                chunk_until,
                 report_type,
                 18.0,
                 background_on_timeout=True,
-            ): report_type
-            for report_type in report_types
+            ): (report_type, chunk_since, chunk_until)
+            for report_type, chunk_since, chunk_until in jobs
         }
         for future in as_completed(futures):
-            report_type = futures[future]
+            report_type, chunk_since, chunk_until = futures[future]
             try:
                 rows, item_errors, item_meta = future.result()
             except Exception as exc:
                 rows, item_errors, item_meta = [], [f"{report_type} 리포트 조회 실패: {exc}"], {}
-            rows_by_type[report_type] = rows
-            meta_by_type[report_type] = item_meta
+            rows_by_type.setdefault(report_type, []).extend(rows or [])
+            meta_key = report_type if len(date_chunks) == 1 else f"{report_type}:{chunk_since}~{chunk_until}"
+            meta_by_type[meta_key] = {
+                **(item_meta or {}),
+                "report_type": report_type,
+                "since": chunk_since,
+                "until": chunk_until,
+                "date_range_was_chunked": len(date_chunks) > 1,
+            }
             for message in item_errors or []:
                 if _dimension_report_is_pending_message(message):
                     continue
+                prefix = f"{report_type} {chunk_since}~{chunk_until}: " if len(date_chunks) > 1 else ""
                 if "파싱 결과 0건" in str(message):
-                    warnings.append(str(message))
+                    warnings.append(f"{prefix}{message}")
                 else:
-                    errors.append(str(message))
+                    errors.append(f"{prefix}{message}")
     return rows_by_type, warnings, errors, meta_by_type
 
 def _dimension_report_is_pending_message(message: Any) -> bool:
@@ -4742,6 +4802,7 @@ def _get_dimension_performance_stats(api_key: str, secret_key: str, cid: str, pa
     day_count = _dimension_report_day_count(since, until)
     if day_count > PERFORMANCE_DIMENSION_REPORT_MAX_DAYS:
         raise ValueError(f"상세보고서 기반 데이터는 최대 {PERFORMANCE_DIMENSION_REPORT_MAX_DAYS}일까지 조회할 수 있습니다.")
+    date_chunks = _split_date_range_chunks(since, until, PERFORMANCE_REPORT_CHUNK_DAYS)
 
     target_rows, target_warnings = _collect_performance_targets(
         api_key, secret_key, cid, scope, "adgroup", type_filter, campaign_ids, adgroup_ids,
@@ -4870,6 +4931,10 @@ def _get_dimension_performance_stats(api_key: str, secret_key: str, cid: str, pa
         )
     summary = _sum_metrics_from_rows(rows)
     warnings = list(target_warnings or [])
+    if len(date_chunks) > 1:
+        warnings.append(
+            f"선택 기간 {day_count}일을 {PERFORMANCE_REPORT_CHUNK_DAYS}일 단위 {len(date_chunks)}개 구간으로 나눠 조회한 뒤 합산했습니다."
+        )
     if media_warning:
         warnings.append(media_warning)
     warnings.extend(report_warnings[:12])
@@ -4907,6 +4972,7 @@ def _get_dimension_performance_stats(api_key: str, secret_key: str, cid: str, pa
         "source": "stat_reports",
         "debug": {
             "day_count": day_count,
+            "date_chunks": [{"since": chunk_since, "until": chunk_until} for chunk_since, chunk_until in date_chunks],
             "activity_row_count": len(activity_rows or []),
             "conversion_row_count": len(conversion_rows or []),
             "parsed_bucket_count": len(rows or []),
@@ -5336,6 +5402,10 @@ def _get_performance_stats(api_key: str, secret_key: str, cid: str, payload: Dic
         api_key, secret_key, cid, scope, level, type_filter, campaign_ids, adgroup_ids,
         include_ad_counts=not _boolish(payload.get("skip_ad_counts"), False),
     )
+    if len(date_chunks) > 1:
+        warnings.append(
+            f"선택 기간 {_dimension_report_day_count(since, until)}일을 {PERFORMANCE_REPORT_CHUNK_DAYS}일 단위 {len(date_chunks)}개 구간으로 나눠 조회한 뒤 합산했습니다."
+        )
     ids = [row["id"] for row in target_rows]
     if not ids:
         empty_result = {
